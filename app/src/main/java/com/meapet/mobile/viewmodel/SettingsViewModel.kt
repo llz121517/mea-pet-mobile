@@ -152,6 +152,16 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    // ════════════════════════════════════════════════
+    // 新增：恢复 System Prompt 为默认值
+    // ════════════════════════════════════════════════
+    /** 将 System Prompt 恢复为默认值并落盘。 */
+    fun resetSystemPrompt() {
+        viewModelScope.launch {
+            settingsManager.setSystemPrompt(SettingsKeys.Defaults.SYSTEM_PROMPT)
+        }
+    }
+
     fun updateTemperature(temp: Double) {
         viewModelScope.launch { settingsManager.setTemperature(temp) }
     }
@@ -196,10 +206,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             _state.update { it.copy(modelsError = "请先填写 API 地址") }
             return
         }
+
         viewModelScope.launch {
             _state.update {
                 it.copy(isLoadingModels = true, modelsError = null)
             }
+
             // 先落盘当前表单值，保证后续聊天与拉取用同一配置
             if (apiKey != settingsManager.getApiKey()) {
                 settingsManager.setApiKey(apiKey)
@@ -272,6 +284,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     // ── 隐私合规 ──────────────────────────────────────
+
     // 授权状态已并入 [SettingsUiState.privacyAgreed]（init 订阅 agreedFlow 响应式维护）
 
     /** 撤销友盟数据采集授权（同步落盘停止上报；App 随界面流程退出）。 */
@@ -286,3 +299,4 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         return "${key.take(4)}****${key.takeLast(4)}"
     }
 }
+
