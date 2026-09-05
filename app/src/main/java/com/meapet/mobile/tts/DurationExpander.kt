@@ -22,10 +22,21 @@ object DurationExpander {
     private const val MAX_FRAMES_PER_PHONE = 50
 
     /**
-     * 整段音频总帧数上限（yLengths）。超出时截断对齐路径，防止 attn 矩阵
-     * （yLengths × tX 个 Float）膨胀到 OOM。约等于 22 秒音频。
+     * attn 矩阵（yLengths × tX 个 Float）的内存上限，超出即截断对齐路径。
+     *
+     * 按内存封顶而非固定帧数：原先的 `MAX_TOTAL_FRAMES = 480_000` 在上游 200 字截断
+     * （`TtsManager.MAX_SYNTH_CHARS`）下永远触发不到——最坏是逐音素全被钳到
+     * [MAX_FRAMES_PER_PHONE]，50 × 约 3600 音素 ≈ 180000 帧 < 480000，等于没有护栏；
+     * 那条注释「约等于 22 秒音频」也算错了：480000 帧 × 256 采样 / 22050Hz ≈ 93 分钟。
+     *
+     * 而它真正要拦的就是 dp 输出异常、逐音素全被钳满的那条路径（此时音频本就是废的，
+     * 早截无损失，旧值下 attn 可达 2GB 量级）。按内存封顶与文本长度无关：
+     * 正常语音（200 字、语速 0.5~2.0，tX 约 1800）对应上限约 9300 帧 ≈ 108 秒，不会被截。
      */
-    const val MAX_TOTAL_FRAMES = 480_000
+    private const val MAX_ATTENTION_BYTES = 64L * 1024 * 1024
+
+    /** attn 元素类型为 Float。 */
+    private const val BYTES_PER_FLOAT = 4L
 
     /**
      * 步骤 3：时长展开 + 注意力路径。
@@ -64,12 +75,15 @@ object DurationExpander {
             }
         }
 
-        // 累加总帧数，超上限即截断（防 attn 矩阵 OOM）
+        // 累加总帧数，按 attn 矩阵内存上限截断（防 OOM，见 MAX_ATTENTION_BYTES）
+        val maxFrames = (MAX_ATTENTION_BYTES / (tX.coerceAtLeast(1) * BYTES_PER_FLOAT))
+            .coerceAtLeast(1L)
+            .toInt()
         var yLengths = 0
         for (v in wCeil) {
             yLengths += v
-            if (yLengths >= MAX_TOTAL_FRAMES) {
-                yLengths = MAX_TOTAL_FRAMES
+            if (yLengths >= maxFrames) {
+                yLengths = maxFrames
                 break
             }
         }

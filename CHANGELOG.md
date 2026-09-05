@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **滑动窗口裁剪打乱消息原始顺序（#3）** — `ConversationManager.trimWindow` 原用「system 整体提前 + 非 system 尾部拼接」重建列表，把 system 消息全部挪到最前，打乱与 user/assistant 的交错顺序。改为就地迭代器从头部逐条裁掉最旧的超额非 system 消息，保留原始交错顺序。
 - **Markwon 缓存键不含全部构造参数（#5）** — `MarkdownText` 的 `markwonCache` 键仅 `dark: Boolean`，但 `textSizePx` 参与构造；系统字体缩放/显示密度变化时同 dark 命中旧实例，公式字号错乱。缓存键改为含全部构造参数的 `MarkwonKey(dark, textSizePx, tableBorder)`，调用处 `remember` 键同步。
 - **modelIds 吞 CancellationException（#2 / #46）** — `ApiResponse.modelIds` 原用裸 `catch (_: Exception)`，违反项目 `ErrorHandling.kt` 的取消重抛约定。现前置 `catch (e: CancellationException) { throw e }`，普通异常记 `Log.w` 后返回空列表，与同文件 `chatCompletionContent` 的 `runCatchingLog` 风格统一。
+- **系统气泡「挤旧扣寿命」实际会延长寿命** — `SystemBubblePolicy` 原按「剩余时长」运算，`ChatViewModel` 扣减后取消旧 Job 并从当前时刻重新 `delay(newLife)`，已流逝的时间被丢弃：一个已存活 6 秒的气泡「扣 2 秒」变成再活 5 秒（总计 11 秒），比原定 7 秒更久，与「挤旧」意图相反。策略函数改为按**绝对到期时刻**运算（`computeNextDeadline(deadlineMs, nowMs, reduceCount, position)`），`lifeMap` 值类型由 `Triple<Long, Job, Int>` 换成语义明确的 `BubbleLife(deadlineMs, job, reduceCount)`，时间基准取 `SystemClock.elapsedRealtime()`；剩余不足一个扣减步长时钳到当前时刻立即移除。排位阈值 3 提取为 `KEEP_FULL_LIFE_POSITIONS`。补 3 条回归用例（含「任意时刻扣减都不会让到期时刻推后」的遍历断言）。
+- **API 网关错误详情被完全丢弃** — `ApiException` 存了 `responseBody` 却无任何读取点：用户只看到「请求过于频繁」这类状态码文案，Logcat 里也没有原始响应体，无从判断是哪个模型、哪条限额触发。新增 `ApiResponse.errorMessage(body)` 解析网关错误说明（兼容 `error.message` 对象、`error` 字符串、顶层 `message` 三种形态），`ApiException.friendlyMessage(statusCode, detail)` 把它拼进用户可见文案（截断至 200 字符），原始响应体经 `Log.w` 落 Logcat 供导出日志排查。
+- **等悬浮窗停止的 GL 恢复轮询无超时上限** — `MainActivity.onResume` 原用 `Handler.postDelayed(16L)` 轮询 `Live2dRenderState.isRunning`，Service 若异常退出、没能把 `isRunning` 置回 false，轮询永不终止且 `glSurfaceView.onResume()` 永不执行 → 主界面永久黑屏 + 每 16ms 唤醒主线程。改为 `lifecycleScope` 内订阅 StateFlow（`isRunning.first { !it }`）并加 2 秒 `withTimeoutOrNull` 上限，超时记 `Log.w` 后照常恢复 GL；随之删掉专用的 `mainHandler` 与 `resumeGate`。
+- **LogExporter 的 waitFor() 无超时** — `logcat -d` 子进程异常挂起时 `process.waitFor()` 会无限占住 `Dispatchers.IO` 线程且不响应协程取消。改为 `waitFor(5, TimeUnit.SECONDS)`，超时记 `Log.w` 并 `destroyForcibly()` 兜底。
+- **TTS attn 矩阵护栏形同虚设** — `DurationExpander.MAX_TOTAL_FRAMES = 480_000` 在上游 200 字截断（`TtsManager.MAX_SYNTH_CHARS`）下永远触发不到（最坏 50 帧/音素 × 约 3600 音素 ≈ 180000 帧），等于没有护栏；注释「约等于 22 秒音频」也算错约 250 倍（实为约 93 分钟）。改为按 attn 矩阵内存封顶（`MAX_ATTENTION_BYTES = 64MiB`，上限随 `tX` 动态换算成帧数），真正拦住 dp 输出异常、逐音素全被钳满那条原可膨胀到 GB 量级的路径；正常语音（200 字、语速 0.5~2.0）对应上限约 9300 帧 ≈ 108 秒，不会被截。
+- **重试目标已不在历史时会误删全部 assistant 回复** — `ChatService.retryLastMessage` 的 `lastUserMessage()` 与 `getMessages()` 是两次独立加锁，之间该消息若被移除，`indexOfLast` 返回 -1 使 `drop(userIdx + 1)` 退化为 `drop(0)`，随后的 assistant 过滤会删掉整段历史的助手消息。补 `userIdx < 0` 前置判断，直接返回失败。
+
+### Documentation
+
+- **修正 ConversationManager 的自相矛盾文档** — 类注释原称「不关心消息是用户还是助手发送的，仅按顺序维护」，但 `trimWindow` 豁免 system、`buildApiMessages` 重组 system 前缀、并提供 `lastUserMessage`/`lastAssistantMessage` 按角色查询，实际处处关心角色；改为如实说明。另 `lastUserMessage()` 的 KDoc 写「最后一条非 system 消息」而实现只取 `role == user`（非 system 还包含 assistant），一并修正。
 
 ### Performance
 
@@ -29,7 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
-- 本次修复对应 `code-review-triage.md` 的 P0 全部 5 项（#3/#4/#5/#7 + #2/#46），并顺手修复 #39/#40、为 #1 的 `lifeMap` 补充线程约束注释（说明其安全性依赖 `Dispatchers.Main.immediate` 单线程前提）。P1 稳定性（ANR 风险）与架构重构另行排期。
+- 首批修复对应 `code-review-triage.md` 的 P0 全部 5 项（#3/#4/#5/#7 + #2/#46），并顺手修复 #39/#40、为 #1 的 `lifeMap` 补充线程约束注释（说明其安全性依赖 `Dispatchers.Main.immediate` 单线程前提）。
+- 第二批（本次）是对 48 条审查结论独立复核后的第一档「小改动高收益」项：一条报告未发现的真实逻辑 bug（系统气泡寿命）、#18 网关错误详情、#38 waitFor 超时，以及三处报告未提到的护栏/边界缺失（GL 恢复轮询无超时、TTS attn 护栏失效、重试边界）。复核同时认定 #6（条件分支内 `collectAsState`）为合法 Compose 用法、#44（`ensureDict` 竞态）因底层 `PinyinDict.init` 已 `@Synchronized` 幂等而无实际危害，两者不再列为待修。
+- P1 稳定性（#37 `currentPrefs` 主线程 `runBlocking`、#15 隐私授权双存储）与架构重构（#8~#14/#16/#19）另行排期。
 
 ---
 

@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import com.meapet.mobile.BuildConfig
 import com.meapet.mobile.core.PrivacyConsentManager
 import com.meapet.mobile.core.isDarkTheme
@@ -39,7 +40,10 @@ import com.meapet.mobile.ui.component.AutoUpdateOptInDialog
 import com.meapet.mobile.ui.component.PRIVACY_POLICY_VERSION
 import com.meapet.mobile.ui.screen.ChatScreenContent
 import com.meapet.mobile.ui.theme.MeaPetTheme
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 主入口 Activity。
@@ -56,14 +60,16 @@ class MainActivity : ComponentActivity() {
     private lateinit var container: AppContainer
     private var insetsController: WindowInsetsControllerCompat? = null
 
-    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    /** 等待悬浮窗 Service 完全停止后再恢复本 Activity GL 渲染的轮询任务。 */
-    private var resumeGate: Runnable? = null
+    /** 等待悬浮窗 Service 完全停止后再恢复本 Activity GL 渲染的订阅任务。 */
+    private var resumeJob: Job? = null
 
     companion object {
         private const val TAG = "MainActivity"
         private const val OVERLAY_PERMISSION_REQUEST = 1001
         private const val NOTIFICATION_PERMISSION_REQUEST = 1002
+
+        /** 等悬浮窗 Service 停止的上限：超时则照常恢复 GL，不允许无上限等待。 */
+        private const val GL_RESUME_WAIT_TIMEOUT_MS = 2_000L
     }
 
     // ── 生命周期 ──────────────────────────────────────
@@ -274,22 +280,27 @@ class MainActivity : ComponentActivity() {
         // CubismShaderAndroid 单例（Service 侧曾在其上下文里重建过 shader），
         // 导致本 Activity 用到无效 program → 黑屏/GL 报错。
         // 因此等 Service 完全停止（isRunning=false）后再恢复渲染。
-        resumeGate?.let { mainHandler.removeCallbacks(it) }
+        resumeJob?.cancel()
+        resumeJob = null
         if (Live2dRenderState.isRunning.value) {
-            val gate = object : Runnable {
-                override fun run() {
-                    if (Live2dRenderState.isRunning.value) {
-                        mainHandler.postDelayed(this, 16L)
-                    } else {
-                        resumeGate = null
-                        try { glSurfaceView.onResume() } catch (e: Exception) {
-                            Log.e(TAG, "onResume(gated) error: ${e.message}")
-                        }
-                    }
+            resumeJob = lifecycleScope.launch {
+                // 订阅 StateFlow 而非轮询；必须带超时上限：Service 若异常退出、
+                // 没能把 isRunning 置回 false，无上限等待会让 GL 永不恢复（主界面永久黑屏）。
+                // 超时后照常恢复——宁可冒一次 shader 竞争，也不能把界面卡死。
+                val stopped = withTimeoutOrNull(GL_RESUME_WAIT_TIMEOUT_MS) {
+                    Live2dRenderState.isRunning.first { !it }
+                    true
+                } == true
+                if (!stopped) {
+                    Log.w(TAG, "Overlay service still running after ${GL_RESUME_WAIT_TIMEOUT_MS}ms, resuming GL anyway")
+                }
+                resumeJob = null
+                try {
+                    glSurfaceView.onResume()
+                } catch (e: Exception) {
+                    Log.e(TAG, "onResume(gated) error: ${e.message}")
                 }
             }
-            resumeGate = gate
-            mainHandler.post(gate)
         } else {
             try {
                 glSurfaceView.onResume()
@@ -301,9 +312,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        // 取消等待 Service 停止的轮询，避免 Activity 已 pause 后还去 onResume GL
-        resumeGate?.let { mainHandler.removeCallbacks(it) }
-        resumeGate = null
+        // 取消等待 Service 停止的订阅，避免 Activity 已 pause 后还去 onResume GL
+        resumeJob?.cancel()
+        resumeJob = null
         try {
             glSurfaceView.onPause()
         } catch (e: Exception) {

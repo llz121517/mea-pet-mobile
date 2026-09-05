@@ -16,6 +16,7 @@ import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 /**
  * 日志导出：抓取 logcat + 本进程 native crash tombstone，写入 cache，拉起系统分享菜单。
@@ -37,6 +38,9 @@ object LogExporter {
 
     private const val TAG = "LogExporter"
     private const val LOG_DIR = "logs"
+
+    /** 等 logcat 子进程退出的上限（秒）：正常瞬间返回，超时即强杀，不允许无上限阻塞。 */
+    private const val LOGCAT_WAIT_TIMEOUT_SECONDS = 5L
 
     /**
      * 导出日志并拉起系统分享菜单。
@@ -146,7 +150,12 @@ object LogExporter {
             val process = ProcessBuilder("logcat", "-d", "-v", "threadtime")
                 .redirectErrorStream(true).start()
             process.inputStream.use { it.copyTo(out) }
-            process.waitFor()
+            // waitFor() 不带超时会把所在 Dispatchers.IO 线程占死，而且不响应协程取消：
+            // logcat -d 正常会在输出读完后立刻退出，只有异常挂起时才需要强杀兜底。
+            if (!process.waitFor(LOGCAT_WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                Log.w(TAG, "logcat 子进程 ${LOGCAT_WAIT_TIMEOUT_SECONDS}s 未退出，强制结束")
+                process.destroyForcibly()
+            }
         } catch (e: Exception) {
             out.writeLine("（logcat 抓取失败: ${e.message}）")
         }

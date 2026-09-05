@@ -6,6 +6,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -59,5 +60,31 @@ object ApiResponse {
     } catch (e: Exception) {
         Log.w(TAG, "Failed to parse model ids: ${e.message}")
         emptyList()
+    }
+
+    /**
+     * 从错误响应体里提取网关给出的具体错误说明。
+     *
+     * 兼容三种常见形态：
+     * - `{"error":{"message":"Rate limit exceeded for model X"}}`（OpenAI 及多数兼容网关）
+     * - `{"error":"invalid key"}`（部分自建代理直接给字符串）
+     * - `{"message":"…"}`（少数网关不套 error）
+     *
+     * @return 去空白后的错误说明；结构不符、字段缺失或为空时返回 null
+     */
+    fun errorMessage(body: String): String? = try {
+        val root = json.parseToJsonElement(body) as? JsonObject
+        val detail = when (val err = root?.get("error")) {
+            is JsonObject -> err["message"]?.jsonPrimitive?.contentOrNull
+            is JsonPrimitive -> err.contentOrNull
+            else -> null
+        } ?: root?.get("message")?.jsonPrimitive?.contentOrNull
+        detail?.trim()?.takeIf { it.isNotEmpty() }
+    } catch (e: CancellationException) {
+        // 取消一律重抛（见 ErrorHandling.kt 约定），不能吞
+        throw e
+    } catch (e: Exception) {
+        // 错误体本身解析失败不值得再报错，调用方退回纯状态码文案即可
+        null
     }
 }
