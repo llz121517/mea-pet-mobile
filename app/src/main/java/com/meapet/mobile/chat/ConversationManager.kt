@@ -13,7 +13,9 @@ import android.util.Log
  *
  * ## 低耦合
  * - 内存操作 + 可选的存储回调，不依赖其他业务模块；
- * - 不关心消息是用户还是助手发送的，仅按顺序维护。
+ * - 但**确实关心消息角色**：system 消息不参与窗口裁剪（见 [trimWindow]）、
+ *   也不进 API 历史（[buildApiMessages] 自行重组 system 前缀），
+ *   并提供 [lastUserMessage] / [lastAssistantMessage] 按角色查询。
  *
  * ## 线程安全
  * 启动时 [restore] 在 IO 线程执行，可能与发送链路并发访问，
@@ -139,7 +141,7 @@ class ConversationManager(
         removed
     }
 
-    /** 获取最后一条非 system 消息。 */
+    /** 获取最后一条 user 消息（不含 assistant / system）。 */
     fun lastUserMessage(): ChatMessage? = synchronized(lock) {
         messages.lastOrNull { it.role == ChatRole.user }
     }

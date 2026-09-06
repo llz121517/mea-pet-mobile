@@ -2,6 +2,7 @@ package com.meapet.mobile.client.model
 
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ApiResponseTest {
@@ -43,5 +44,29 @@ class ApiResponseTest {
     fun chatCompletionContentExtractsMessage() {
         val body = """{"choices":[{"message":{"role":"assistant","content":"喵"}}]}"""
         assertEquals("喵", ApiResponse.chatCompletionContent(body))
+    }
+
+    @Test
+    fun errorMessageFromNestedErrorObject() {
+        val body = """{"error":{"message":"Rate limit exceeded for model gpt-4o","type":"rate_limit"}}"""
+        assertEquals("Rate limit exceeded for model gpt-4o", ApiResponse.errorMessage(body))
+    }
+
+    @Test
+    fun errorMessageFromPlainErrorString() {
+        assertEquals("invalid key", ApiResponse.errorMessage("""{"error":"invalid key"}"""))
+    }
+
+    @Test
+    fun errorMessageFromTopLevelMessage() {
+        assertEquals("quota exhausted", ApiResponse.errorMessage("""{"message":"  quota exhausted  "}"""))
+    }
+
+    @Test
+    fun errorMessageMalformedOrEmptyReturnsNull() {
+        assertNull(ApiResponse.errorMessage("not-json"))
+        assertNull(ApiResponse.errorMessage("""{"error":{"type":"rate_limit"}}"""))
+        assertNull(ApiResponse.errorMessage("""{"error":"   "}"""))
+        assertNull(ApiResponse.errorMessage("""[{"error":"array root"}]"""))
     }
 }

@@ -1,6 +1,7 @@
 package com.meapet.mobile.viewmodel
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.meapet.mobile.chat.ChatMessage
@@ -24,6 +25,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
+
+/**
+ * 单条系统气泡的生命周期状态。
+ *
+ * @property deadlineMs 到期移除时刻（[SystemClock.elapsedRealtime] 基准，单调不受改表影响）
+ * @property job 到期移除任务
+ * @property reduceCount 已被「挤旧」扣减的次数（上限 [SystemBubblePolicy.MAX_REDUCE_COUNT]）
+ */
+private data class BubbleLife(
+    val deadlineMs: Long,
+    val job: Job,
+    val reduceCount: Int
+)
 
 /**
  * 聊天界面 ViewModel。
@@ -73,25 +88,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         // 监听 Live2D 触摸分区事件→添加系统消息气泡
         // 每条气泡独立生命周期，从产生开始倒计时 7 秒。
-        // 新消息到达时按位置自动扣除旧气泡的剩余寿命：
+        // 新消息到达时按位置扣除旧气泡的剩余寿命（扣的是「还剩多久」，不是重新计时）：
         //   position 1-3（最新）→ 不扣
         //   position 4-5          → 扣 2 秒
         //   position 6+（最旧）→ 扣 4 秒（首次扣 2 秒 + 再次扣 2 秒）
         viewModelScope.launch {
-            // msgId → (剩余毫秒, 移除Job, 已扣减次数)
+            // msgId → 气泡生命周期（到期时刻 / 移除Job / 已扣减次数）
             // 线程约束：lifeMap 无同步，安全性依赖「所有读写都经 viewModelScope.launch
             // 运行在 Dispatchers.Main.immediate 单线程上」这一前提（collect 协程写、
             // scheduleRemove 协程删）。若未来把任一访问挪到别的调度器，必须改用
             // Mutex / actor 保护，否则会并发修改非线程安全 Map。
-            val lifeMap = LinkedHashMap<String, Triple<Long, Job, Int>>()
+            val lifeMap = LinkedHashMap<String, BubbleLife>()
 
             Live2dManager.tapMessageEvent.collect { text ->
                 val newMsg = ChatMessage(role = ChatRole.system, content = text)
                 _state.update { it.copy(messages = it.messages + newMsg) }
 
+                // 本轮统一取一次「现在」，保证新气泡定寿命与旧气泡扣寿命同基准
+                val now = SystemClock.elapsedRealtime()
+
                 // 为本条启动独立倒计时，初始寿命见 SystemBubblePolicy
                 val job = scheduleRemove(lifeMap, newMsg.id, SystemBubblePolicy.BASE_LIFE_MS)
-                lifeMap[newMsg.id] = Triple(SystemBubblePolicy.BASE_LIFE_MS, job, 0)
+                lifeMap[newMsg.id] = BubbleLife(now + SystemBubblePolicy.BASE_LIFE_MS, job, 0)
 
                 // 重新排位：按 timestamp 降序（最新在前），重新分配剩余寿命
                 val sysIds = _state.value.messages
@@ -102,16 +120,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 sysIds.forEachIndexed { index, id ->
                     val position = index + 1 // 1 = 最新
                     val entry = lifeMap[id] ?: return@forEachIndexed
-                    val (currentLife, oldJob, reduceCount) = entry
 
-                    // 按排位扣减寿命（策略见 SystemBubblePolicy）
-                    val (newLife, newCount) =
-                        SystemBubblePolicy.computeNextLife(currentLife, reduceCount, position)
+                    // 按排位扣减剩余寿命（策略见 SystemBubblePolicy）
+                    val (newDeadline, newCount) = SystemBubblePolicy.computeNextDeadline(
+                        deadlineMs = entry.deadlineMs,
+                        nowMs = now,
+                        reduceCount = entry.reduceCount,
+                        position = position
+                    )
 
-                    if (newLife != currentLife) {
-                        oldJob.cancel()
-                        val newJob = scheduleRemove(lifeMap, id, newLife)
-                        lifeMap[id] = Triple(newLife, newJob, newCount)
+                    if (newDeadline != entry.deadlineMs) {
+                        entry.job.cancel()
+                        val newJob = scheduleRemove(lifeMap, id, newDeadline - now)
+                        lifeMap[id] = BubbleLife(newDeadline, newJob, newCount)
                     }
                 }
             }
@@ -395,21 +416,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * 调度系统气泡的延时移除，返回对应的 Job。
-     * @param lifeMap 更新此 map 中的条目
+     * @param lifeMap 到期后从此 map 中摘掉对应条目
      * @param msgId 消息 ID
-     * @param delayMs 剩余毫秒数
+     * @param delayMs 距到期还有多少毫秒（≤0 表示立即到期）
      */
     private fun scheduleRemove(
-        lifeMap: MutableMap<String, Triple<Long, Job, Int>>,
+        lifeMap: MutableMap<String, BubbleLife>,
         msgId: String,
         delayMs: Long
     ): Job = viewModelScope.launch {
-        if (delayMs <= 0) {
-            removeBubble(msgId)
-            lifeMap.remove(msgId)
-            return@launch
-        }
-        kotlinx.coroutines.delay(delayMs.milliseconds)
+        // 必须先让出一次再动 lifeMap：viewModelScope 用 Dispatchers.Main.immediate，
+        // delay(0) 不会挂起，协程体会同步跑在调用方写回 lifeMap 之前，
+        // 于是刚被摘掉的条目又被写回去，留下持有已完成 Job 的僵尸条目。
+        if (delayMs > 0) kotlinx.coroutines.delay(delayMs.milliseconds) else yield()
         removeBubble(msgId)
         lifeMap.remove(msgId)
     }

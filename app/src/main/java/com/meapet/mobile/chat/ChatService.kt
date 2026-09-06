@@ -169,6 +169,13 @@ class ChatService(
         // 重发时由 sendMessage 统一重新入史，避免消息重复
         val history = conversationManager.getMessages()
         val userIdx = history.indexOfLast { it.id == lastUserMsg.id }
+        // lastUserMessage() 与 getMessages() 是两次独立加锁，之间该消息若被移除
+        // （清空会话 / 窗口裁剪），userIdx 会是 -1，drop(0) 就等于「整个历史」，
+        // 会把历史里所有 assistant 回复一并误删。
+        if (userIdx < 0) {
+            Log.w(TAG, "Retry target no longer in history, aborting")
+            return Result.failure(IllegalStateException("该消息已不在会话历史中，无法重试"))
+        }
         history.drop(userIdx + 1)
             .filter { it.role == ChatRole.assistant }
             .forEach { conversationManager.removeMessage(it.id) }
