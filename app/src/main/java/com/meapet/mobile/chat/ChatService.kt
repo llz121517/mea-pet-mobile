@@ -55,14 +55,26 @@ class ChatService(
      * @param content 用户消息文本
      * @return 包含用户消息与 AI 回复的 Pair
      */
-    suspend fun sendMessage(content: String): Result<Pair<ChatMessage, ChatMessage>> {
+    suspend fun sendMessage(content: String): Result<Pair<ChatMessage, ChatMessage>> =
+        sendMessage(ChatMessage(role = ChatRole.user, content = content))
+
+    /**
+     * 发送一条**已构建好**的用户消息并获取 AI 回复。
+     *
+     * 调用方自带 [ChatMessage] 的意义：UI 层的乐观消息与入史的消息是同一个 id。
+     * 若各建一条，同一句话就有两个 id，`ChatViewModel.mergeWithHistory` 无法把它们
+     * 认作同一条，一次 `reloadHistory()` 就会并列成两条。
+     *
+     * @param userMessage 用户消息（id 由调用方决定）
+     * @return 包含用户消息与 AI 回复的 Pair
+     */
+    suspend fun sendMessage(userMessage: ChatMessage): Result<Pair<ChatMessage, ChatMessage>> {
         return withContext(Dispatchers.IO) {
+            val content = userMessage.content
             try {
-                // 1) 构建用户消息
-                val userMessage = ChatMessage(
-                    role = ChatRole.user,
-                    content = content
-                )
+                // 1) 用户消息先入史：apiMessages 由历史构建，当前消息必须已在其中。
+                //    代价是任何失败路径都必须回滚，否则留下从未发出的"幽灵消息"
+                //    （污染后续请求上下文，且会被持久化）。
                 conversationManager.addMessage(userMessage)
 
                 // 2) 获取记忆上下文（拆成稳定段与每轮都变的尾部段，见 MemoryContext）
@@ -117,6 +129,7 @@ class ChatService(
                     ?.takeIf { it.isNotBlank() }
                 if (assistantContent == null) {
                     Log.w(TAG, "Unexpected API response: missing choices or content")
+                    conversationManager.removeMessage(userMessage.id)
                     return@withContext Result.failure(
                         IllegalStateException("API 响应中没有有效的回复内容")
                     )
@@ -150,38 +163,45 @@ class ChatService(
                 Result.success(userMessage to assistantMessage)
 
             } catch (e: CancellationException) {
+                // 取消同样要回滚：清空会话会取消在途请求，留下的消息既无回复也无人清理
+                conversationManager.removeMessage(userMessage.id)
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send message", e)
+                conversationManager.removeMessage(userMessage.id)
                 Result.failure(e)
             }
         }
     }
 
     /**
-     * 重新发送上一条消息（用于失败重试）。
+     * 重新发送指定的用户消息（用于失败重试）。
+     *
+     * **重试目标必须由调用方给出**，不能在这里"取历史里最后一条 user"——发送失败时
+     * 该消息已被回滚出历史，那样取到的是**上一条早已成功的消息**，会把它重发一遍，
+     * 并在 UI 列表里造出同一个 id 的两份副本（LazyColumn 重复 key 直接崩溃）。
+     *
+     * @param userMessage 要重发的用户消息（沿用原 id 与 timestamp）
      */
-    suspend fun retryLastMessage(): Result<Pair<ChatMessage, ChatMessage>> {
-        val lastUserMsg = conversationManager.lastUserMessage()
-            ?: return Result.failure(IllegalStateException("No message to retry"))
-
-        // 把该条 user 之后的 assistant 回复（若有）连同 user 本身一并移除，
-        // 重发时由 sendMessage 统一重新入史，避免消息重复
+    suspend fun retryMessage(userMessage: ChatMessage): Result<Pair<ChatMessage, ChatMessage>> {
         val history = conversationManager.getMessages()
-        val userIdx = history.indexOfLast { it.id == lastUserMsg.id }
-        // lastUserMessage() 与 getMessages() 是两次独立加锁，之间该消息若被移除
-        // （清空会话 / 窗口裁剪），userIdx 会是 -1，drop(0) 就等于「整个历史」，
-        // 会把历史里所有 assistant 回复一并误删。
-        if (userIdx < 0) {
-            Log.w(TAG, "Retry target no longer in history, aborting")
-            return Result.failure(IllegalStateException("该消息已不在会话历史中，无法重试"))
+        val userIdx = history.indexOfLast { it.id == userMessage.id }
+        if (userIdx >= 0) {
+            // 把该条 user 之后的 assistant 回复（若有）连同 user 本身一并移除，
+            // 重发时由 sendMessage 统一重新入史，避免消息重复。
+            // drop 只在 userIdx >= 0 时执行：userIdx == -1 时 drop(0) 等于「整个历史」，
+            // 会把历史里所有 assistant 回复一并误删。
+            history.drop(userIdx + 1)
+                .filter { it.role == ChatRole.assistant }
+                .forEach { conversationManager.removeMessage(it.id) }
+            conversationManager.removeMessage(userMessage.id)
+        } else {
+            // 正常情况：发送失败已把它回滚出历史。也可能是历史被裁剪或清空。
+            // 直接按新消息重发即可。
+            Log.d(TAG, "Retry target not in history, sending as a new message")
         }
-        history.drop(userIdx + 1)
-            .filter { it.role == ChatRole.assistant }
-            .forEach { conversationManager.removeMessage(it.id) }
-        conversationManager.removeMessage(lastUserMsg.id)
 
-        return sendMessage(lastUserMsg.content)
+        return sendMessage(userMessage)
     }
 
     /** 获取当前会话历史。 */

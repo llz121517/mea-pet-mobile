@@ -271,6 +271,11 @@ private fun MessageList(
     onDismissError: () -> Unit,
     onRetry: () -> Unit
 ) {
+    // 兜底去重：消息列表出现重复 id 一定是上游 bug，但 LazyColumn 撞到重复 key 是
+    // 直接抛 IllegalArgumentException 崩掉整个应用（不是渲染错乱），代价过高，
+    // 所以在唯一的消费点加一道保险。真正的修复始终在产生 state 的地方。
+    val uniqueMessages = remember(state.messages) { state.messages.distinctBy { it.id } }
+
     LazyColumn(
         state = listState,
         modifier = Modifier
@@ -296,8 +301,9 @@ private fun MessageList(
             }
         }
 
+        // 兜底去重见函数开头 uniqueMessages
         items(
-            items = state.messages,
+            items = uniqueMessages,
             key = { it.id }
         ) { message ->
             ChatBubble(message = message, alpha = bubbleAlpha)
