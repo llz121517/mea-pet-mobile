@@ -206,8 +206,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             current.drop(idxInCurrent + 1)
         } else {
             // 分界消息在当前列表里找不到（极端情况：history 整体都领先于 current），
-            // 保守起见保留 current 末尾最近的几条（系统气泡等短生命周期消息）
-            current.takeLast(5)
+            // 保守起见保留 current 末尾最近的几条（系统气泡等短生命周期消息）。
+            // 必须再按时间戳过滤：本分支下"末尾几条"里可能混着已经在历史里、
+            // 只是 id 不同的副本（如失败发送残留的同一句话），只保留确实比历史
+            // 更新的消息，才符合"history 之后才是新追加"这一合并前提。
+            val lastHistoryTs = history.last().timestamp
+            current.takeLast(5).filter { it.timestamp > lastHistoryTs }
         }
         // 去重：tailExtra 里若已包含 history 中出现的 id（如悬浮窗已落库），去掉
         val tailExtraDeduped = tailExtra.filter { it.id !in historyIds }
@@ -258,7 +262,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         sendJob = viewModelScope.launch {
-            val result = chatService.sendMessage(content)
+            // 传入乐观消息本身：入史与 UI 共用同一个 id，reloadHistory 合并时才认得出
+            // 是同一条（各建一条会让同一句话有两个 id，一次 resume 就并列成两条）
+            val result = chatService.sendMessage(userMessage)
             result.fold(
                 onSuccess = { (userMsg, assistantMsg) ->
                     _state.update { current ->
@@ -298,7 +304,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         sendJob = viewModelScope.launch {
-            val result = chatService.retryLastMessage()
+            // 重试目标由 UI 指定：失败的消息已被回滚出历史，服务端侧再去"取历史里最后
+            // 一条 user"会重发另一条早已成功的消息
+            val result = chatService.retryMessage(lastUserMsg)
             result.fold(
                 onSuccess = { (userMsg, assistantMsg) ->
                     _state.update { current ->
@@ -306,7 +314,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         // 去掉该 user 消息本身，及其之后的所有 assistant 回复
                         val cutIndex = current.messages.indexOfLast { it.id == lastUserMsg.id }
                         val updated = current.messages.filterIndexed { index, msg ->
-                            if (index <= cutIndex) msg.id != lastUserMsg.id else !msg.isAssistant
+                            when {
+                                // 目标消息一律剔除（下面重新追加），无论它在列表哪个位置——
+                                // 只按 index <= cutIndex 判断的话，重复副本会被漏掉，
+                                // 追加后 LazyColumn 就拿到两个相同 key 而崩溃
+                                msg.id == lastUserMsg.id -> false
+                                // cutIndex < 0（目标已不在列表，理论上不可达）时不删任何
+                                // assistant：此时全部下标都 > -1，否则等于清空界面所有回复
+                                cutIndex >= 0 && index > cutIndex -> !msg.isAssistant
+                                else -> true
+                            }
                         }
                         current.copy(
                             messages = updated + listOf(userMsg, assistantMsg),
