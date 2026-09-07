@@ -1,5 +1,21 @@
 package com.meapet.mobile.ui.component
 
+/*
+ * ── TODO(2026-09-07) ────────────────────────────────────────────────
+ * 1) 拆分本文件（现约 670 行、混 7 类职责）：计划按
+ *    ui/component/markdown/ 拆成 MarkdownText / MarkdownLatex /
+ *    MarkdownSegments / MarkdownFactory / MarkdownScrollView，纯搬家、internal 保持。
+ *
+ * 2) 已知限制：
+ *    Markwon 表格 TableRowSpan 是 ReplacementSpan —— 单元格文字不在 TextView 文本里，
+ *    而在 span 内部 Cell 的 StaticLayout 中，且 cells 无公共取回口。
+ *    后果：长按选中表格只能按行选、复制内容为空。
+ *    彻底解决需弃用 ext-tables 改自绘表格（格内才谈得上真实文本选择），属大改；
+ *    若要低成本可用方案：把每个表格拆成独立 TextView，复制时兜底为
+ *    “整张表可粘贴纯文本（行=换行、列=制表符）”。
+ * ──────────────────────────────────────────────────────────────────
+ */
+
 import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
