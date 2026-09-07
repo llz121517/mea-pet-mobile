@@ -13,7 +13,9 @@ import android.util.Log
  *
  * ## 低耦合
  * - 内存操作 + 可选的存储回调，不依赖其他业务模块；
- * - 不关心消息是用户还是助手发送的，仅按顺序维护。
+ * - 但**确实关心消息角色**：system 消息不参与窗口裁剪（见 [trimWindow]）、
+ *   也不进 API 历史（[buildApiMessages] 自行重组 system 前缀），
+ *   并提供 [lastUserMessage] / [lastAssistantMessage] 按角色查询。
  *
  * ## 线程安全
  * 启动时 [restore] 在 IO 线程执行，可能与发送链路并发访问，
@@ -139,7 +141,7 @@ class ConversationManager(
         removed
     }
 
-    /** 获取最后一条非 system 消息。 */
+    /** 获取最后一条 user 消息（不含 assistant / system）。 */
     fun lastUserMessage(): ChatMessage? = synchronized(lock) {
         messages.lastOrNull { it.role == ChatRole.user }
     }
@@ -187,14 +189,22 @@ class ConversationManager(
      */
     private fun trimWindow() {
         if (messages.size <= maxSize) return
-        val systemMessages = messages.filter { it.role == ChatRole.system }
-        val nonSystem = messages.filter { it.role != ChatRole.system }
-        val budget = (maxSize - systemMessages.size - trimBatch).coerceAtLeast(1)
-        val excess = nonSystem.size - budget
+        val systemCount = messages.count { it.role == ChatRole.system }
+        val nonSystemCount = messages.size - systemCount
+        val budget = (maxSize - systemCount - trimBatch).coerceAtLeast(1)
+        val excess = nonSystemCount - budget
         if (excess > 0) {
-            val trimmed = nonSystem.drop(excess)
-            messages.clear()
-            messages.addAll(systemMessages + trimmed)
+            // 就地从头部逐条裁掉最旧的 excess 条非 system 消息。
+            // 不能用「system 提前 + 尾部拼接」重建：会把 system 消息整体挪到最前，
+            // 打乱与 user/assistant 的原始交错顺序。
+            var toRemove = excess
+            val iterator = messages.iterator()
+            while (toRemove > 0 && iterator.hasNext()) {
+                if (iterator.next().role != ChatRole.system) {
+                    iterator.remove()
+                    toRemove--
+                }
+            }
             Log.d(TAG, "Window trimmed: removed $excess messages (batch=$trimBatch)")
         }
     }

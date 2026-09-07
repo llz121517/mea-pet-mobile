@@ -20,11 +20,34 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meapet.mobile.chat.ChatMessage
 import com.meapet.mobile.chat.ChatRole
+
+/** 气泡宽度上限（dp）。表格类内容需要横向空间，固定 280dp 在大屏上是浪费。 */
+private const val MAX_BUBBLE_WIDTH_DP = 460
+
+/** 气泡最多占屏幕宽度的比例。 */
+private const val MAX_WIDTH_FRACTION = 0.82f
+
+/** 气泡左右内边距，正文可用宽度需扣掉两侧。 */
+private val BUBBLE_HORIZONTAL_PADDING = 16.dp
+
+/**
+ * 气泡最大宽度 = min(屏幕宽度 × [MAX_WIDTH_FRACTION], [MAX_BUBBLE_WIDTH_DP])。
+ *
+ * 原先两处都写死 280dp，与屏幕无关——平板和大屏手机同样只有 280dp。而 Markwon 的
+ * 表格按可用宽度均分列宽、没有横向滚动，列一多每列就只剩几十 dp、单元格逐字换行。
+ * 取值思路与悬浮窗气泡（OverlayBubbleWindow 的 MAX_BUBBLE_WIDTH_DP / MAX_WIDTH_FRACTION）
+ * 保持一致。
+ */
+@Composable
+private fun bubbleMaxWidth(): Dp =
+    minOf(MAX_BUBBLE_WIDTH_DP.dp, LocalConfiguration.current.screenWidthDp.dp * MAX_WIDTH_FRACTION)
 
 /**
  * 聊天气泡组件。
@@ -65,7 +88,7 @@ private fun UserBubble(
     ) {
         Box(
             modifier = Modifier
-                .widthIn(max = 280.dp)
+                .widthIn(max = bubbleMaxWidth())
                 .clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp))
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha))
                 .padding(horizontal = 16.dp, vertical = 10.dp)
@@ -118,10 +141,13 @@ private fun AssistantBubble(
         Column {
             Box(
                 modifier = Modifier
-                    .widthIn(max = 280.dp)
+                    .widthIn(max = bubbleMaxWidth())
                     .clip(RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha))
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    // 左右内边距交给 MarkdownText 施加：横向滚动的表格要能一路滑到气泡
+                    // 边缘，若内边距加在这里，表格会在内边距那一段就被裁掉、看起来像被
+                    // 气泡边缘遮住一截
+                    .padding(vertical = 10.dp)
             ) {
                 // 助手消息走 Markdown 渲染（代码块/公式/表格/链接），流式时自动补全未闭合围栏。
                 // TextView 已开启原生文字选择：长按弹出复制/全选菜单，与链接点击并存。
@@ -129,7 +155,10 @@ private fun AssistantBubble(
                     markdown = message.content,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     alpha = alpha,
-                    isStreaming = message.isStreaming
+                    isStreaming = message.isStreaming,
+                    // 扣掉左右内边距后的正文宽度，供宽表格判断是否需要横向滚动
+                    availableWidth = bubbleMaxWidth() - BUBBLE_HORIZONTAL_PADDING * 2,
+                    horizontalPadding = BUBBLE_HORIZONTAL_PADDING
                 )
             }
 

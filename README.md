@@ -4,6 +4,8 @@ Android 上的 Live2D AI 桌宠：在主页与系统悬浮窗里渲染 Live2D �
 
 本项目由 [suan-11/mea-pet-public](https://github.com/suan-11/mea-pet-public) 衍生。
 
+- 本项目由 LLM 驱动的 Agent 辅助开发
+
 ---
 
 ## 功能
@@ -167,7 +169,7 @@ Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Markwon  ·  Coroutines  ·  G
 
 应用内展示的梅尔 Live2D 模型资源来自社区作品，原始出处：
 
-- [Live2D模型分享 - 梅娅 / Bilibili](https://www.bilibili.com/video/BV1AoX7BXEaN)
+- [Bilibili — [Live2D模型分享 - 梅娅]](https://www.bilibili.com/video/BV1AoX7BXEaN)
 
 使用该模型时请遵循原作者的发布说明与授权要求。模型版权归原作者所有，与本仓库 MIT 许可证无关。
 
@@ -179,4 +181,4 @@ Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Markwon  ·  Coroutines  ·  G
 
 本项目基于 [MIT](LICENSE) 许可证开源。
 
-本项目包含 Live2D 第三方组件，其许可证条款详见 [NOTICE.md](NOTICE.md)。使用 Live2D Cubism Core 需要单独下载并接受 Live2D 专有软件许可协议。应用内 Live2D 角色模型来源见上文「Live2D 模型来源」。
+本项目包含 Live2D 等第三方组件，其许可证条款详见 [NOTICE.md](NOTICE.md)。使用 Live2D Cubism Core 需要单独下载并接受 Live2D 专有软件许可协议。应用内 Live2D 角色模型来源见上文「Live2D 模型来源」。

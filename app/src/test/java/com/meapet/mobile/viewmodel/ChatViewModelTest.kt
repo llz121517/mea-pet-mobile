@@ -27,6 +27,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.mockito.Mockito
+import org.mockito.kotlin.any
+import org.mockito.kotlin.argThat
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
@@ -103,14 +105,15 @@ class ChatViewModelTest {
 
     @Test
     fun `发送消息会调用 ChatService`() = runTest(dispatcher.scheduler) {
-        wheneverBlocking { chatService.sendMessage("hi") }
+        // ViewModel 传入自己的乐观消息（同 id 入史），因此 stub/verify 的是 ChatMessage 重载
+        wheneverBlocking { chatService.sendMessage(any<ChatMessage>()) }
             .thenReturn(Result.success(ChatMessage(ChatRole.user, "hi") to reply(ChatMessage(ChatRole.user, "hi"))))
 
         val vm = ChatViewModel(application)
         vm.onEvent(ChatEvent.SendMessage("hi"))
         vm.advance()
 
-        verify(chatService).sendMessage("hi")
+        verify(chatService).sendMessage(argThat<ChatMessage> { content == "hi" && role == ChatRole.user })
     }
 
     @Test
@@ -180,7 +183,7 @@ class ChatViewModelTest {
     fun `有用户消息时重试调用服务`() = runTest(dispatcher.scheduler) {
         val user = ChatMessage(role = ChatRole.user, content = "hi")
         whenever(chatService.getHistory()).thenReturn(listOf(user))
-        wheneverBlocking { chatService.retryLastMessage() }
+        wheneverBlocking { chatService.retryMessage(any<ChatMessage>()) }
             .thenReturn(Result.success(user to reply(user)))
 
         val vm = ChatViewModel(application)
@@ -189,7 +192,46 @@ class ChatViewModelTest {
         vm.onEvent(ChatEvent.RetryLastMessage)
         vm.advance()
 
-        verify(chatService).retryLastMessage()
+        verify(chatService).retryMessage(argThat<ChatMessage> { id == user.id })
+    }
+
+    /**
+     * 失败后重试必须重发**界面上那条**消息。
+     *
+     * 失败的消息已被 `ChatService.sendMessage` 回滚出历史，若服务端侧再去取"历史里
+     * 最后一条 user"，拿到的是上一条早已成功的消息：它会被重发一遍，并因为原副本还在
+     * UI 列表里而造出同一个 id 的两份 → LazyColumn 重复 key → 整个应用崩溃。
+     */
+    @Test
+    fun `失败后重试传的是界面最后一条用户消息且不产生重复 id`() = runTest(dispatcher.scheduler) {
+        val oldUser = ChatMessage(role = ChatRole.user, content = "老消息")
+        val oldReply = ChatMessage(role = ChatRole.assistant, content = "老回复")
+        whenever(chatService.getHistory()).thenReturn(listOf(oldUser, oldReply))
+        val vm = ChatViewModel(application)
+        vm.advance()
+
+        wheneverBlocking { chatService.sendMessage(any<ChatMessage>()) }
+            .thenReturn(Result.failure(RuntimeException("请求过于频繁")))
+        vm.onEvent(ChatEvent.SendMessage("新消息"))
+        vm.advance()
+
+        val newUser = vm.state.value.messages.last { it.isUser }
+        assertEquals("新消息", newUser.content)
+
+        wheneverBlocking { chatService.retryMessage(any<ChatMessage>()) }
+            .thenReturn(Result.success(newUser to ChatMessage(ChatRole.assistant, "新回复")))
+        vm.onEvent(ChatEvent.RetryLastMessage)
+        vm.advance()
+
+        verify(chatService).retryMessage(argThat<ChatMessage> { id == newUser.id })
+
+        val ids = vm.state.value.messages.map { it.id }
+        assertEquals(
+            "消息列表存在重复 id: " + vm.state.value.messages.map { it.content },
+            ids.size,
+            ids.distinct().size
+        )
+        assertEquals(1, vm.state.value.messages.count { it.content == "老消息" })
     }
 
     @Test
@@ -206,6 +248,44 @@ class ChatViewModelTest {
         assertEquals(1, dialog?.memories?.size)
     }
 
+    /**
+     * 发送失败后的消息重复（偶发 bug 的确定性复现）。
+     *
+     * 失败时 [ChatService.sendMessage] 不回滚，历史里残留一条与 ViewModel 乐观消息
+     * 同内容、不同 id 的"幽灵消息"。此后任意一次 `ON_RESUME`（息屏亮屏 / 切后台 /
+     * 悬浮窗返回）触发 [ChatViewModel.reloadHistory]，`mergeWithHistory` 因分界消息
+     * 不在 UI 列表里（`idxInCurrent == -1`）落入 `takeLast(5)` 兜底分支，乐观消息
+     * 因 id 不在历史里被当作"新追加"保留 → 同一句话并列成两条。
+     */
+    @Test
+    fun `发送失败后 resume 不应把同一条消息并列成两条`() = runTest(dispatcher.scheduler) {
+        whenever(chatService.getHistory()).thenReturn(emptyList())
+        val vm = ChatViewModel(application)
+        vm.advance()
+
+        wheneverBlocking { chatService.sendMessage(any<ChatMessage>()) }
+            .thenReturn(Result.failure(RuntimeException("请求过于频繁")))
+        vm.onEvent(ChatEvent.SendMessage("hello"))
+        vm.advance()
+        assertEquals(1, vm.state.value.messages.count { it.isUser })
+
+        // 真实 ChatService 的副作用：失败但历史里留下了幽灵消息（id 与乐观消息不同）。
+        // 时间戳取与乐观消息相同的值——这是最严苛的情形（服务端副本只比它晚几微秒），
+        // 合并时必须靠「严格晚于历史末条」把它判成旧副本而丢弃。
+        val optimisticTs = vm.state.value.messages.first { it.isUser }.timestamp
+        whenever(chatService.getHistory()).thenReturn(
+            listOf(ChatMessage(role = ChatRole.user, content = "hello", timestamp = optimisticTs))
+        )
+
+        vm.reloadHistory()
+
+        assertEquals(
+            "resume 后同一条消息被并列成两条: " + vm.state.value.messages.map { it.content },
+            1,
+            vm.state.value.messages.count { it.isUser }
+        )
+    }
+
     @Test
     fun `无用户消息时重试不调用服务`() = runTest(dispatcher.scheduler) {
         val vm = ChatViewModel(application)
@@ -213,6 +293,7 @@ class ChatViewModelTest {
         vm.onEvent(ChatEvent.RetryLastMessage)
         vm.advance()
 
-        org.mockito.kotlin.verify(chatService, org.mockito.kotlin.never()).retryLastMessage()
+        org.mockito.kotlin.verify(chatService, org.mockito.kotlin.never())
+            .retryMessage(any<ChatMessage>())
     }
 }

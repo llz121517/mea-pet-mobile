@@ -1,0 +1,2213 @@
+<html lang="zh-CN" data-trae-theme="dark"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeaPet Mobile 代码审查报告</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-2: #1c2331;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --danger: #f85149;
+    --warning: #d29922;
+    --success: #3fb950;
+    --purple: #bc8cff;
+    --code-bg: #0d1117;
+    --code-border: #30363d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", "WenQuanYi Micro Hei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+  }
+  .container { max-width: 1000px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #161b22 0%, #1a1f3a 100%);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 36px;
+    margin-bottom: 32px;
+  }
+  .header h1 {
+    font-size: 26px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    background: linear-gradient(90deg, #58a6ff, #bc8cff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .header .meta {
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+  .header .meta span { margin-right: 16px; }
+  .header .meta code {
+    background: var(--surface-2);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--accent);
+  }
+
+  /* Stats bar */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    text-align: center;
+    transition: transform 0.15s;
+  }
+  .stat-card:hover { transform: translateY(-2px); }
+  .stat-card .num { font-size: 32px; font-weight: 700; }
+  .stat-card .label { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+  .stat-card.critical .num { color: var(--danger); }
+  .stat-card.arch .num { color: var(--warning); }
+  .stat-card.smell .num { color: var(--purple); }
+  .stat-card.impl .num { color: var(--accent); }
+
+  /* Section */
+  .section { margin-bottom: 40px; }
+  .section-title {
+    font-size: 20px;
+    font-weight: 700;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-title .badge {
+    font-size: 12px;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-weight: 600;
+  }
+  .badge-danger { background: rgba(248,81,73,0.15); color: var(--danger); border: 1px solid rgba(248,81,73,0.3); }
+  .badge-warning { background: rgba(210,153,34,0.15); color: var(--warning); border: 1px solid rgba(210,153,34,0.3); }
+  .badge-info { background: rgba(88,166,255,0.15); color: var(--accent); border: 1px solid rgba(88,166,255,0.3); }
+  .badge-purple { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid rgba(188,140,255,0.3); }
+
+  /* Finding card */
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 16px;
+    transition: border-color 0.15s;
+  }
+  .finding:hover { border-color: var(--accent); }
+  .finding-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .finding-id {
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .finding-title { font-size: 16px; font-weight: 600; flex: 1; min-width: 200px; }
+  .finding-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+  .tag-severity-high { background: rgba(248,81,73,0.12); color: var(--danger); }
+  .tag-severity-mid { background: rgba(210,153,34,0.12); color: var(--warning); }
+  .tag-severity-low { background: rgba(139,148,158,0.12); color: var(--text-dim); }
+  .tag-cat { background: rgba(88,166,255,0.1); color: var(--accent); }
+
+  .finding-body { color: var(--text); font-size: 14px; }
+  .finding-body p { margin-bottom: 10px; }
+  .finding-body ul { margin-left: 20px; margin-bottom: 10px; }
+  .finding-body li { margin-bottom: 4px; }
+
+  .file-ref {
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: 13px;
+    color: var(--text-dim);
+    background: var(--surface-2);
+    padding: 2px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-bottom: 8px;
+  }
+  .file-ref .path { color: var(--accent); }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 10px 0;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  pre code { color: var(--text); }
+  .kw { color: #ff7b72; }
+  .str { color: #a5d6ff; }
+  .cm { color: #8b949e; }
+  .fn { color: #d2a8ff; }
+  .ty { color: #ffa657; }
+  .nm { color: #79c0ff; }
+
+  .fix {
+    background: rgba(63,185,80,0.06);
+    border-left: 3px solid var(--success);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 16px;
+    margin: 10px 0;
+  }
+  .fix-label {
+    color: var(--success);
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .fix p { margin-bottom: 4px; font-size: 14px; }
+
+  .impact {
+    background: rgba(248,81,73,0.06);
+    border-left: 3px solid var(--danger);
+    border-radius: 0 8px 8px 0;
+    padding: 10px 16px;
+    margin: 10px 0;
+    font-size: 14px;
+  }
+  /* 复查修订（2026-08-31 Claude 复查标注） */
+  .revision {
+    background: rgba(210,153,34,0.08);
+    border-left: 3px solid var(--warning);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 16px;
+    margin: 10px 0;
+    font-size: 14px;
+  }
+  .revision-label {
+    color: var(--warning);
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .revision p { margin-bottom: 4px; font-size: 14px; }
+  .finding.retracted { opacity: 0.7; }
+  .tag-severity-retracted { background: rgba(63,185,80,0.12); color: var(--success); }
+  .revision-banner {
+    background: rgba(210,153,34,0.1);
+    border: 1px solid rgba(210,153,34,0.35);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 32px;
+    font-size: 14px;
+  }
+  .revision-banner .revision-label { font-size: 14px; }
+
+  /* TOC */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 32px;
+  }
+  .toc-title { font-weight: 700; margin-bottom: 10px; font-size: 15px; }
+  .toc ol { margin-left: 20px; }
+  .toc li { margin-bottom: 6px; }
+  .toc a { color: var(--accent); text-decoration: none; font-size: 14px; }
+  .toc a:hover { text-decoration: underline; }
+  .toc .sub { margin-left: 16px; list-style: circle; }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+</style>
+<style data-trae-edit-ui="true" id="trae-previewer-tools-styles">:root {
+  --trae-layer-image-download: 89990;
+  --trae-layer-browser-inspect-overlay: 90000;
+  --trae-layer-browser-inspect-highlight: 90010;
+  --trae-layer-browser-inspect-action: 90020;
+  --trae-layer-text-selection-action: 90030;
+  --trae-layer-edit-tooltip: 100095;
+}
+:root,
+[data-trae-theme='dark'] {
+  --trae-bg-base-default: #171717;
+  --trae-bg-menu: #222427;
+  --trae-bg-overlay-l1: rgba(255, 255, 255, 0.04);
+  --trae-bg-overlay-l2: rgba(255, 255, 255, 0.08);
+  --trae-bg-overlay-l3: rgba(255, 255, 255, 0.12);
+  --trae-bg-overlay-l4: rgba(255, 255, 255, 0.16);
+  --trae-bg-invert: #f5f9fe;
+  --trae-bg-invert-hover: #e8ecf0;
+  --trae-bg-invert-active: #dce0e4;
+  --trae-bg-invert-disabled: rgba(224, 226, 242, 0.12);
+  --bg-bg-brand-disabled: rgba(75, 63, 227, 0.35);
+  --bg-bg-brand-popup: rgba(106, 111, 255, 0.15);
+  --trae-border-l1: #e0e2f217;
+  --trae-border-l2: rgba(255, 255, 255, 0.12);
+  --trae-border-l3: rgba(255, 255, 255, 0.08);
+  --trae-border-neutral-l3: rgba(229, 229, 229, 0.20);
+  --trae-border-brand: #6a6fff;
+  --trae-text-default: #f5f9fe;
+  --trae-text-default-hover: #f5f9fe;
+  --trae-text-default-active: #f5f9fe;
+  --trae-text-secondary: rgba(245, 249, 254, 0.5);
+  --trae-text-tertiary: rgba(245, 249, 254, 0.4);
+  --trae-text-disabled: #666b75;
+  --trae-text-onaccent: #222427;
+  --trae-icon-default: #f5f9fe;
+  --trae-icon-secondary: rgba(245, 249, 254, 0.5);
+  --trae-icon-brand: #6a6fff;
+  --icon-icon-brand: var(--trae-icon-brand);
+  --trae-icon-onaccent: #222427;
+  --trae-status-success: #22c55e;
+  --trae-status-primary: #3b82f6;
+  --trae-status-primary-default: #387bff;
+  --trae-status-primary-surface-l1: rgba(53, 121, 255, 0.18);
+  --trae-status-success-default: #33c192;
+  --trae-status-success-surface-l1: rgba(0, 165, 110, 0.18);
+  --trae-status-error-default: #f65a5a;
+  --trae-status-error-surface-l1: rgba(246, 70, 70, 0.18);
+  --trae-annotation-marker-bg: #4b3fe3;
+  --trae-annotation-marker-text: #ffffff;
+  --trae-annotation-region-border: var(--trae-status-primary-default);
+  --trae-region-outside-mask-bg: rgba(0, 0, 0, 0.32);
+  --trae-panel-shadow: 0px 6px 24px -1px rgba(0, 0, 0, 0.16);
+  --trae-floating-shadow: 0px 2px 8px 0px rgba(0, 0, 0, 0.2);
+  --trae-shadow-elevation-50: 0 1px 2px -1px rgba(0, 0, 0, 0.45);
+  --text-text-default: var(--trae-text-default);
+  --text-text-onaccent: var(--trae-text-onaccent);
+  --bg-bg-menu: var(--trae-bg-menu);
+  --bg-bg-white: var(--trae-bg-menu);
+  --bg-bg-invert: var(--trae-bg-invert);
+  --bg-bg-invert-disabled: var(--trae-bg-invert-disabled);
+  --bg-bg-overlay-l1: var(--trae-bg-overlay-l1);
+  --bg-bg-overlay-l2: var(--trae-bg-overlay-l2);
+  --bg-bg-overlay-l3: var(--trae-bg-overlay-l3);
+  --border-border-neutral-l1: var(--trae-border-l1);
+  --border-border-brand: var(--trae-border-brand);
+  --border-border-brand-half: rgba(106, 111, 255, 0.4);
+  --status-error-default: var(--trae-status-error-default);
+  --status-error-surface-l1: var(--trae-status-error-surface-l1);
+  --radius-radius-md-12: 12px;
+  --spacers-spacer-0: 0;
+  --spacers-spacer-6: 6px;
+}
+
+[data-trae-theme='light'] {
+  --trae-bg-base-default: #fafafa;
+  --trae-bg-menu: #ffffff;
+  --trae-bg-overlay-l1: rgba(0, 0, 0, 0.04);
+  --trae-bg-overlay-l2: rgba(0, 0, 0, 0.06);
+  --trae-bg-overlay-l3: rgba(0, 0, 0, 0.08);
+  --trae-bg-overlay-l4: rgba(0, 0, 0, 0.12);
+  --trae-bg-invert: #1f2328;
+  --trae-bg-invert-hover: #32383f;
+  --trae-bg-invert-active: #444d56;
+  --trae-bg-invert-disabled: rgba(115, 115, 115, 0.20);
+  --bg-bg-brand-disabled: rgba(75, 63, 227, 0.22);
+  --bg-bg-brand-popup: rgba(170, 183, 255, 0.36);
+  --trae-border-l1: rgba(0, 0, 0, 0.1);
+  --trae-border-l2: rgba(0, 0, 0, 0.12);
+  --trae-border-l3: rgba(0, 0, 0, 0.08);
+  --trae-border-neutral-l3: rgba(115, 115, 115, 0.36);
+  --trae-border-brand: #4b3fe3;
+  --trae-text-default: #1f2328;
+  --trae-text-default-hover: #111214;
+  --trae-text-default-active: #111214;
+  --trae-text-secondary: rgba(31, 35, 40, 0.5);
+  --trae-text-tertiary: rgba(31, 35, 40, 0.4);
+  --trae-text-disabled: #a1a1a1;
+  --trae-text-onaccent: #ffffff;
+  --trae-icon-default: #1f2328;
+  --trae-icon-secondary: rgba(31, 35, 40, 0.5);
+  --trae-icon-brand: #4b3fe3;
+  --icon-icon-brand: var(--trae-icon-brand);
+  --trae-icon-onaccent: #ffffff;
+  --trae-status-success: #22c55e;
+  --trae-status-primary: #3b82f6;
+  --trae-status-primary-default: #2f74ff;
+  --trae-status-primary-surface-l1: rgba(47, 116, 255, 0.12);
+  --trae-status-success-default: #15a877;
+  --trae-status-success-surface-l1: rgba(64, 176, 139, 0.12);
+  --trae-status-error-default: #e8463a;
+  --trae-status-error-surface-l1: rgba(232, 70, 58, 0.12);
+  --trae-annotation-marker-bg: #4b3fe3;
+  --trae-annotation-marker-text: #ffffff;
+  --trae-annotation-region-border: var(--trae-status-primary-default);
+  --trae-region-outside-mask-bg: rgba(0, 0, 0, 0.18);
+  --trae-panel-shadow: 0px 6px 24px -1px rgba(24, 24, 24, 0.06);
+  --trae-floating-shadow: 0px 2px 8px 0px rgba(24, 24, 24, 0.2);
+  --trae-shadow-elevation-50: 0 1px 2px -1px rgba(24, 24, 24, 0.08);
+  --text-text-default: var(--trae-text-default);
+  --text-text-onaccent: var(--trae-text-onaccent);
+  --bg-bg-menu: var(--trae-bg-menu);
+  --bg-bg-white: var(--trae-bg-menu);
+  --bg-bg-invert: var(--trae-bg-invert);
+  --bg-bg-invert-disabled: var(--trae-bg-invert-disabled);
+  --bg-bg-overlay-l1: var(--trae-bg-overlay-l1);
+  --bg-bg-overlay-l2: var(--trae-bg-overlay-l2);
+  --bg-bg-overlay-l3: var(--trae-bg-overlay-l3);
+  --border-border-neutral-l1: var(--trae-border-l1);
+  --border-border-brand: var(--trae-border-brand);
+  --border-border-brand-half: rgba(75, 63, 227, 0.4);
+  --status-error-default: var(--trae-status-error-default);
+  --status-error-surface-l1: var(--trae-status-error-surface-l1);
+  --radius-radius-md-12: 12px;
+  --spacers-spacer-0: 0;
+  --spacers-spacer-6: 6px;
+}
+
+@keyframes trae-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes trae-edit-bar-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes trae-edit-bar-leave {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+@keyframes trae-edit-panel-leave {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+.trae-edit-mode-active:not(.trae-edit-mode-dragging) body *:not([data-trae-edit-ui]):not([data-trae-edit-ui] *) {
+  transition: none !important;
+  animation-play-state: paused !important;
+}
+
+.trae-edit-mode-reorder-hit-test [data-trae-edit-ui]:not(.trae-edit-pointer-shield):not(.trae-edit-panel),
+.trae-edit-mode-reorder-hit-test [data-trae-edit-ui]:not(.trae-edit-pointer-shield):not(.trae-edit-panel) * {
+  pointer-events: none !important;
+}
+
+.trae-browser-inspect-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: var(--trae-layer-browser-inspect-overlay);
+  pointer-events: auto;
+  background: transparent;
+}
+
+.trae-browser-inspect-highlight-box {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: var(--trae-layer-browser-inspect-highlight);
+  display: none;
+}
+
+.trae-browser-inspect-highlight-tag {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  height: 18px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  background-color: var(--trae-status-success-default);
+  color: var(--trae-text-onaccent);
+  font-size: 12px;
+  font-weight: 400;
+  display: none;
+  align-items: center;
+  z-index: var(--trae-layer-browser-inspect-action);
+}
+
+.trae-browser-inspect-highlight-box-show {
+  display: flex;
+}
+
+.trae-browser-inspect-highlight-tag.trae-browser-inspect-highlight-box-show {
+  display: none;
+}
+
+.trae-browser-inspect-select-button.trae-browser-inspect-highlight-box-show {
+  display: block !important;
+}
+
+.trae-browser-inspect-select-button {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  z-index: var(--trae-layer-browser-inspect-action);
+}
+
+.trae-browser-inspect-select-highlight-box {
+  background: transparent !important;
+}
+
+.trae-browser-inspect-select-highlight-box .trae-browser-inspect-highlight-tag {
+  background-color: var(--trae-status-success-default);
+}
+
+.trae-add-to-chat-card {
+  display: block;
+  overflow: hidden;
+  background: var(--trae-bg-menu);
+  border: 1px solid var(--trae-border-l1);
+  border-radius: 8px;
+  box-shadow: var(--trae-floating-shadow);
+  transition:
+    width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.trae-add-to-chat-content {
+  position: relative;
+  width: max-content;
+}
+
+.trae-fade-exit {
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+}
+
+.trae-fade-enter {
+  opacity: 1;
+  transition: opacity 0.2s ease-in;
+}
+
+.trae-buttons-view {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  background: transparent;
+}
+
+.trae-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transform: none !important;
+  transition: none !important;
+  animation: none !important;
+}
+
+.trae-action-button:hover {
+  background: var(--trae-bg-overlay-l2);
+}
+
+.trae-action-button:active {
+  background: var(--trae-bg-overlay-l3);
+}
+
+.trae-action-button:focus-visible {
+  outline: 2px solid var(--trae-status-primary);
+  outline-offset: 1px;
+}
+
+.trae-action-button-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--trae-icon-default);
+  flex-shrink: 0;
+}
+
+.trae-action-button-title {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--trae-text-default);
+  white-space: nowrap;
+}
+
+.trae-edit-toolbar-button-active {
+  background: var(--bg-bg-brand-disabled, rgba(75, 63, 227, 0.22)) !important;
+  color: var(--icon-icon-brand, #4b3fe3) !important;
+  font-weight: bold !important;
+}
+
+.trae-edit-toolbar-button-active:hover {
+  background: var(--bg-bg-brand-popup, rgba(170, 183, 255, 0.36)) !important;
+}
+
+.trae-edit-toolbar button[data-action='alignment-dropdown']:hover,
+.trae-edit-toolbar button[data-action='text-align-dropdown']:hover,
+.trae-edit-toolbar button[data-action='font-decrease']:hover,
+.trae-edit-toolbar button[data-action='font-increase']:hover,
+.trae-edit-toolbar button[data-action^='align-']:hover {
+  border-radius: 8px;
+  background: var(--bg-bg-overlay-l1, rgba(115, 115, 115, 0.08)) !important;
+}
+
+.trae-edit-toolbar button[data-action='alignment-dropdown']:active,
+.trae-edit-toolbar button[data-action='text-align-dropdown']:active,
+.trae-edit-toolbar button[data-action='font-decrease']:active,
+.trae-edit-toolbar button[data-action='font-increase']:active,
+.trae-edit-toolbar button[data-action^='align-']:active {
+  border-radius: 8px;
+  background: var(--bg-bg-overlay-l2, rgba(115, 115, 115, 0.12)) !important;
+}
+
+.trae-comment-input {
+  background: transparent;
+  color: var(--trae-text-default);
+  caret-color: var(--trae-text-default);
+}
+
+.trae-comment-input::placeholder {
+  color: var(--trae-text-tertiary);
+}
+
+.trae-point-edit-bar,
+.trae-point-comment-input-bar,
+.trae-comment-only-panel {
+  transform-origin: top center;
+  will-change: opacity, transform;
+}
+
+.trae-edit-panel:not(.trae-edit-panel-leave) {
+  pointer-events: auto !important;
+}
+
+.trae-edit-bar-enter {
+  animation: trae-edit-bar-enter var(--transition-normal, 0.18s cubic-bezier(0.2, 0, 0, 1)) both;
+}
+
+.trae-edit-bar-leave {
+  pointer-events: none;
+  animation: trae-edit-bar-leave var(--transition-fast, 0.14s ease) both;
+}
+
+.trae-edit-panel-leave {
+  pointer-events: none;
+  animation: trae-edit-panel-leave var(--transition-fast, 0.14s ease) both;
+}
+
+.trae-edit-panel [data-trae-tooltip] {
+  position: relative;
+}
+
+.trae-edit-panel [data-trae-tooltip]::after {
+  content: attr(data-trae-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: var(--trae-layer-edit-tooltip);
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--trae-bg-invert, var(--bg-bg-invert));
+  color: var(--trae-text-onaccent, var(--text-text-onaccent));
+  box-shadow: var(--trae-floating-shadow);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: 0.039px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-sizing: border-box;
+  opacity: 0;
+  transform: translateX(-50%);
+  visibility: hidden;
+}
+
+.trae-edit-panel [data-trae-tooltip]::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 5px);
+  z-index: var(--trae-layer-edit-tooltip);
+  width: 8px;
+  height: 4px;
+  background: var(--trae-bg-invert, var(--bg-bg-invert));
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transform: translateX(-50%);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.trae-edit-panel [data-trae-tooltip]:hover::after,
+.trae-edit-panel [data-trae-tooltip]:focus-visible::after,
+.trae-edit-panel [data-trae-tooltip]:hover::before,
+.trae-edit-panel [data-trae-tooltip]:focus-visible::before {
+  opacity: 1;
+  visibility: visible;
+}
+
+.trae-comment-btn {
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.trae-comment-btn:disabled {
+  cursor: not-allowed;
+}
+
+.trae-comment-btn:focus-visible {
+  outline: 2px solid var(--trae-status-primary);
+  outline-offset: 1px;
+}
+
+.trae-comment-btn-primary {
+  background: var(--trae-bg-invert);
+  color: var(--trae-text-onaccent);
+}
+
+.trae-comment-btn-primary:hover:not(:disabled) {
+  background: var(--trae-bg-invert-hover);
+}
+
+.trae-comment-btn-primary:active:not(:disabled) {
+  background: var(--trae-bg-invert-active);
+}
+
+.trae-comment-btn-primary:disabled {
+  background: var(--trae-bg-invert-disabled);
+  color: var(--trae-text-disabled);
+}
+
+.trae-comment-btn-secondary {
+  background: var(--trae-bg-overlay-l2);
+  color: var(--trae-text-default);
+}
+
+.trae-comment-btn-secondary:hover:not(:disabled) {
+  background: var(--trae-bg-overlay-l3);
+}
+
+.trae-comment-btn-secondary:active:not(:disabled) {
+  background: var(--trae-bg-overlay-l4);
+}
+
+.trae-comment-btn-secondary:disabled {
+  background: var(--trae-bg-overlay-l2);
+  color: var(--trae-text-disabled);
+}
+
+.trae-comment-btn-text {
+  background: transparent;
+  color: var(--trae-text-default);
+}
+
+.trae-comment-btn-text:hover:not(:disabled) {
+  border-radius: 8px;
+  background: var(--bg-bg-overlay-l1, var(--trae-bg-overlay-l1));
+  color: var(--trae-text-default-hover);
+}
+
+.trae-comment-btn-text:active:not(:disabled) {
+  border-radius: 8px;
+  background: var(--trae-bg-overlay-l2);
+  color: var(--trae-text-default-active);
+}
+
+.trae-comment-btn-text:disabled {
+  background: transparent;
+  color: var(--trae-text-disabled);
+}
+
+.trae-marking-btn {
+  justify-content: center;
+}
+
+.trae-marking-btn:hover:not(:disabled) {
+  background: var(--trae-bg-overlay-l1) !important;
+}
+
+.trae-marking-btn-active {
+  background: var(--bg-bg-brand-disabled, rgba(75, 63, 227, 0.22)) !important;
+  color: var(--icon-icon-brand, var(--trae-icon-brand)) !important;
+}
+
+.trae-marking-btn-active:hover {
+  background: var(--bg-bg-brand-popup, rgba(170, 183, 255, 0.36)) !important;
+  color: var(--icon-icon-brand, var(--trae-icon-brand)) !important;
+}
+
+.trae-marking-btn:active:not(:disabled) {
+  background: var(--trae-bg-overlay-l2) !important;
+}
+
+.trae-marking-btn:disabled {
+  color: var(--trae-text-disabled) !important;
+  cursor: not-allowed !important;
+}
+
+.trae-action-button-shortcut {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--trae-icon-secondary);
+  flex-shrink: 0;
+}
+
+.trae-shortcut-container {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.trae-shortcut-key {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 12px;
+  color: var(--trae-icon-secondary);
+}
+
+.trae-add-to-chat-divider {
+  width: 2px;
+  height: 12px;
+  padding: 0 6px;
+  box-sizing: content-box;
+  background-clip: content-box;
+  background-color: var(--trae-border-l2);
+  flex-shrink: 0;
+}
+
+.trae-editor-view {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  padding: 8px;
+  background: transparent;
+}
+
+.trae-editor-text-container {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  background: var(--trae-bg-overlay-l1);
+  border: 1px solid var(--trae-border-l3);
+  border-radius: 4px;
+  gap: 8px;
+}
+
+.trae-editor-textarea {
+  flex: 1;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+  color: var(--trae-text-default);
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+  max-height: 140px;
+}
+
+.trae-editor-textarea::placeholder {
+  color: var(--trae-text-tertiary);
+}
+
+.trae-editor-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    max-height 0.2s ease-out,
+    opacity 0.2s ease-out,
+    margin-top 0.2s ease-out;
+}
+
+.trae-editor-action-bar-visible {
+  max-height: 32px;
+  opacity: 1;
+  margin-top: 8px;
+}
+
+.trae-editor-cancel-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 4px;
+  background: var(--trae-bg-overlay-l2);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.trae-editor-cancel-button:hover {
+  background: var(--trae-bg-overlay-l3);
+}
+
+.trae-editor-cancel-button:active {
+  background: var(--trae-bg-overlay-l3);
+}
+
+.trae-editor-cancel-button:focus-visible {
+  outline: 2px solid var(--trae-status-primary);
+  outline-offset: 1px;
+}
+
+.trae-editor-cancel-text {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--trae-text-default);
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.trae-editor-submit-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 8px;
+  background: var(--trae-bg-invert);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.trae-editor-submit-button:hover {
+  background: var(--trae-bg-invert-hover);
+}
+
+.trae-editor-submit-button:active {
+  background: var(--trae-bg-invert-active);
+}
+
+.trae-editor-submit-button:focus-visible {
+  outline: 2px solid var(--trae-status-primary);
+  outline-offset: 1px;
+}
+
+.trae-editor-submit-text {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--trae-text-onaccent);
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.trae-editor-submit-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: var(--trae-icon-onaccent);
+  flex-shrink: 0;
+}
+
+.trae-success-view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 32px;
+  white-space: nowrap;
+}
+
+.trae-success-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--trae-status-success);
+  flex-shrink: 0;
+}
+
+.trae-success-text {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  color: var(--trae-text-default);
+  user-select: none;
+}
+</style><style data-trae-pptx-captured-css="true">:root { --bg: #0d1117; --surface: #161b22; --surface-2: #1c2331; --border: #30363d; --text: #e6edf3; --text-dim: #8b949e; --accent: #58a6ff; --danger: #f85149; --warning: #d29922; --success: #3fb950; --purple: #bc8cff; --code-bg: #0d1117; --code-border: #30363d; }
+* { margin: 0px; padding: 0px; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", "WenQuanYi Micro Hei", sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; font-size: 15px; }
+.container { max-width: 1000px; margin: 0px auto; padding: 32px 24px 80px; }
+.header { background: linear-gradient(135deg, rgb(22, 27, 34) 0%, rgb(26, 31, 58) 100%); border: 1px solid var(--border); border-radius: 12px; padding: 32px 36px; margin-bottom: 32px; }
+.header h1 { font-size: 26px; font-weight: 700; margin-bottom: 8px; background: linear-gradient(90deg, rgb(88, 166, 255), rgb(188, 140, 255)) text; -webkit-text-fill-color: transparent; }
+.header .meta { color: var(--text-dim); font-size: 14px; }
+.header .meta span { margin-right: 16px; }
+.header .meta code { background: var(--surface-2); padding: 2px 8px; border-radius: 4px; font-size: 13px; color: var(--accent); }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; text-align: center; transition: transform 0.15s; }
+.stat-card:hover { transform: translateY(-2px); }
+.stat-card .num { font-size: 32px; font-weight: 700; }
+.stat-card .label { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+.stat-card.critical .num { color: var(--danger); }
+.stat-card.arch .num { color: var(--warning); }
+.stat-card.smell .num { color: var(--purple); }
+.stat-card.impl .num { color: var(--accent); }
+.section { margin-bottom: 40px; }
+.section-title { font-size: 20px; font-weight: 700; padding-bottom: 10px; border-bottom: 2px solid var(--border); margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+.section-title .badge { font-size: 12px; padding: 2px 10px; border-radius: 20px; font-weight: 600; }
+.badge-danger { background: rgba(248, 81, 73, 0.15); color: var(--danger); border: 1px solid rgba(248, 81, 73, 0.3); }
+.badge-warning { background: rgba(210, 153, 34, 0.15); color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.3); }
+.badge-info { background: rgba(88, 166, 255, 0.15); color: var(--accent); border: 1px solid rgba(88, 166, 255, 0.3); }
+.badge-purple { background: rgba(188, 140, 255, 0.15); color: var(--purple); border: 1px solid rgba(188, 140, 255, 0.3); }
+.finding { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 24px; margin-bottom: 16px; transition: border-color 0.15s; }
+.finding:hover { border-color: var(--accent); }
+.finding-header { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.finding-id { background: var(--surface-2); color: var(--text-dim); font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 4px; flex-shrink: 0; }
+.finding-title { font-size: 16px; font-weight: 600; flex: 1 1 0%; min-width: 200px; }
+.finding-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
+.tag-severity-high { background: rgba(248, 81, 73, 0.12); color: var(--danger); }
+.tag-severity-mid { background: rgba(210, 153, 34, 0.12); color: var(--warning); }
+.tag-severity-low { background: rgba(139, 148, 158, 0.12); color: var(--text-dim); }
+.tag-cat { background: rgba(88, 166, 255, 0.1); color: var(--accent); }
+.finding-body { color: var(--text); font-size: 14px; }
+.finding-body p { margin-bottom: 10px; }
+.finding-body ul { margin-left: 20px; margin-bottom: 10px; }
+.finding-body li { margin-bottom: 4px; }
+.file-ref { font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace; font-size: 13px; color: var(--text-dim); background: var(--surface-2); padding: 2px 8px; border-radius: 4px; display: inline-block; margin-bottom: 8px; }
+.file-ref .path { color: var(--accent); }
+pre { background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 10px 0px; font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace; font-size: 13px; line-height: 1.5; }
+pre code { color: var(--text); }
+.kw { color: rgb(255, 123, 114); }
+.str { color: rgb(165, 214, 255); }
+.cm { color: rgb(139, 148, 158); }
+.fn { color: rgb(210, 168, 255); }
+.ty { color: rgb(255, 166, 87); }
+.nm { color: rgb(121, 192, 255); }
+.fix { background: rgba(63, 185, 80, 0.06); border-left: 3px solid var(--success); border-radius: 0px 8px 8px 0px; padding: 12px 16px; margin: 10px 0px; }
+.fix-label { color: var(--success); font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.fix p { margin-bottom: 4px; font-size: 14px; }
+.impact { background: rgba(248, 81, 73, 0.06); border-left: 3px solid var(--danger); border-radius: 0px 8px 8px 0px; padding: 10px 16px; margin: 10px 0px; font-size: 14px; }
+.toc { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; margin-bottom: 32px; }
+.toc-title { font-weight: 700; margin-bottom: 10px; font-size: 15px; }
+.toc ol { margin-left: 20px; }
+.toc li { margin-bottom: 6px; }
+.toc a { color: var(--accent); text-decoration: none; font-size: 14px; }
+.toc a:hover { text-decoration: underline; }
+.toc .sub { margin-left: 16px; list-style: circle; }
+hr { border-right: none; border-bottom: none; border-left: none; border-image: initial; border-top: 1px solid var(--border); margin: 32px 0px; }
+:root { --trae-layer-image-download: 89990; --trae-layer-browser-inspect-overlay: 90000; --trae-layer-browser-inspect-highlight: 90010; --trae-layer-browser-inspect-action: 90020; --trae-layer-text-selection-action: 90030; --trae-layer-edit-tooltip: 100095; }
+:root, [data-trae-theme="dark"] { --trae-bg-base-default: #171717; --trae-bg-menu: #222427; --trae-bg-overlay-l1: rgba(255, 255, 255, 0.04); --trae-bg-overlay-l2: rgba(255, 255, 255, 0.08); --trae-bg-overlay-l3: rgba(255, 255, 255, 0.12); --trae-bg-overlay-l4: rgba(255, 255, 255, 0.16); --trae-bg-invert: #f5f9fe; --trae-bg-invert-hover: #e8ecf0; --trae-bg-invert-active: #dce0e4; --trae-bg-invert-disabled: rgba(224, 226, 242, 0.12); --bg-bg-brand-disabled: rgba(75, 63, 227, 0.35); --bg-bg-brand-popup: rgba(106, 111, 255, 0.15); --trae-border-l1: #e0e2f217; --trae-border-l2: rgba(255, 255, 255, 0.12); --trae-border-l3: rgba(255, 255, 255, 0.08); --trae-border-neutral-l3: rgba(229, 229, 229, 0.20); --trae-border-brand: #6a6fff; --trae-text-default: #f5f9fe; --trae-text-default-hover: #f5f9fe; --trae-text-default-active: #f5f9fe; --trae-text-secondary: rgba(245, 249, 254, 0.5); --trae-text-tertiary: rgba(245, 249, 254, 0.4); --trae-text-disabled: #666b75; --trae-text-onaccent: #222427; --trae-icon-default: #f5f9fe; --trae-icon-secondary: rgba(245, 249, 254, 0.5); --trae-icon-brand: #6a6fff; --icon-icon-brand: var(--trae-icon-brand); --trae-icon-onaccent: #222427; --trae-status-success: #22c55e; --trae-status-primary: #3b82f6; --trae-status-primary-default: #387bff; --trae-status-primary-surface-l1: rgba(53, 121, 255, 0.18); --trae-status-success-default: #33c192; --trae-status-success-surface-l1: rgba(0, 165, 110, 0.18); --trae-status-error-default: #f65a5a; --trae-status-error-surface-l1: rgba(246, 70, 70, 0.18); --trae-annotation-marker-bg: #4b3fe3; --trae-annotation-marker-text: #ffffff; --trae-annotation-region-border: var(--trae-status-primary-default); --trae-region-outside-mask-bg: rgba(0, 0, 0, 0.32); --trae-panel-shadow: 0px 6px 24px -1px rgba(0, 0, 0, 0.16); --trae-floating-shadow: 0px 2px 8px 0px rgba(0, 0, 0, 0.2); --trae-shadow-elevation-50: 0 1px 2px -1px rgba(0, 0, 0, 0.45); --text-text-default: var(--trae-text-default); --text-text-onaccent: var(--trae-text-onaccent); --bg-bg-menu: var(--trae-bg-menu); --bg-bg-white: var(--trae-bg-menu); --bg-bg-invert: var(--trae-bg-invert); --bg-bg-invert-disabled: var(--trae-bg-invert-disabled); --bg-bg-overlay-l1: var(--trae-bg-overlay-l1); --bg-bg-overlay-l2: var(--trae-bg-overlay-l2); --bg-bg-overlay-l3: var(--trae-bg-overlay-l3); --border-border-neutral-l1: var(--trae-border-l1); --border-border-brand: var(--trae-border-brand); --border-border-brand-half: rgba(106, 111, 255, 0.4); --status-error-default: var(--trae-status-error-default); --status-error-surface-l1: var(--trae-status-error-surface-l1); --radius-radius-md-12: 12px; --spacers-spacer-0: 0; --spacers-spacer-6: 6px; }
+[data-trae-theme="light"] { --trae-bg-base-default: #fafafa; --trae-bg-menu: #ffffff; --trae-bg-overlay-l1: rgba(0, 0, 0, 0.04); --trae-bg-overlay-l2: rgba(0, 0, 0, 0.06); --trae-bg-overlay-l3: rgba(0, 0, 0, 0.08); --trae-bg-overlay-l4: rgba(0, 0, 0, 0.12); --trae-bg-invert: #1f2328; --trae-bg-invert-hover: #32383f; --trae-bg-invert-active: #444d56; --trae-bg-invert-disabled: rgba(115, 115, 115, 0.20); --bg-bg-brand-disabled: rgba(75, 63, 227, 0.22); --bg-bg-brand-popup: rgba(170, 183, 255, 0.36); --trae-border-l1: rgba(0, 0, 0, 0.1); --trae-border-l2: rgba(0, 0, 0, 0.12); --trae-border-l3: rgba(0, 0, 0, 0.08); --trae-border-neutral-l3: rgba(115, 115, 115, 0.36); --trae-border-brand: #4b3fe3; --trae-text-default: #1f2328; --trae-text-default-hover: #111214; --trae-text-default-active: #111214; --trae-text-secondary: rgba(31, 35, 40, 0.5); --trae-text-tertiary: rgba(31, 35, 40, 0.4); --trae-text-disabled: #a1a1a1; --trae-text-onaccent: #ffffff; --trae-icon-default: #1f2328; --trae-icon-secondary: rgba(31, 35, 40, 0.5); --trae-icon-brand: #4b3fe3; --icon-icon-brand: var(--trae-icon-brand); --trae-icon-onaccent: #ffffff; --trae-status-success: #22c55e; --trae-status-primary: #3b82f6; --trae-status-primary-default: #2f74ff; --trae-status-primary-surface-l1: rgba(47, 116, 255, 0.12); --trae-status-success-default: #15a877; --trae-status-success-surface-l1: rgba(64, 176, 139, 0.12); --trae-status-error-default: #e8463a; --trae-status-error-surface-l1: rgba(232, 70, 58, 0.12); --trae-annotation-marker-bg: #4b3fe3; --trae-annotation-marker-text: #ffffff; --trae-annotation-region-border: var(--trae-status-primary-default); --trae-region-outside-mask-bg: rgba(0, 0, 0, 0.18); --trae-panel-shadow: 0px 6px 24px -1px rgba(24, 24, 24, 0.06); --trae-floating-shadow: 0px 2px 8px 0px rgba(24, 24, 24, 0.2); --trae-shadow-elevation-50: 0 1px 2px -1px rgba(24, 24, 24, 0.08); --text-text-default: var(--trae-text-default); --text-text-onaccent: var(--trae-text-onaccent); --bg-bg-menu: var(--trae-bg-menu); --bg-bg-white: var(--trae-bg-menu); --bg-bg-invert: var(--trae-bg-invert); --bg-bg-invert-disabled: var(--trae-bg-invert-disabled); --bg-bg-overlay-l1: var(--trae-bg-overlay-l1); --bg-bg-overlay-l2: var(--trae-bg-overlay-l2); --bg-bg-overlay-l3: var(--trae-bg-overlay-l3); --border-border-neutral-l1: var(--trae-border-l1); --border-border-brand: var(--trae-border-brand); --border-border-brand-half: rgba(75, 63, 227, 0.4); --status-error-default: var(--trae-status-error-default); --status-error-surface-l1: var(--trae-status-error-surface-l1); --radius-radius-md-12: 12px; --spacers-spacer-0: 0; --spacers-spacer-6: 6px; }
+@keyframes trae-spin { 
+  100% { transform: rotate(360deg); }
+}
+@keyframes trae-edit-bar-enter { 
+  0% { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0px) scale(1); }
+}
+@keyframes trae-edit-bar-leave { 
+  0% { opacity: 1; transform: translateY(0px) scale(1); }
+  100% { opacity: 0; transform: translateY(-4px) scale(0.98); }
+}
+@keyframes trae-edit-panel-leave { 
+  0% { opacity: 1; transform: translateY(0px) scale(1); }
+  100% { opacity: 0; transform: translateY(-4px) scale(0.98); }
+}
+.trae-edit-mode-active:not(.trae-edit-mode-dragging) body :not([data-trae-edit-ui]):not([data-trae-edit-ui] *) { transition: none !important; animation-play-state: paused !important; }
+.trae-edit-mode-reorder-hit-test [data-trae-edit-ui]:not(.trae-edit-pointer-shield):not(.trae-edit-panel), .trae-edit-mode-reorder-hit-test [data-trae-edit-ui]:not(.trae-edit-pointer-shield):not(.trae-edit-panel) * { pointer-events: none !important; }
+.trae-browser-inspect-overlay { position: fixed; top: 0px; left: 0px; width: 100%; height: 100%; z-index: var(--trae-layer-browser-inspect-overlay); pointer-events: auto; background: transparent; }
+.trae-browser-inspect-highlight-box { position: absolute; top: 0px; left: 0px; z-index: var(--trae-layer-browser-inspect-highlight); display: none; }
+.trae-browser-inspect-highlight-tag { position: absolute; left: 0px; top: 0px; height: 18px; padding: 0px 6px; box-sizing: border-box; border-radius: 4px; background-color: var(--trae-status-success-default); color: var(--trae-text-onaccent); font-size: 12px; font-weight: 400; display: none; align-items: center; z-index: var(--trae-layer-browser-inspect-action); }
+.trae-browser-inspect-highlight-box-show { display: flex; }
+.trae-browser-inspect-highlight-tag.trae-browser-inspect-highlight-box-show { display: none; }
+.trae-browser-inspect-select-button.trae-browser-inspect-highlight-box-show { display: block !important; }
+.trae-browser-inspect-select-button { position: absolute; top: 0px; left: 0px; display: none; z-index: var(--trae-layer-browser-inspect-action); }
+.trae-browser-inspect-select-highlight-box { background: transparent !important; }
+.trae-browser-inspect-select-highlight-box .trae-browser-inspect-highlight-tag { background-color: var(--trae-status-success-default); }
+.trae-add-to-chat-card { display: block; overflow: hidden; background: var(--trae-bg-menu); border: 1px solid var(--trae-border-l1); border-radius: 8px; box-shadow: var(--trae-floating-shadow); transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), height 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+.trae-add-to-chat-content { position: relative; width: max-content; }
+.trae-fade-exit { opacity: 0; transition: opacity 0.15s ease-out; }
+.trae-fade-enter { opacity: 1; transition: opacity 0.2s ease-in; }
+.trae-buttons-view { display: flex; align-items: center; gap: 6px; padding: 4px; background: transparent; }
+.trae-action-button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; background: transparent; border: none; border-radius: 4px; cursor: pointer; transform: none !important; transition: none !important; animation: auto ease 0s 1 normal none running none !important; }
+.trae-action-button:hover { background: var(--trae-bg-overlay-l2); }
+.trae-action-button:active { background: var(--trae-bg-overlay-l3); }
+.trae-action-button:focus-visible { outline: 2px solid var(--trae-status-primary); outline-offset: 1px; }
+.trae-action-button-icon { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; color: var(--trae-icon-default); flex-shrink: 0; }
+.trae-action-button-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 500; line-height: 16px; color: var(--trae-text-default); white-space: nowrap; }
+.trae-edit-toolbar-button-active { background: var(--bg-bg-brand-disabled, rgba(75, 63, 227, 0.22)) !important; color: var(--icon-icon-brand, #4b3fe3) !important; font-weight: bold !important; }
+.trae-edit-toolbar-button-active:hover { background: var(--bg-bg-brand-popup, rgba(170, 183, 255, 0.36)) !important; }
+.trae-edit-toolbar button[data-action="alignment-dropdown"]:hover, .trae-edit-toolbar button[data-action="text-align-dropdown"]:hover, .trae-edit-toolbar button[data-action="font-decrease"]:hover, .trae-edit-toolbar button[data-action="font-increase"]:hover, .trae-edit-toolbar button[data-action^="align-"]:hover { border-radius: 8px; background: var(--bg-bg-overlay-l1, rgba(115, 115, 115, 0.08)) !important; }
+.trae-edit-toolbar button[data-action="alignment-dropdown"]:active, .trae-edit-toolbar button[data-action="text-align-dropdown"]:active, .trae-edit-toolbar button[data-action="font-decrease"]:active, .trae-edit-toolbar button[data-action="font-increase"]:active, .trae-edit-toolbar button[data-action^="align-"]:active { border-radius: 8px; background: var(--bg-bg-overlay-l2, rgba(115, 115, 115, 0.12)) !important; }
+.trae-comment-input { background: transparent; color: var(--trae-text-default); caret-color: var(--trae-text-default); }
+.trae-comment-input::placeholder { color: var(--trae-text-tertiary); }
+.trae-point-edit-bar, .trae-point-comment-input-bar, .trae-comment-only-panel { transform-origin: center top; will-change: opacity, transform; }
+.trae-edit-panel:not(.trae-edit-panel-leave) { pointer-events: auto !important; }
+.trae-edit-bar-enter { animation: trae-edit-bar-enter var(--transition-normal, 0.18s cubic-bezier(0.2, 0, 0, 1)) both; }
+.trae-edit-bar-leave { pointer-events: none; animation: trae-edit-bar-leave var(--transition-fast, 0.14s ease) both; }
+.trae-edit-panel-leave { pointer-events: none; animation: trae-edit-panel-leave var(--transition-fast, 0.14s ease) both; }
+.trae-edit-panel [data-trae-tooltip] { position: relative; }
+.trae-edit-panel [data-trae-tooltip]::after { content: attr(data-trae-tooltip); position: absolute; left: 50%; bottom: calc(100% + 8px); z-index: var(--trae-layer-edit-tooltip); padding: 6px 10px; border-radius: 6px; background: var(--trae-bg-invert, var(--bg-bg-invert)); color: var(--trae-text-onaccent, var(--text-text-onaccent)); box-shadow: var(--trae-floating-shadow); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; font-size: 11px; font-weight: 500; line-height: 16px; letter-spacing: 0.039px; white-space: nowrap; pointer-events: none; box-sizing: border-box; opacity: 0; transform: translateX(-50%); visibility: hidden; }
+.trae-edit-panel [data-trae-tooltip]::before { content: ""; position: absolute; left: 50%; bottom: calc(100% + 5px); z-index: var(--trae-layer-edit-tooltip); width: 8px; height: 4px; background: var(--trae-bg-invert, var(--bg-bg-invert)); clip-path: polygon(0px 0px, 100% 0px, 50% 100%); transform: translateX(-50%); pointer-events: none; opacity: 0; visibility: hidden; }
+.trae-edit-panel [data-trae-tooltip]:hover::after, .trae-edit-panel [data-trae-tooltip]:focus-visible::after, .trae-edit-panel [data-trae-tooltip]:hover::before, .trae-edit-panel [data-trae-tooltip]:focus-visible::before { opacity: 1; visibility: visible; }
+.trae-comment-btn { justify-content: center; cursor: pointer; transition: background-color 0.15s; }
+.trae-comment-btn:disabled { cursor: not-allowed; }
+.trae-comment-btn:focus-visible { outline: 2px solid var(--trae-status-primary); outline-offset: 1px; }
+.trae-comment-btn-primary { background: var(--trae-bg-invert); color: var(--trae-text-onaccent); }
+.trae-comment-btn-primary:hover:not(:disabled) { background: var(--trae-bg-invert-hover); }
+.trae-comment-btn-primary:active:not(:disabled) { background: var(--trae-bg-invert-active); }
+.trae-comment-btn-primary:disabled { background: var(--trae-bg-invert-disabled); color: var(--trae-text-disabled); }
+.trae-comment-btn-secondary { background: var(--trae-bg-overlay-l2); color: var(--trae-text-default); }
+.trae-comment-btn-secondary:hover:not(:disabled) { background: var(--trae-bg-overlay-l3); }
+.trae-comment-btn-secondary:active:not(:disabled) { background: var(--trae-bg-overlay-l4); }
+.trae-comment-btn-secondary:disabled { background: var(--trae-bg-overlay-l2); color: var(--trae-text-disabled); }
+.trae-comment-btn-text { background: transparent; color: var(--trae-text-default); }
+.trae-comment-btn-text:hover:not(:disabled) { border-radius: 8px; background: var(--bg-bg-overlay-l1, var(--trae-bg-overlay-l1)); color: var(--trae-text-default-hover); }
+.trae-comment-btn-text:active:not(:disabled) { border-radius: 8px; background: var(--trae-bg-overlay-l2); color: var(--trae-text-default-active); }
+.trae-comment-btn-text:disabled { background: transparent; color: var(--trae-text-disabled); }
+.trae-marking-btn { justify-content: center; }
+.trae-marking-btn:hover:not(:disabled) { background: var(--trae-bg-overlay-l1) !important; }
+.trae-marking-btn-active { background: var(--bg-bg-brand-disabled, rgba(75, 63, 227, 0.22)) !important; color: var(--icon-icon-brand, var(--trae-icon-brand)) !important; }
+.trae-marking-btn-active:hover { background: var(--bg-bg-brand-popup, rgba(170, 183, 255, 0.36)) !important; color: var(--icon-icon-brand, var(--trae-icon-brand)) !important; }
+.trae-marking-btn:active:not(:disabled) { background: var(--trae-bg-overlay-l2) !important; }
+.trae-marking-btn:disabled { color: var(--trae-text-disabled) !important; cursor: not-allowed !important; }
+.trae-action-button-shortcut { display: flex; align-items: center; gap: 2px; color: var(--trae-icon-secondary); flex-shrink: 0; }
+.trae-shortcut-container { display: flex; align-items: center; gap: 2px; }
+.trae-shortcut-key { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 500; line-height: 12px; color: var(--trae-icon-secondary); }
+.trae-add-to-chat-divider { width: 2px; height: 12px; padding: 0px 6px; box-sizing: content-box; background-clip: content-box; background-color: var(--trae-border-l2); flex-shrink: 0; }
+.trae-editor-view { display: flex; flex-direction: column; width: 320px; padding: 8px; background: transparent; }
+.trae-editor-text-container { display: flex; align-items: center; padding: 8px; background: var(--trae-bg-overlay-l1); border: 1px solid var(--trae-border-l3); border-radius: 4px; gap: 8px; }
+.trae-editor-textarea { flex: 1 1 0%; padding: 0px 2px; border: none; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: 400; line-height: 20px; color: var(--trae-text-default); resize: none; outline: none; overflow-y: auto; max-height: 140px; }
+.trae-editor-textarea::placeholder { color: var(--trae-text-tertiary); }
+.trae-editor-action-bar { display: flex; align-items: center; justify-content: flex-end; gap: 4px; max-height: 0px; opacity: 0; overflow: hidden; transition: max-height 0.2s ease-out, opacity 0.2s ease-out, margin-top 0.2s ease-out; }
+.trae-editor-action-bar-visible { max-height: 32px; opacity: 1; margin-top: 8px; }
+.trae-editor-cancel-button { display: flex; align-items: center; justify-content: center; height: 24px; padding: 0px 4px; background: var(--trae-bg-overlay-l2); border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.15s; }
+.trae-editor-cancel-button:hover { background: var(--trae-bg-overlay-l3); }
+.trae-editor-cancel-button:active { background: var(--trae-bg-overlay-l3); }
+.trae-editor-cancel-button:focus-visible { outline: 2px solid var(--trae-status-primary); outline-offset: 1px; }
+.trae-editor-cancel-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 500; line-height: 16px; color: var(--trae-text-default); white-space: nowrap; padding: 0px 4px; }
+.trae-editor-submit-button { display: flex; align-items: center; justify-content: center; height: 24px; padding: 0px 8px; background: var(--trae-bg-invert); border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.15s; }
+.trae-editor-submit-button:hover { background: var(--trae-bg-invert-hover); }
+.trae-editor-submit-button:active { background: var(--trae-bg-invert-active); }
+.trae-editor-submit-button:focus-visible { outline: 2px solid var(--trae-status-primary); outline-offset: 1px; }
+.trae-editor-submit-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 500; line-height: 16px; color: var(--trae-text-onaccent); white-space: nowrap; padding: 0px 4px; }
+.trae-editor-submit-icon { display: flex; align-items: center; justify-content: center; width: 12px; height: 12px; color: var(--trae-icon-onaccent); flex-shrink: 0; }
+.trae-success-view { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0px 12px; height: 32px; white-space: nowrap; }
+.trae-success-icon { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; color: var(--trae-status-success); flex-shrink: 0; }
+.trae-success-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 12px; font-weight: 400; line-height: 18px; color: var(--trae-text-default); user-select: none; }</style></head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>MeaPet Mobile 代码审查报告</h1>
+    <div class="meta">
+      <span>仓库: <code>github.com/llz121517/mea-pet-mobile</code></span>
+      <span>类型: Android / Kotlin / Live2D 虚拟宠物</span>
+      <span>审查日期: 2026-08-31</span>
+      <span>复查修订: 2026-08-31（Claude 对照源码逐条核实）</span>
+    </div>
+  </div>
+
+  <!-- Revision banner -->
+  <div class="revision-banner">
+    <div class="revision-label">⚠ 本报告已经过复查修订</div>
+    <p>全部 48 条发现已对照当前源码逐条核实：<strong>属实 41 · 部分属实 6 · 不属实 1</strong>。被修订的条目下方有黄色「复查修订」标注；#6 经复查不属实已撤回；#1 的 Crash 风险结论不成立，降级为并发加固项。详见配套文档 <code>code-review-triage.md</code>。</p>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat-card critical"><div class="num">5</div><div class="label">严重缺陷 (Bug)（原 7：#1 降级、#6 撤回）</div></div>
+    <div class="stat-card arch"><div class="num">12</div><div class="label">架构设计问题</div></div>
+    <div class="stat-card smell"><div class="num">15</div><div class="label">代码异味</div></div>
+    <div class="stat-card impl"><div class="num">11</div><div class="label">不优雅实现</div></div>
+  </div>
+
+  <!-- TOC -->
+  <div class="toc">
+    <div class="toc-title">目录</div>
+    <ol>
+      <li><a href="#sec1">一、严重缺陷（功能性 Bug / 并发隐患）</a></li>
+      <li><a href="#sec2">二、架构设计问题</a></li>
+      <li><a href="#sec3">三、代码异味</a></li>
+      <li><a href="#sec4">四、不优雅的实现</a></li>
+      <li><a href="#sec5">五、跨文件共性问题</a></li>
+      <li><a href="#sec6">六、优先级修复路线图</a></li>
+    </ol>
+  </div>
+
+  <!-- ============ Section 1: Critical Bugs ============ -->
+  <div class="section" id="sec1">
+    <div class="section-title">
+      <span class="badge badge-danger">P0</span>
+      一、严重缺陷（功能性 Bug / 并发隐患）
+    </div>
+
+    <!-- Bug 1 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#1</span>
+        <span class="finding-title">lifeMap 多协程无锁并发修改非线程安全 Map</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">并发</span>
+          <span class="tag tag-severity-mid">并发隐患（已降级）</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">viewmodel/ChatViewModel.kt</span> :82-113, 392-405 <span style="color: var(--warning);">（原报告误标 335-340）</span></div>
+      <div class="finding-body">
+        <p><code>lifeMap</code> 是一个普通 <code>LinkedHashMap</code>，同时被 <code>collect</code> 协程读写，又被每个 <code>scheduleRemove</code> 启动的独立协程 <code>remove</code>。两个或多个协程无任何同步机制并发修改同一非线程安全 Map，极易抛出 <code>ConcurrentModificationException</code> 或丢失更新。</p>
+<pre><code><span class="cm">// collect 协程中写</span>
+lifeMap[newMsg.id] = Triple(SystemBubblePolicy.BASE_LIFE_MS, job, <span class="nm">0</span>)
+sysIds.forEachIndexed { index, id -&gt;
+    lifeMap[id] = Triple(newLife, newJob, newCount)  <span class="cm">// ← 写</span>
+}
+
+<span class="cm">// scheduleRemove 启动的独立协程中删</span>
+<span class="kw">private fun</span> <span class="fn">scheduleRemove</span>(
+    lifeMap: MutableMap&lt;String, Triple&lt;Long, Job, Int&gt;&gt;,
+    msgId: String, delayMs: Long
+): Job = viewModelScope.<span class="fn">launch</span> {
+    kotlinx.coroutines.<span class="fn">delay</span>(delayMs.<span class="fn">milliseconds</span>)
+    <span class="fn">removeBubble</span>(msgId)
+    lifeMap.<span class="fn">remove</span>(msgId)  <span class="cm">// ← 另一协程并发删</span>
+}</code></pre>
+      </div>
+      <div class="impact">系统气泡数量增多时，倒计时协程与 collect 协程同时操作 lifeMap，可能崩溃或气泡错乱。</div>
+      <div class="revision">
+        <div class="revision-label">复查修订（2026-08-31）：部分属实，「可能崩溃」结论不成立，P0 降级为 P2 加固</div>
+        <p>事实层面属实：lifeMap 确为无同步的 <code>LinkedHashMap</code>（ChatViewModel.kt:82），collect 协程写（:90/:110）、scheduleRemove 协程删（:399/:404）。但 <strong>ConcurrentModificationException 实际不可能发生</strong>：</p>
+        <p>① 所有访问均经 <code>viewModelScope.launch</code>，运行在 <code>Dispatchers.Main.immediate</code> 单线程调度器上，不存在并行执行；② 代码从未对 lifeMap 本身做迭代（<code>sysIds.forEachIndexed</code> 迭代的是 List，map 只有按 key 的 get/put/remove），且 collect lambda 内各 map 操作之间无挂起点。线程封闭消除了竞争。保留为加固项：结构依赖「恰好都在主线程」的隐式前提，建议注明线程约束或 actor 化。</p>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议修复</div>
+        <p>改用 <code>Mutex</code> 保护所有 lifeMap 访问，或更好：将气泡生命周期管理收敛到单一 actor 协程（<code>Channel</code> 接收消息），避免跨协程共享可变状态。</p>
+      </div>
+    </div>
+
+    <!-- Bug 2 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#2</span>
+        <span class="finding-title">ApiResponse.modelIds 吞掉 CancellationException，破坏协程取消语义</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">并发</span>
+          <span class="tag tag-severity-high">协程泄漏</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">client/model/ApiResponse.kt</span> :43-56</div>
+      <div class="finding-body">
+        <p><code>catch (_: Exception)</code> 会捕获 <code>kotlinx.coroutines.CancellationException</code>。该函数被 <code>SettingsViewModel.fetchModels</code> 在 <code>withContext(Dispatchers.IO)</code> 中调用，若用户离开页面导致协程取消，取消信号被吞掉，协程不会正确终止。</p>
+<pre><code><span class="kw">fun</span> <span class="fn">modelIds</span>(body: String): List&lt;String&gt; = <span class="kw">try</span> {
+    <span class="cm">// ...解析逻辑...</span>
+} <span class="kw">catch</span> (_: Exception) {  <span class="cm">// ← 吞掉 CancellationException</span>
+    emptyList()
+}</code></pre>
+        <p>同文件的 <code>chatCompletionContent</code> 已用 <code>runCatchingLog</code>（正确重抛 CancellationException），唯独此处裸 try-catch，风格也不一致。</p>
+      </div>
+      <div class="revision">
+        <div class="revision-label">复查修订（2026-08-31）：属实，但实际危害极低</div>
+        <p><code>modelIds</code> 是纯同步 JSON 解析（ApiResponse.kt:43-56）、无任何挂起点，实践中 CancellationException 几乎不可能在此抛出，「协程泄漏」场景难以真实发生。修复仍值得做（成本一行），动机是<strong>统一项目错误处理约定</strong>（ErrorHandling.kt:11-14 明确要求重抛 CE）而非防崩溃。优先级可从 P0 适当放宽。</p>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议修复</div>
+        <pre><code><span class="kw">catch</span> (e: CancellationException) { <span class="kw">throw</span> e }
+<span class="kw">catch</span> (e: Exception) { Log.w(TAG, ...); emptyList() }</code></pre>
+      </div>
+    </div>
+
+    <!-- Bug 3 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#3</span>
+        <span class="finding-title">ConversationManager.trimWindow 破坏消息原始顺序</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">逻辑</span>
+          <span class="tag tag-severity-high">数据错乱</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">chat/ConversationManager.kt</span> :188-200</div>
+      <div class="finding-body">
+        <p>裁剪窗口时 <code>messages.addAll(systemMessages + trimmed)</code> 把所有 system 消息整体提到列表最前，彻底打乱 system 与 user/assistant 的原始交错顺序。</p>
+<pre><code><span class="kw">private fun</span> <span class="fn">trimWindow</span>() {
+    <span class="kw">if</span> (messages.size &lt;= maxSize) <span class="kw">return</span>
+    <span class="kw">val</span> systemMessages = messages.<span class="fn">filter</span> { it.role == ChatRole.system }
+    <span class="kw">val</span> nonSystem = messages.<span class="fn">filter</span> { it.role != ChatRole.system }
+    <span class="cm">// ...</span>
+    messages.<span class="fn">clear</span>()
+    messages.<span class="fn">addAll</span>(systemMessages + trimmed)  <span class="cm">// ← system 全部挪到最前</span>
+}</code></pre>
+      </div>
+      <div class="revision">
+        <div class="revision-label">复查修订（2026-08-31）：属实，但实际影响有限</div>
+        <p>乱序属实（ConversationManager.kt:190-197）。但 <code>buildApiMessages</code>（:113-114）发请求时会过滤 history 中的 system 消息并自行重组 system 前缀，因此<strong>对发给模型的内容影响有限</strong>，主要影响内存中 history 的排列（以及将来若改用原序消费 history 时的隐患）。仍建议按原方案修复。</p>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议修复</div>
+        <p>采用就地逐条裁剪（<code>removeAt(0)</code>）保留原序，或按原始 index 排序后保留尾部 maxSize-trimBatch 条。</p>
+      </div>
+    </div>
+
+    <!-- Bug 4 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#4</span>
+        <span class="finding-title">clearConversation 整体重置 ChatUiState，误清更新通知与记忆弹窗</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">状态管理</span>
+          <span class="tag tag-severity-high">副作用</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">viewmodel/ChatViewModel.kt</span> :309-317</div>
+      <div class="finding-body">
+        <p><code>ChatUiState(...)</code> 抛弃了所有字段（包括正在显示的 <code>updateNotice</code>、<code>memoryDialog</code>），清空对话会顺带关掉更新提示和记忆弹窗——这是 <code>ChatUiState</code> 上帝状态带来的副作用。</p>
+<pre><code><span class="kw">private fun</span> <span class="fn">clearConversation</span>() {
+    sendJob?.<span class="fn">cancel</span>()
+    chatService.<span class="fn">clearHistory</span>()
+    _state.<span class="fn">update</span> {
+        ChatUiState(memoryContextInfo = <span class="str">"对话已清除"</span>)  <span class="cm">// ← 整体重置</span>
+    }
+}</code></pre>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议修复</div>
+        <p>改为 <code>it.copy(messages = emptyList(), isLoading = false, error = null, inputText = "", memoryContextInfo = "对话已清除")</code>，保留其他字段。</p>
+      </div>
+    </div>
+
+    <!-- Bug 5 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#5</span>
+        <span class="finding-title">MarkdownText 缓存键与构造参数不一致，返回陈旧实例</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">缓存</span>
+          <span class="tag tag-severity-high">渲染错乱</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">ui/component/MarkdownText.kt</span> :86-111</div>
+      <div class="finding-body">
+        <p><code>markwonCache</code> 缓存键仅 <code>dark: Boolean</code>，但 <code>textSizePx</code> 与 <code>tableBorder</code> 参与构造。首次以某 dark 值调用决定缓存实例后，同 dark 不同参数命中旧实例，返回陈旧的 Markwon。设备密度变化或多密度场景下公式字号、表格边框色错乱。</p>
+<pre><code><span class="kw">private val</span> markwonCache = ConcurrentHashMap&lt;Boolean, Markwon&gt;()
+
+<span class="kw">private fun</span> <span class="fn">obtainMarkwon</span>(
+    context: Context, dark: Boolean, textSizePx: Float, tableBorder: Int
+): Markwon = markwonCache.<span class="fn">getOrPut</span>(dark) {  <span class="cm">// ← 键只有 dark</span>
+    Markwon.<span class="fn">builder</span>(context)
+        <span class="cm">// ... .usePlugin(TablePlugin.create(...tableBorder...))</span>
+        <span class="cm">// ... .usePlugin(JLatexMathPlugin.create(textSizePx) ...)</span>
+        .<span class="fn">build</span>()
+}</code></pre>
+      </div>
+      <div class="revision">
+        <div class="revision-label">复查修订（2026-08-31）：属实，但影响面收窄</div>
+        <p><code>tableBorder</code> 实为 <code>dark</code> 的纯函数（MarkdownText.kt:146 <code>if (dark) ... else ...</code>），同 dark 下不可能不同，不会造成陈旧命中；真正会发散的只有 <code>textSizePx</code>（:145，来自 <code>LocalDensity</code>，系统字体缩放/显示密度变化时同 dark 会命中旧实例）。场景存在但触发条件苛刻，修复建议不变（缓存键纳入全部构造参数）。</p>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议修复</div>
+        <p>将 <code>textSizePx</code> 和 <code>tableBorder</code> 纳入缓存键（如 <code>data class MarkwonKey(dark, textSizePx, tableBorder)</code>），或证明它们在生命周期内不变并加 assert。</p>
+      </div>
+    </div>
+
+    <!-- Bug 6 -->
+    <div class="finding retracted">
+      <div class="finding-header">
+        <span class="finding-id">#6</span>
+        <span class="finding-title"><s>OverlayMenu 条件分支内调用 collectAsState，违反 Compose 规则</s></span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">Compose</span>
+          <span class="tag tag-severity-retracted">复查：不属实，已撤回</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">ui/component/OverlayMenu.kt</span> :75-78</div>
+      <div class="finding-body">
+        <p><code>collectAsState</code> 是 Composable 函数，却被放在 <code>if (container != null)</code> 条件分支里。Compose 要求 Composable 调用不能依赖运行时条件分支，否则编译器生成的 groups 不稳定，可能导致状态丢失或运行时异常。</p>
+<pre><code><span class="kw">val</span> mainVoiceOn = <span class="kw">if</span> (container != <span class="kw">null</span>) {
+    container.settingsManager.ttsMainEnabledFlow.<span class="fn">collectAsState</span>(initial = <span class="kw">false</span>).value
+} <span class="kw">else</span> <span class="kw">false</span></code></pre>
+      </div>
+      <div class="revision">
+        <div class="revision-label">复查修订（2026-08-31）：不属实，本条撤回</div>
+        <p>「违反 Compose 组合规则」的定性错误：<strong>Compose 明确允许可组合函数的条件调用</strong>，编译器通过 group 插入/移除正确处理分支切换，不会崩溃或行为异常。<code>container</code> 经 <code>remember(context)</code>（:74）稳定化，分支变化只会触发正常的订阅/退订。最多算风格可议（可早退或对空 flow 取 collect），并非缺陷，无需修复。</p>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议修复（已作废，仅供参考）</div>
+        <p>在分支前无条件 <code>collectAsState</code>，或将 <code>container == null</code> 提为外层 <code>if (container == null) return</code> 早退。</p>
+      </div>
+    </div>
+
+    <!-- Bug 7 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#7</span>
+        <span class="finding-title">ConversationStore.persistAsync 作用域取消后静默丢数据</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">持久化</span>
+          <span class="tag tag-severity-high">数据丢失</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">chat/ConversationStore.kt</span> :init block + persistAsync</div>
+      <div class="finding-body">
+        <p>传入的 <code>scope</code> 一旦取消，collector 协程结束，之后所有 <code>persistAsync</code> 只往 <code>MutableSharedFlow</code>（replay=1, DROP_OLDEST）里 emit，没有任何报错，数据静默丢失。</p>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议修复</div>
+        <p>在 emit 前检查 collector 存活状态，或改用 <code>Channel</code> + <code>isClosedForSend</code> 检测，失败时至少 Log.w 告警。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Section 2: Architecture ============ -->
+  <div class="section" id="sec2">
+    <div class="section-title">
+      <span class="badge badge-warning">P1</span>
+      二、架构设计问题
+    </div>
+
+    <!-- Arch 1 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#8</span>
+        <span class="finding-title">Live2dDelegate 是 God Class（9 项职责）</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">God Class</span>
+          <span class="tag tag-severity-mid">可维护性</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">live2d/Live2dDelegate.kt</span></div>
+      <div class="finding-body">
+        <p>一个类承担：GL 生命周期管理、触摸交互处理、分区语音播放、TTS 互斥、配色管理、壁纸加载、模型加载调度、渲染状态、日志。违反 SRP，难以测试和扩展。</p>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议</div>
+        <p>拆分为 <code>Live2dGlLifecycle</code>、<code>TouchInteractionHandler</code>、<code>VoiceZoneController</code>、<code>Live2dThemeConfig</code> 等独立类，通过接口注入组合。</p>
+      </div>
+    </div>
+
+    <!-- Arch 2 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#9</span>
+        <span class="finding-title">ChatViewModel / SettingsViewModel 上帝类</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">God Class</span>
+          <span class="tag tag-severity-mid">可维护性</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">viewmodel/ChatViewModel.kt</span>, <span class="path">viewmodel/SettingsViewModel.kt</span></div>
+      <div class="finding-body">
+        <p><code>ChatViewModel</code> 同时管：聊天消息、记忆对话框、更新检测、Live2D 系统气泡调度、TTS 播放、ZoneTouch 开关。<code>SettingsViewModel</code> 约 500 行，<code>SettingsUiState</code> 含 <s>25</s> <strong>30</strong> 字段、对应 30+ 公开方法（实测 32 个）。</p>
+<pre><code><span class="cm">// ChatViewModel.init — 三个无关 launch 混居</span>
+init {
+    viewModelScope.<span class="fn">launch</span> { <span class="cm">// 历史恢复</span> }
+    viewModelScope.<span class="fn">launch</span> { <span class="cm">// 气泡监听</span> }
+    viewModelScope.<span class="fn">launch</span> { <span class="cm">// 更新检测</span> }
+}</code></pre>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议</div>
+        <p>拆分为 <code>MemoryViewModel</code>、<code>UpdateViewModel</code>、<code>ApiSettingsViewModel</code>、<code>TtsSettingsViewModel</code>、<code>AppearanceViewModel</code>，或抽取 UseCase / Interactor。</p>
+      </div>
+    </div>
+
+    <!-- Arch 3 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#10</span>
+        <span class="finding-title">跨模块通信用 companion object var 回调（全局可变状态）</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">全局状态</span>
+          <span class="tag tag-severity-mid">耦合</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">app/AppContainer.kt</span> :193-201, <span class="path">live2d/Live2dDelegate.kt</span> :39-44, <span class="path">tts/TtsManager.kt</span> :47-49</div>
+      <div class="finding-body">
+        <p>Live2D 与 TTS 之间通过 companion 上的可变全局字段耦合：</p>
+<pre><code><span class="cm">// AppContainer.wireVoiceMutex()</span>
+Live2dDelegate.ttsPlayingChecker = { ttsManager.isPlaying.value }
+Live2dDelegate.ttsStopper = { ttsManager.<span class="fn">stop</span>() }
+TtsManager.onPlaybackStart = { Live2dDelegate.<span class="fn">getInstance</span>().<span class="fn">stopTouchVoices</span>() }</code></pre>
+        <p>注释声称"避免包间反向依赖"，但本质是全局可变单例字段做隐式布线：时序耦合、无所有者、无生命周期、可被覆盖。</p>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议</div>
+        <p>通过事件总线、显式接口注入或共享 <code>Flow</code> 实现解耦。</p>
+      </div>
+    </div>
+
+    <!-- Arch 4 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#11</span>
+        <span class="finding-title">消息源不一致，ViewModel 需复杂 merge 补丁</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">数据一致性</span>
+          <span class="tag tag-severity-mid">脆弱</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">viewmodel/ChatViewModel.kt</span> (mergeWithHistory)</div>
+      <div class="finding-body">
+        <p><code>ConversationManager</code> 有滑动窗口裁剪，而 <code>ViewModel.messages</code> 从不裁剪——两份真相源不一致。<code>mergeWithHistory</code> 用 <code>takeLast(5)</code> 魔法数字补丁弥合差异，逻辑复杂且脆弱。</p>
+      </div>
+      <div class="revision">
+        <div class="revision-label">复查修订（2026-08-31）：核心论点属实，机制描述有偏差</div>
+        <p><code>takeLast(5)</code>（ChatViewModel.kt:185）只是分界 id 在 current 中找不到时的<strong>保守兜底分支</strong>；主弥合机制是「以 history 最后一条 id 为分界，之前以 history 为准、之后保留尾部」（:176-189，KDoc :146-152 有明确说明）。双消息源、一边裁剪一边不裁剪的核心问题成立。</p>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议</div>
+        <p>让 <code>ConversationManager</code> 成为唯一消息源，ViewModel 直接订阅其 Flow，不再自维护副本。</p>
+      </div>
+    </div>
+
+    <!-- Arch 5 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#12</span>
+        <span class="finding-title">模型层越界控制 UI 生命周期</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">分层违规</span>
+          <span class="tag tag-severity-mid&lt;/span&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=" file-ref"="">文件: <span class="path">live2d/Live2dModel.kt</span> :144, :219</span></div>
+      <div class="finding-body">
+        <p><code>Live2dModel.draw()</code> 和 <code>setupModel()</code> 在模型为空/加载失败时直接调用 <code>Activity.finish()</code> 关闭 Activity。数据层不应控制 UI 生命周期，应通过回调或事件通知上层处理。</p>
+      </div>
+    </div>
+
+    <!-- Arch 6 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#13</span>
+        <span class="finding-title">服务定位器反模式四处复现</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">DI</span>
+          <span class="tag tag-severity-mid">可测试性</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">MainActivity.kt</span> :80, <span class="path">ChatScreen.kt</span> :161, <span class="path">OverlayMenu.kt</span> :74</div>
+      <div class="finding-body">
+        <p>Composable 直接 <code>(context.applicationContext as MeaPetApplication).container</code> 取容器，是 service locator 反模式。UI 层直接依赖 Application 具体类型，无法预览、难测试。</p>
+<pre><code><span class="kw">val</span> container = <span class="fn">remember</span>(context) {
+    (context.applicationContext <span class="kw">as?</span> MeaPetApplication)?.container
+}</code></pre>
+      </div>
+      <div class="revision">
+        <div class="revision-label">复查修订（2026-08-31）：属实，且问题面更广</div>
+        <p>实际服务定位调用点不止三处：SettingsScreen、ProviderSettings、AboutSettings、PrivacyDialog、OverlayPalette、FloatingLive2dService 等同样直接引用 <code>MeaPetApplication</code>/<code>container</code>。另 MainActivity.kt:80 实际经 <code>MeaPetApplication.from()</code> 辅助方法取值，形式略异但同为该模式。标题「四处复现」应为「多处复现」。</p>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议</div>
+        <p>使用 <code>CompositionLocalProvider(LocalContainer provides container)</code> 或经 ViewModel 暴露依赖。</p>
+      </div>
+    </div>
+
+    <!-- Arch 7 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#14</span>
+        <span class="finding-title">三套并发原语混用</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">并发</span>
+          <span class="tag tag-severity-mid">一致性</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">chat/ConversationManager.kt</span>, <span class="path">chat/ConversationStore.kt</span>, <span class="path">viewmodel/ChatViewModel.kt</span></div>
+      <div class="finding-body">
+        <ul>
+          <li><code>ConversationManager</code>：用 <code>synchronized(lock)</code>（阻塞线程），且 <code>getHistory()</code> 非 suspend，从主线程调用会阻塞 UI</li>
+          <li><code>ConversationStore</code>：用 <code>kotlinx.coroutines.sync.Mutex</code>（suspend）</li>
+          <li><code>ChatViewModel</code>：用 <code>StateFlow.update</code>（CAS）</li>
+          <li><code>lifeMap</code>：无任何同步（bug）</li>
+        </ul>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议</div>
+        <p>统一为协程友好的 <code>Mutex</code> / <code>Channel</code> / actor 模式。</p>
+      </div>
+    </div>
+
+    <!-- Arch 8 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#15</span>
+        <span class="finding-title">PrivacyConsentManager 双存储"两源真相"</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">数据一致性</span>
+          <span class="tag tag-severity-mid">ANR</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">core/PrivacyConsentManager.kt</span> :51-69</div>
+      <div class="finding-body">
+        <p>同一授权状态同时写 SharedPreferences 和 DataStore。<code>agreedFlow</code> 读 DS，<code>isAgreed()</code> 读 SP，若 DS 写超时失败，Flow 长期返回与 <code>isAgreed()</code> 不一致的旧值。且 <code>setAgreed</code> 在主线程 <code>runBlocking</code> + 2s 超时，触 ANR 边缘。</p>
+      </div>
+    </div>
+
+    <!-- Arch 9 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#16</span>
+        <span class="finding-title">客户端生命周期两套并存</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">资源泄漏</span>
+          <span class="tag tag-severity-mid">连接池浪费</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">viewmodel/SettingsViewModel.kt</span> (fetchModels), <span class="path">app/AppContainer.kt</span> (reloadClient)</div>
+      <div class="finding-body">
+        <p><code>container.reloadClient()</code>（共享热替换）与 <code>SettingsViewModel.fetchModels</code> 内临时 <code>OpenAiCompatibleClient(...).close()</code>（一次性）并存。<code>fetchModels</code> 先 <code>reloadClient()</code> 重建共享客户端，又用表单值临时 new 一个——两次构造、两套连接池，冗余且易泄漏。</p>
+      </div>
+    </div>
+
+    <!-- Arch 10 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#17</span>
+        <span class="finding-title">ChatService 返回 Pair&lt;ChatMessage, ChatMessage&gt; 语义模糊</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">API 设计</span>
+          <span class="tag tag-severity-low">可读性</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">chat/ChatService.kt</span></div>
+      <div class="finding-body">
+        <p><code>sendMessage</code> 和 <code>retryLastMessage</code> 返回 <code>Result&lt;Pair&lt;ChatMessage, ChatMessage&gt;&gt;</code>，调用方靠注释猜"第一个是 user，第二个是 assistant"。应定义 <code>data class ChatExchange(val user: ChatMessage, val assistant: ChatMessage)</code>。</p>
+      </div>
+    </div>
+
+    <!-- Arch 11 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#18</span>
+        <span class="finding-title">ApiException 存 responseBody 却不解析具体错误</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">错误处理</span>
+          <span class="tag tag-severity-low">UX</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">client/exception/ApiException.kt</span>, <span class="path">client/OpenAiCompatibleClient.kt</span></div>
+      <div class="finding-body">
+        <p><code>ApiException</code> 存了 <code>responseBody</code> 但 <code>message</code> 只用状态码中文文案。OpenAI 网关返回的 <code>{"error":{"message":"Rate limit exceeded for model X"}}</code> 等具体错误信息被丢弃，用户只看到"请求过于频繁"。</p>
+      </div>
+    </div>
+
+    <!-- Arch 12 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#19</span>
+        <span class="finding-title">MemoryRepository 读方法写数据，违反 CQS</span>
+        <div class="finding-tags">
+          <span class="tag tag-cat">CQS</span>
+          <span class="tag tag-severity-low">设计</span>
+        </div>
+      </div>
+      <div class="file-ref">文件: <span class="path">memory/MemoryRepository.kt</span></div>
+      <div class="finding-body">
+        <p><code>getRelevant()</code> 在读方法里改写 <code>accessCount</code> 并落盘，违反 Command-Query Separation 原则。读操作产生副作用（持久化），增加并发复杂度和调试难度。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Section 3: Code Smells ============ -->
+  <div class="section" id="sec3">
+    <div class="section-title">
+      <span class="badge badge-purple">P2</span>
+      三、代码异味
+    </div>
+
+    <!-- Smell 1 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#20</span>
+        <span class="finding-title">SettingsManager 20+ 项设置，每项 Flow + getter + setter 高度重复（样板代码爆炸）</span>
+        <div class="finding-tags"><span class="tag tag-cat">重复</span><span class="tag tag-severity-mid">可维护性</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">settings/SettingsManager.kt</span> (346 行)</div>
+      <div class="finding-body">
+        <p>每加一个设置需改三处（Flow + getter + setter），约 60+ 个高度重复成员。</p>
+<pre><code><span class="kw">val</span> apiKeyFlow: Flow&lt;String&gt; = dataStore.data.<span class="fn">map</span> { it[KEY_API_KEY] ?: <span class="str">""</span> }
+<span class="kw">fun</span> <span class="fn">getApiKey</span>(): String = <span class="fn">currentPrefs</span>()[KEY_API_KEY] ?: <span class="str">""</span>
+<span class="kw">suspend fun</span> <span class="fn">setApiKey</span>(key: String) { cachedPrefs = dataStore.<span class="fn">edit</span> { it[KEY_API_KEY] = key } }
+<span class="cm">// ... 同模式重复 20+ 次</span></code></pre>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议</div>
+        <p>用泛型 <code>Setting&lt;T&gt;</code> 数据类 + 委托，或扩展函数统一生成 Flow/get/set。</p>
+      </div>
+      <div class="revision">
+        <div class="revision-label">复查修订（2026-08-31）：模式属实，数量高估</div>
+        <p>实测约 <strong>21 项设置</strong>（非 ~30 项），每项确实重复 Flow+getter+setter 三处（如 API_KEY 见 :85/:195/:249），约 60+ 个重复成员（非 ~90）。结论与修复建议不变。</p>
+      </div>
+    </div>
+
+    <!-- Smell 2 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#21</span>
+        <span class="finding-title">SettingsViewModel.save* 系列方法重复"读旧值-比较-写-reload"模式十几次</span>
+        <div class="finding-tags"><span class="tag tag-cat">重复</span><span class="tag tag-severity-mid">DRY</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">viewmodel/SettingsViewModel.kt</span></div>
+      <div class="finding-body">
+<pre><code><span class="kw">fun</span> <span class="fn">saveApiKey</span>(key: String) = viewModelScope.<span class="fn">launch</span> {
+    <span class="kw">if</span> (key == settingsManager.<span class="fn">getApiKey</span>()) <span class="kw">return</span>@launch
+    settingsManager.<span class="fn">setApiKey</span>(key); container.<span class="fn">reloadClient</span>()
+}
+<span class="kw">fun</span> <span class="fn">saveApiUrl</span>(url: String) = viewModelScope.<span class="fn">launch</span> {
+    <span class="kw">if</span> (url == settingsManager.<span class="fn">getApiUrl</span>()) <span class="kw">return</span>@launch
+    settingsManager.<span class="fn">setApiUrl</span>(url); container.<span class="fn">reloadClient</span>()
+}
+<span class="cm">// ... 同模式重复 10+ 次</span></code></pre>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议</div>
+        <p>抽取 <code>private fun &lt;T&gt; saveIfChanged(current: T, setter: (T) -&gt; Unit, reload: Boolean, value: T)</code>。</p>
+      </div>
+      <div class="revision">
+        <div class="revision-label">复查修订（2026-08-31）：模式属实，次数高估</div>
+        <p>完整的「读旧值-比较-写-reload」模式实为 <strong>4 处</strong>（saveApiKey:188、saveApiUrl:197、saveModel:206、saveSystemPrompt:214，另 selectModel:455 类似），带 reload 的仅 2 处；其余 update* 多为不含比较的一行式 launch（约 15 处）。「重复十几次」夸大，抽取 saveIfChanged 的建议仍成立。</p>
+      </div>
+    </div>
+
+    <!-- Smell 3 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#22</span>
+        <span class="finding-title">魔法数字遍布全项目</span>
+        <div class="finding-tags"><span class="tag tag-cat">魔法数字</span><span class="tag tag-severity-mid">可读性</span></div>
+      </div>
+      <div class="finding-body">
+        <p>典型示例：</p>
+        <ul>
+          <li><code>SystemBubblePolicy</code> 阈值 <code>3</code>（前 3 个不扣减）未命名常量</li>
+          <li><code>mergeWithHistory</code> 的 <code>takeLast(5)</code></li>
+          <li><code>KtorHttpClientEngine</code> 超时 <code>300_000</code> / <code>30_000</code> 不可配置</li>
+          <li><code>maskApiKey</code> 的 <code>8</code> / <code>4</code></li>
+          <li><code>MainActivity</code> 颜色 <code>0x14</code> / <code>0xF7</code> / <code>0xFF000000</code> 位运算</li>
+          <li>Live2D 触摸阈值 <code>30f/400L</code>、分区边界 <code>-0.45f/0.45f/-0.44f/0.66f</code></li>
+          <li><code>LogExporter</code> <code>dropLast(5)</code></li>
+          <li><code>ChatScreen</code> <code>padding(bottom = 100.dp)</code> / <code>88.dp</code></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Smell 4 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#23</span>
+        <span class="finding-title">strings.xml 形同虚设，硬编码中文遍布 UI 层</span>
+        <div class="finding-tags"><span class="tag tag-cat">i18n</span><span class="tag tag-severity-low">规范</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">ui/screen/ChatScreen.kt</span>, <span class="path">ui/component/ChatBubble.kt</span>, <span class="path">ui/component/PrivacyPolicyContent.kt</span> 等</div>
+      <div class="finding-body">
+        <p>所有 UI 文案直接写死在 Composable 中，如 <code>text = "开始和 Mea 对话吧！\n发送一条消息开始聊天 🐾"</code>、<code>Text("Mea 正在思考...")</code>。无法 i18n，修改文案需重新编译。</p>
+        <p>另：600+ 字 SystemPrompt 和法律政策全文也写死在 Kotlin 源码（<code>SettingsKeys.kt:67</code>、<code>PrivacyPolicyContent.kt</code>），应放 <code>assets/</code> 或 <code>res/raw/</code>。</p>
+      </div>
+      <div class="revision">
+        <div class="revision-label">复查修订（2026-08-31）：硬编码属实，「全项目无 strings.xml」字面不实</div>
+        <p><code>res/values/strings.xml</code> 实际存在，但仅含 <code>app_name</code> 一项，形同虚设。UI 文案硬编码中文（ChatScreen.kt:292、ChatBubble.kt:140、PrivacyDialog.kt:118 起）与 600+ 字 SystemPrompt 写死在 SettingsKeys.kt:67-68 均属实。标题已相应修正。</p>
+      </div>
+    </div>
+
+    <!-- Smell 5 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#24</span>
+        <span class="finding-title">Triple&lt;Long, Job, Int&gt; 语义模糊</span>
+        <div class="finding-tags"><span class="tag tag-cat">命名</span><span class="tag tag-severity-low">可读性</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">viewmodel/ChatViewModel.kt</span> :82</div>
+      <div class="finding-body">
+        <p><code>LinkedHashMap&lt;String, Triple&lt;Long, Job, Int&gt;&gt;</code> 三元组分别表示"剩余毫秒/移除Job/已扣减次数"，全靠注释记忆。应定义 <code>data class BubbleLife(val lifeMs: Long, val job: Job, val reduceCount: Int)</code>。</p>
+      </div>
+    </div>
+
+    <!-- Smell 6 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#25</span>
+        <span class="finding-title">Overlay 四窗口类 dp()/withAlpha()/place() 逐字重复</span>
+        <div class="finding-tags"><span class="tag tag-cat">重复</span><span class="tag tag-severity-mid">DRY</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">live2d/overlay/OverlayAlphaWindow.kt</span>, <span class="path">OverlayBubbleWindow.kt</span>, <span class="path">OverlayInputWindow.kt</span>, <span class="path">OverlayMenuWindow.kt</span></div>
+      <div class="finding-body">
+        <p>四个窗口类的 <code>dp()</code>、<code>withAlpha()</code>、<code>place()</code> 辅助方法逐字重复。同样，<code>Live2dSpriteShader</code> 和 <code>WallpaperBlurShader</code> 的 <code>compileShader</code>/<code>checkShaderCompiled</code> 完全相同。应提取到公共基类或工具对象。</p>
+      </div>
+    </div>
+
+    <!-- Smell 7 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#26</span>
+        <span class="finding-title">弹窗 Card 模板三处重复</span>
+        <div class="finding-tags"><span class="tag tag-cat">重复</span><span class="tag tag-severity-low">DRY</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">PrivacyDialog.kt</span>, <span class="path">AutoUpdateOptInDialog.kt</span>, <span class="path">ChatScreen.kt</span> (MemoryDialog)</div>
+      <div class="finding-body">
+        <p>同款 <code>Dialog + Card(widthIn=420, padding=24/48, elevation=12)</code> 模板重复三次，应抽 <code>MeaPetDialogCard</code> 复用。</p>
+      </div>
+    </div>
+
+    <!-- Smell 8 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#27</span>
+        <span class="finding-title">空且无注释的 catch 违反自家 ErrorHandling 约定</span>
+        <div class="finding-tags"><span class="tag tag-cat">异常处理</span><span class="tag tag-severity-mid">规范</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">MainActivity.kt</span> :104,241,244,409; <span class="path">Live2dManager.kt</span> :129</div>
+      <div class="finding-body">
+        <p>项目 <code>ErrorHandling.kt</code> 明文要求"防御性场景允许静默，但需注释说明"，但多处 <code>catch (_: Exception) {}</code> 无任何注释。</p>
+      </div>
+    </div>
+
+    <!-- Smell 9 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#28</span>
+        <span class="finding-title">死代码 / 死参数</span>
+        <div class="finding-tags"><span class="tag tag-cat">死代码</span><span class="tag tag-severity-low">整洁</span></div>
+      </div>
+      <div class="finding-body">
+        <ul>
+          <li><code>Live2dSprite.textureId</code> 构造参数从不读取</li>
+          <li><code>Live2dView.setClearColor()</code> setter 无调用点（字段本身有使用；原文表述已修正）</li>
+          <li><code>Type.kt</code> 大段注释掉的 Typography 死代码</li>
+          <li><code>ApiRequest</code> 的 <code>visionMessage</code>/<code>textContent</code>/<code>imageUrlContent</code> 仅被测试调用，主源码无调用点</li>
+          <li><code>MeaPetApplication.onTerminate()</code> 仅打日志、无业务（真机几不触发）</li>
+          <li><code>Color.kt</code> 中 <code>Purple80/Purple40</code> 等旧模板残留（仅定义无引用，已核实）</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Smell 10 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#29</span>
+        <span class="finding-title">EXCHANGE_COUNT 状态数据塞进 SettingsKeys</span>
+        <div class="finding-tags"><span class="tag tag-cat">语义错位</span><span class="tag tag-severity-low">整洁</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">settings/SettingsKeys.kt</span> :18-24</div>
+      <div class="finding-body">
+        <p>注释自认"不是用户设置，只是借 DataStore 存跨进程计数器"，却放在 SettingsKeys/SettingsManager 中，污染"设置"语义。应另立 <code>ExchangeCounter</code> 仓储。</p>
+      </div>
+    </div>
+
+    <!-- Smell 11 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#30</span>
+        <span class="finding-title">ChatMessage 领域模型混入运行时 UI 状态 isStreaming</span>
+        <div class="finding-tags"><span class="tag tag-cat">SRP</span><span class="tag tag-severity-low">设计</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">chat/ChatMessage.kt</span></div>
+      <div class="finding-body">
+        <p><code>@Transient val isStreaming: Boolean = false</code> 是纯 UI 流式状态，被塞进可序列化的领域模型，违反单一职责。应拆为 UI 层的 wrapper 或在 ViewModel 用并行 Map 维护。</p>
+      </div>
+    </div>
+
+    <!-- Smell 12 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#31</span>
+        <span class="finding-title">ChatUiState 上帝状态</span>
+        <div class="finding-tags"><span class="tag tag-cat">状态管理</span><span class="tag tag-severity-mid&lt;/span&gt;&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=" file-ref"="">文件: <span class="path">chat/ChatState.kt</span></span></div>
+      <div class="finding-body">
+        <p>单一状态类混入：聊天消息、输入框文本、错误卡片、记忆上下文提示、更新通知（Snackbar）、记忆对话框。后两者与"聊天 UI"属不同关注点。</p>
+      </div>
+    </div>
+
+    <!-- Smell 13 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#32</span>
+        <span class="finding-title">ConversationManager 文档自相矛盾</span>
+        <div class="finding-tags"><span class="tag tag-cat">文档</span><span class="tag tag-severity-low&lt;/span&gt;&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=" file-ref"="">文件: <span class="path">chat/ConversationManager.kt</span></span></div>
+      <div class="finding-body">
+        <p>类注释写"不关心消息是用户还是助手发送的，仅按顺序维护"，但类内却提供 <code>lastUserMessage()</code> 与 <code>lastAssistantMessage()</code> 按角色查询——与"不关心角色"矛盾。</p>
+      </div>
+    </div>
+
+    <!-- Smell 14 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#33</span>
+        <span class="finding-title">手动 Animatable 动画重复实现，未用 AnimatedVisibility</span>
+        <div class="finding-tags"><span class="tag tag-cat">Compose</span><span class="tag tag-severity-low">惯用法</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">ui/component/OverlayMenu.kt</span> :60-70, <span class="path">PrivacyDialog.kt</span> :61-65</div>
+      <div class="finding-body">
+        <p>每处弹窗都自造 <code>Animatable + graphicsLayer</code> 三状态机驱动缩放/淡入，可读性差且易出竞态。应使用 <code>AnimatedVisibility</code> 或抽 <code>Modifier.scaleInAppearance()</code>。</p>
+      </div>
+    </div>
+
+    <!-- Smell 15 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#34</span>
+        <span class="finding-title">依赖版本断层严重</span>
+        <div class="finding-tags"><span class="tag tag-cat">依赖</span><span class="tag tag-severity-mid">技术债</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">gradle/libs.versions.toml</span></div>
+      <div class="finding-body">
+        <p><code>agp = "9.3.0"</code>、<code>kotlin = "2.2.10"</code>、<code>composeBom = "2026.02.01"</code> 极新，但 <code>lifecycle 2.6.1</code>、<code>coreKtx 1.10.1</code> 严重过旧，依赖版本断层。Java <code>sourceCompatibility = VERSION_11</code> 也偏旧（Java 11 已 EOL）。<code>abiFilters</code> 缺 x86_64，CI 模拟器调试不便。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Section 4: Inelegant ============ -->
+  <div class="section" id="sec4">
+    <div class="section-title">
+      <span class="badge badge-info">P2</span>
+      四、不优雅的实现
+    </div>
+
+    <!-- Impl 1 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#35</span>
+        <span class="finding-title">MainActivity.onCreate 约 180 行 God Method</span>
+        <div class="finding-tags"><span class="tag tag-cat">超长方法</span><span class="tag tag-severity-mid">可读性</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">ui/MainActivity.kt</span> :72-253</div>
+      <div class="finding-body">
+        <p>一个 onCreate 混合：isTaskRoot 守卫 → 容器获取 → 主题首帧预置 → 壁纸预置 → insets → GLSurfaceView 配置 → ComposeView 巨型 setContent → 触摸透传。应拆 <code>setupFirstFrameTheme()</code>、<code>setupGlSurface()</code>、<code>setupComposeContent()</code> 等。</p>
+      </div>
+    </div>
+
+    <!-- Impl 2 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#36</span>
+        <span class="finding-title">onResume 用 Handler.postDelayed(16L) 忙等 Service 停止（忙等反模式）</span>
+        <div class="finding-tags"><span class="tag tag-cat">反模式</span><span class="tag tag-severity-mid">性能</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">ui/MainActivity.kt</span> :277-292</div>
+      <div class="finding-body">
+<pre><code><span class="kw">val</span> gate = <span class="kw">object</span> : Runnable {
+    <span class="kw">override fun</span> <span class="fn">run</span>() {
+        <span class="kw">if</span> (Live2dRenderState.isRunning.value) {
+            mainHandler.<span class="fn">postDelayed</span>(<span class="kw">this</span>, <span class="nm">16L</span>)  <span class="cm">// ← 16ms 自旋忙等</span>
+        } <span class="kw">else</span> { <span class="cm">/* resume GL */</span> }
+    }
+}</code></pre>
+      </div>
+      <div class="fix">
+        <div class="fix-label">建议</div>
+        <p>让 <code>Live2dRenderState.isRunning</code> 暴露 Flow 或用 <code>suspendCancellableCoroutine</code>，或 Service onDestroy 直接回调 Activity 恢复 GL。</p>
+      </div>
+    </div>
+
+    <!-- Impl 3 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#37</span>
+        <span class="finding-title">SettingsManager.currentPrefs() 主线程 runBlocking 读盘</span>
+        <div class="finding-tags"><span class="tag tag-cat">ANR</span><span class="tag tag-severity-high">性能</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">settings/SettingsManager.kt</span> :192-193</div>
+      <div class="finding-body">
+        <p>被 <code>MainActivity.onCreate</code> 在主线程调用（getThemeMode/getWallpaperPath 等），启动期 DataStore 慢时直接 ANR。</p>
+<pre><code><span class="kw">private fun</span> <span class="fn">currentPrefs</span>(): Preferences =
+    cachedPrefs ?: <span class="fn">runBlocking</span> { dataStore.data.<span class="fn">first</span>() }.<span class="fn">also</span> { cachedPrefs = it }</code></pre>
+      </div>
+    </div>
+
+    <!-- Impl 4 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#38</span>
+        <span class="finding-title">LogExporter Process.waitFor() 无超时，可能永久阻塞 IO 协程</span>
+        <div class="finding-tags"><span class="tag tag-cat">阻塞</span><span class="tag tag-severity-mid">稳定性</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">core/LogExporter.kt</span> :149</div>
+      <div class="finding-body">
+        <p><code>logcat -d</code> 一般会退出，但若子进程异常挂起，<code>waitFor()</code> 无限等待，所在 <code>Dispatchers.IO</code> 协程被占。应 <code>waitFor(5, TimeUnit.SECONDS)</code> 并 <code>destroyForcibly()</code> 兜底。</p>
+      </div>
+    </div>
+
+    <!-- Impl 5 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#39</span>
+        <span class="finding-title">MarkdownText.update 每次 recomposition 都 setMarkdown 重新解析</span>
+        <div class="finding-tags"><span class="tag tag-cat">性能</span><span class="tag tag-severity-mid">卡顿</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">ui/component/MarkdownText.kt</span> :177-182</div>
+      <div class="finding-body">
+        <p>流式输出时 <code>safe</code> 频繁变化，<code>update</code> 块每次 recomposition 都调 <code>markwon.setMarkdown(tv, safe)</code> 重新解析整段（含 LaTeX/表格），主线程开销大。应 <code>remember(markdown, isStreaming, dark) { markwon.markdownToText(...) }</code> 缓存 Spanned。</p>
+      </div>
+    </div>
+
+    <!-- Impl 6 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#40</span>
+        <span class="finding-title">retryLastMessage 的 O(n²) 过滤</span>
+        <div class="finding-tags"><span class="tag tag-cat">性能</span><span class="tag tag-severity-low">算法</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">viewmodel/ChatViewModel.kt</span></div>
+      <div class="finding-body">
+        <p><code>filterNot</code> 内部对每个元素都调 <code>indexOf(msg)</code>/<code>indexOfLast</code>，整体 O(n²)。应先算一次 <code>userIdx</code> 再用 index 比较。</p>
+      </div>
+    </div>
+
+    <!-- Impl 7 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#41</span>
+        <span class="finding-title">DurationExpander 用稠密矩阵表示稀疏对齐，最坏数百 MB</span>
+        <div class="finding-tags"><span class="tag tag-cat">内存</span><span class="tag tag-severity-mid">性能</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">tts/DurationExpander.kt</span> :80</div>
+      <div class="finding-body">
+        <p><code>buildAttention</code> 用 <code>Array(yLengths) { FloatArray(tX) }</code> 稠密矩阵表示本应稀疏的对齐关系，内存开销随序列长度平方增长，长文本可达数百 MB。应改用稀疏结构。</p>
+      </div>
+    </div>
+
+    <!-- Impl 8 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#42</span>
+        <span class="finding-title">MemoryRepository 每次突变全量重写 JSON 文件</span>
+        <div class="finding-tags"><span class="tag tag-cat">IO</span><span class="tag tag-severity-low">性能</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">memory/MemoryRepository.kt</span> (persistLocked)</div>
+      <div class="finding-body">
+        <p>每次增删改记忆条目都全量序列化并重写整个 JSON 文件。记忆条目增多后 IO 开销线性增长。应考虑增量写入或分页存储。</p>
+      </div>
+    </div>
+
+    <!-- Impl 9 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#43</span>
+        <span class="finding-title">WallpaperStore 同一 URI 打开 InputStream 三次</span>
+        <div class="finding-tags"><span class="tag tag-cat">IO</span><span class="tag tag-severity-low">性能</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">core/WallpaperStore.kt</span> :47,51,63</div>
+      <div class="finding-body">
+        <p>同一 content URI 的 <code>openInputStream</code> 被调用三次（解码尺寸 → 读 EXIF → 解码图片），每次都重新授权/打开。应一次性 <code>copyTo</code> 临时文件再复用。</p>
+      </div>
+    </div>
+
+    <!-- Impl 10 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#44</span>
+        <span class="finding-title">ChineseG2p.ensureDict check-then-act 竞态</span>
+        <div class="finding-tags"><span class="tag tag-cat">并发</span><span class="tag tag-severity-low">竞态</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">tts/g2p/ChineseG2p.kt</span> :24-32</div>
+      <div class="finding-body">
+        <p><code>ensureDict</code> 存在经典的 check-then-act 竞态：<code>@Volatile</code> 标志位检查后、<s>加锁</s>初始化前，另一线程可能同时进入初始化。应使用双重检查锁或在锁内再次验证。</p>
+      </div>
+      <div class="revision">
+        <div class="revision-label">复查修订（2026-08-31）：竞态属实，但「加锁初始化前」描述错误</div>
+        <p>实际代码<strong>没有任何锁</strong>：<code>@Volatile dictReady</code> 检查后直接无保护地初始化（ChineseG2p.kt:24-32），因此竞态比原文描述更直白——就是无保护的 check-then-act，可能重复初始化。修复建议（双重检查锁）不变。原行号 :27-32 修正为 :24-32。</p>
+      </div>
+    </div>
+
+    <!-- Impl 11 -->
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#45</span>
+        <span class="finding-title">ChatBubble 三个气泡 Composable 结构高度重复</span>
+        <div class="finding-tags"><span class="tag tag-cat">重复</span><span class="tag tag-severity-low">DRY</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">ui/component/ChatBubble.kt</span> :54-174</div>
+      <div class="finding-body">
+        <p><code>UserBubble</code>/<code>AssistantBubble</code>/<code>SystemBanner</code> 均为 <code>Row/Box + clip + background + padding</code>，且 <code>widthIn(max = 280.dp)</code>、<code>lineHeight = 22.sp</code>、<code>alpha</code> 叠加逻辑在三个函数里复制。应抽 <code>BubbleContainer(shape, color, content)</code>。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Section 5: Cross-cutting ============ -->
+  <div class="section" id="sec5">
+    <div class="section-title">五、跨文件共性问题</div>
+
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#46</span>
+        <span class="finding-title">CancellationException 处理不一致</span>
+        <div class="finding-tags"><span class="tag tag-cat">并发</span><span class="tag tag-severity-mid">一致性</span></div>
+      </div>
+      <div class="finding-body">
+        <p>项目内对 <code>CancellationException</code> 的处理风格不统一：</p>
+        <ul>
+          <li>正确：<code>ChatService</code>、<code>ConversationStore.load</code>、<code>runCatchingLog</code> 均显式重抛</li>
+          <li>错误：<code>ApiResponse.modelIds</code> 的 <code>catch (_: Exception)</code> 吞掉取消</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#47</span>
+        <span class="finding-title">Pair 作返回/承载类型多处出现</span>
+        <div class="finding-tags"><span class="tag tag-cat">命名</span><span class="tag tag-severity-low">可读性</span></div>
+      </div>
+      <div class="finding-body">
+        <p><code>ChatService.sendMessage</code> 返 <code>Pair&lt;ChatMessage,ChatMessage&gt;</code>、<code>SystemBubblePolicy.computeNextLife</code> 返 <code>Pair&lt;Long,Int&gt;</code>、<code>SettingsViewModel.checkForUpdate</code> 解构 <code>Pair(message,url)</code>。均应换命名 data class。</p>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-id">#48</span>
+        <span class="finding-title">ChatService.sendMessage 超长方法（约 100 行）</span>
+        <div class="finding-tags"><span class="tag tag-cat">超长方法</span><span class="tag tag-severity-mid">可维护性</span></div>
+      </div>
+      <div class="file-ref">文件: <span class="path">chat/ChatService.kt</span> :58-159</div>
+      <div class="finding-body">
+        <p>单一方法承担：建用户消息 → 取记忆 → 取设置 → 组装上下文 → 构建请求 → 发请求 → 解析 → 剥离协议块 → 入史 → 触发事后处理。职责过多，应拆分为 <code>buildRequest()</code>、<code>parseAssistantReply()</code>、<code>schedulePostProcess()</code> 等。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Section 6: Roadmap ============ -->
+  <div class="section" id="sec6">
+    <div class="section-title">六、优先级修复路线图（2026-08-31 复查修订版）</div>
+
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-title">P0 — 立即修复（真实用户可见缺陷，工作量均很小）</span>
+      </div>
+      <div class="finding-body">
+        <ul>
+          <li><strong>#4</strong> clearConversation 误清状态（真实用户可见 bug）— 改 copy 而非整体重建</li>
+          <li><strong>#7</strong> ConversationStore 静默丢数据（真实数据丢失）— 检测 collector 存活</li>
+          <li><strong>#3</strong> ConversationManager.trimWindow 破坏消息顺序（影响有限）— 就地裁剪</li>
+          <li><strong>#5</strong> MarkdownText 缓存键不全（仅 textSizePx 会发散）— 纳入全部构造参数</li>
+          <li><strong>#2 / #46</strong> ApiResponse.modelIds 吞 CancellationException（危害极低，为统一约定而修）— 显式重抛</li>
+        </ul>
+        <div class="revision">
+          <div class="revision-label">复查修订</div>
+          <p>原 P0 中 <strong>#1 已降级</strong>（CME 实际不可能，移入 P2 加固）、<strong>#6 已撤回</strong>（条件调用 collectAsState 是合法 Compose 用法，非缺陷）。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-title">P1 — 近期处理（先稳定性 / ANR，后架构重构）</span>
+      </div>
+      <div class="finding-body">
+        <ul>
+          <li><strong>#37</strong> SettingsManager.currentPrefs 消除主线程 runBlocking（启动期 ANR 风险，优先）</li>
+          <li><strong>#15</strong> PrivacyConsentManager 统一存储源 + 消除主线程 runBlocking（ANR 边缘）</li>
+          <li><strong>#36</strong> 消除 onResume 16ms 自旋忙等（改 Flow 订阅/回调）</li>
+          <li><strong>#38</strong> LogExporter waitFor() 加超时 + destroyForcibly 兜底</li>
+          <li><strong>#18</strong> ApiException 解析网关 error.message，改善报错体验</li>
+          <li><strong>#8-9</strong> 拆分 God Class（Live2dDelegate / ChatViewModel / SettingsViewModel）</li>
+          <li><strong>#10</strong> companion var 回调改事件总线/接口注入</li>
+          <li><strong>#11</strong> 消息源统一为 ConversationManager 单一真相源</li>
+          <li><strong>#12</strong> Live2dModel 的 Activity.finish() 改为回调上层</li>
+          <li><strong>#13</strong> 服务定位器改 CompositionLocal（实际超过 3 处调用点）</li>
+          <li><strong>#14</strong> 并发原语统一为协程友好模型（含 #1 lifeMap 加固一并处理）</li>
+          <li><strong>#16</strong> 客户端生命周期统一由容器管理</li>
+          <li><strong>#19</strong> MemoryRepository.getRelevant() 读写分离（CQS）</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="finding-header">
+        <span class="finding-title">P2 — 持续改善（异味 / 惯用法 / 性能）</span>
+      </div>
+      <div class="finding-body">
+        <ul>
+          <li><strong>#20-21</strong> SettingsManager/SettingsViewModel 样板代码用泛型委托消除（数量以复查值为准）</li>
+          <li><strong>#22-23</strong> 魔法数字提常量；UI 文案抽 strings.xml、SystemPrompt 移 assets</li>
+          <li><strong>#25-26</strong>、<strong>#45</strong> 重复代码提取公共基类/组件</li>
+          <li><strong>#35</strong> MainActivity.onCreate 拆方法</li>
+          <li><strong>#39</strong> MarkdownText 缓存 Spanned 避免流式卡顿（性能收益最直接）</li>
+          <li><strong>#40-44</strong> O(n²) 过滤、稠密矩阵、全量重写 JSON、三次开流、ensureDict 竞态</li>
+          <li><strong>#1</strong> lifeMap 加固：注明主线程约束或 actor 化（随 #14 一并处理）</li>
+          <li><strong>#17 / #24 / #47</strong> Pair/Triple 换命名 data class</li>
+          <li><strong>#27-34</strong> 空 catch 补注释、死代码清理、EXCHANGE_COUNT 另立仓储、isStreaming 移出领域模型、ChatUiState 拆分、文档修正、AnimatedVisibility、依赖版本拉齐</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <hr>
+  <p style="color: var(--text-dim); font-size: 13px; text-align: center;">
+    审查范围：app/src/main/java 下 17 个包共 ~80 个 Kotlin 源文件 + Gradle 配置 + AndroidManifest<br>
+    审查工具：静态代码分析 + 人工逐文件审查<br>
+    审查日期：2026-08-31　·　复查修订：2026-08-31（对照 dev 分支源码逐条核实：属实 41 / 部分属实 6 / 不属实 1，黄色「复查修订」块为修订标注）<br>
+    配套文档：仓库根目录 <code>code-review-triage.md</code>
+  </p>
+
+</div>
+
+
+</div></div></div><div data-trae-edit-ui="true" class="trae-image-download-btn" title="Download image" style="position: fixed; display: none; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; background: var(--trae-bg-menu, #222427); border: 1px solid var(--trae-border-l2, rgba(255,255,255,0.12)); box-shadow: var(--trae-floating-shadow, 0px 2px 8px 0px rgba(0,0,0,0.2)); color: var(--trae-icon-default, #f5f9fe); cursor: pointer; z-index: 89990; transition: background 0.15s; pointer-events: auto;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M8 2v8m0 0L5 7m3 3l3-3M3 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
+    </svg></div></body></html>

@@ -52,11 +52,14 @@ class ConversationStore(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    init {
-        scope.launch(Dispatchers.IO) {
-            pending.collect { snapshot ->
-                persist(snapshot)
-            }
+    /**
+     * 落盘 collector 协程。保留引用以便 [persistAsync] 检测其存活：
+     * 传入 scope 一旦被取消，collector 结束，之后所有 emit 都无人消费——
+     * 不检测的话数据静默丢失。
+     */
+    private val persistJob = scope.launch(Dispatchers.IO) {
+        pending.collect { snapshot ->
+            persist(snapshot)
         }
     }
 
@@ -85,6 +88,11 @@ class ConversationStore(
 
     /** 提交当前会话快照，异步合并落盘（不阻塞调用方）。 */
     fun persistAsync(snapshot: List<ChatMessage>) {
+        // scope 已取消时 collector 不在，emit 会静默丢弃——至少告警暴露问题
+        if (!persistJob.isActive) {
+            Log.w(TAG, "Persist collector inactive (scope cancelled?); dropping snapshot of ${snapshot.size} messages")
+            return
+        }
         pending.tryEmit(snapshot)
     }
 

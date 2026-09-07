@@ -1,6 +1,7 @@
 package com.meapet.mobile.viewmodel
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.meapet.mobile.chat.ChatMessage
@@ -24,6 +25,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
+
+/**
+ * 单条系统气泡的生命周期状态。
+ *
+ * @property deadlineMs 到期移除时刻（[SystemClock.elapsedRealtime] 基准，单调不受改表影响）
+ * @property job 到期移除任务
+ * @property reduceCount 已被「挤旧」扣减的次数（上限 [SystemBubblePolicy.MAX_REDUCE_COUNT]）
+ */
+private data class BubbleLife(
+    val deadlineMs: Long,
+    val job: Job,
+    val reduceCount: Int
+)
 
 /**
  * 聊天界面 ViewModel。
@@ -73,21 +88,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         // 监听 Live2D 触摸分区事件→添加系统消息气泡
         // 每条气泡独立生命周期，从产生开始倒计时 7 秒。
-        // 新消息到达时按位置自动扣除旧气泡的剩余寿命：
+        // 新消息到达时按位置扣除旧气泡的剩余寿命（扣的是「还剩多久」，不是重新计时）：
         //   position 1-3（最新）→ 不扣
         //   position 4-5          → 扣 2 秒
         //   position 6+（最旧）→ 扣 4 秒（首次扣 2 秒 + 再次扣 2 秒）
         viewModelScope.launch {
-            // msgId → (剩余毫秒, 移除Job, 已扣减次数)
-            val lifeMap = LinkedHashMap<String, Triple<Long, Job, Int>>()
+            // msgId → 气泡生命周期（到期时刻 / 移除Job / 已扣减次数）
+            // 线程约束：lifeMap 无同步，安全性依赖「所有读写都经 viewModelScope.launch
+            // 运行在 Dispatchers.Main.immediate 单线程上」这一前提（collect 协程写、
+            // scheduleRemove 协程删）。若未来把任一访问挪到别的调度器，必须改用
+            // Mutex / actor 保护，否则会并发修改非线程安全 Map。
+            val lifeMap = LinkedHashMap<String, BubbleLife>()
 
             Live2dManager.tapMessageEvent.collect { text ->
                 val newMsg = ChatMessage(role = ChatRole.system, content = text)
                 _state.update { it.copy(messages = it.messages + newMsg) }
 
+                // 本轮统一取一次「现在」，保证新气泡定寿命与旧气泡扣寿命同基准
+                val now = SystemClock.elapsedRealtime()
+
                 // 为本条启动独立倒计时，初始寿命见 SystemBubblePolicy
                 val job = scheduleRemove(lifeMap, newMsg.id, SystemBubblePolicy.BASE_LIFE_MS)
-                lifeMap[newMsg.id] = Triple(SystemBubblePolicy.BASE_LIFE_MS, job, 0)
+                lifeMap[newMsg.id] = BubbleLife(now + SystemBubblePolicy.BASE_LIFE_MS, job, 0)
 
                 // 重新排位：按 timestamp 降序（最新在前），重新分配剩余寿命
                 val sysIds = _state.value.messages
@@ -98,16 +120,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 sysIds.forEachIndexed { index, id ->
                     val position = index + 1 // 1 = 最新
                     val entry = lifeMap[id] ?: return@forEachIndexed
-                    val (currentLife, oldJob, reduceCount) = entry
 
-                    // 按排位扣减寿命（策略见 SystemBubblePolicy）
-                    val (newLife, newCount) =
-                        SystemBubblePolicy.computeNextLife(currentLife, reduceCount, position)
+                    // 按排位扣减剩余寿命（策略见 SystemBubblePolicy）
+                    val (newDeadline, newCount) = SystemBubblePolicy.computeNextDeadline(
+                        deadlineMs = entry.deadlineMs,
+                        nowMs = now,
+                        reduceCount = entry.reduceCount,
+                        position = position
+                    )
 
-                    if (newLife != currentLife) {
-                        oldJob.cancel()
-                        val newJob = scheduleRemove(lifeMap, id, newLife)
-                        lifeMap[id] = Triple(newLife, newJob, newCount)
+                    if (newDeadline != entry.deadlineMs) {
+                        entry.job.cancel()
+                        val newJob = scheduleRemove(lifeMap, id, newDeadline - now)
+                        lifeMap[id] = BubbleLife(newDeadline, newJob, newCount)
                     }
                 }
             }
@@ -181,8 +206,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             current.drop(idxInCurrent + 1)
         } else {
             // 分界消息在当前列表里找不到（极端情况：history 整体都领先于 current），
-            // 保守起见保留 current 末尾最近的几条（系统气泡等短生命周期消息）
-            current.takeLast(5)
+            // 保守起见保留 current 末尾最近的几条（系统气泡等短生命周期消息）。
+            // 必须再按时间戳过滤：本分支下"末尾几条"里可能混着已经在历史里、
+            // 只是 id 不同的副本（如失败发送残留的同一句话），只保留确实比历史
+            // 更新的消息，才符合"history 之后才是新追加"这一合并前提。
+            val lastHistoryTs = history.last().timestamp
+            current.takeLast(5).filter { it.timestamp > lastHistoryTs }
         }
         // 去重：tailExtra 里若已包含 history 中出现的 id（如悬浮窗已落库），去掉
         val tailExtraDeduped = tailExtra.filter { it.id !in historyIds }
@@ -233,7 +262,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         sendJob = viewModelScope.launch {
-            val result = chatService.sendMessage(content)
+            // 传入乐观消息本身：入史与 UI 共用同一个 id，reloadHistory 合并时才认得出
+            // 是同一条（各建一条会让同一句话有两个 id，一次 resume 就并列成两条）
+            val result = chatService.sendMessage(userMessage)
             result.fold(
                 onSuccess = { (userMsg, assistantMsg) ->
                     _state.update { current ->
@@ -273,17 +304,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         sendJob = viewModelScope.launch {
-            val result = chatService.retryLastMessage()
+            // 重试目标由 UI 指定：失败的消息已被回滚出历史，服务端侧再去"取历史里最后
+            // 一条 user"会重发另一条早已成功的消息
+            val result = chatService.retryMessage(lastUserMsg)
             result.fold(
                 onSuccess = { (userMsg, assistantMsg) ->
                     _state.update { current ->
-                        val updated = current.messages
-                            .filterNot { msg ->
-                                msg.id == lastUserMsg.id || (
-                                    msg.isAssistant && current.messages.indexOf(msg) >
-                                        current.messages.indexOfLast { it.id == lastUserMsg.id }
-                                )
+                        // 分界一次性定位（原实现 indexOf 套 filterNot 为 O(n²)）：
+                        // 去掉该 user 消息本身，及其之后的所有 assistant 回复
+                        val cutIndex = current.messages.indexOfLast { it.id == lastUserMsg.id }
+                        val updated = current.messages.filterIndexed { index, msg ->
+                            when {
+                                // 目标消息一律剔除（下面重新追加），无论它在列表哪个位置——
+                                // 只按 index <= cutIndex 判断的话，重复副本会被漏掉，
+                                // 追加后 LazyColumn 就拿到两个相同 key 而崩溃
+                                msg.id == lastUserMsg.id -> false
+                                // cutIndex < 0（目标已不在列表，理论上不可达）时不删任何
+                                // assistant：此时全部下标都 > -1，否则等于清空界面所有回复
+                                cutIndex >= 0 && index > cutIndex -> !msg.isAssistant
+                                else -> true
                             }
+                        }
                         current.copy(
                             messages = updated + listOf(userMsg, assistantMsg),
                             isLoading = false
@@ -312,7 +353,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         sendJob = null
         chatService.clearHistory()
         _state.update {
-            ChatUiState(memoryContextInfo = "对话已清除")
+            // 只清对话相关字段，保留 updateNotice / memoryDialog 等无关状态
+            it.copy(
+                messages = emptyList(),
+                isLoading = false,
+                error = null,
+                inputText = "",
+                memoryContextInfo = "对话已清除"
+            )
         }
     }
 
@@ -385,21 +433,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * 调度系统气泡的延时移除，返回对应的 Job。
-     * @param lifeMap 更新此 map 中的条目
+     * @param lifeMap 到期后从此 map 中摘掉对应条目
      * @param msgId 消息 ID
-     * @param delayMs 剩余毫秒数
+     * @param delayMs 距到期还有多少毫秒（≤0 表示立即到期）
      */
     private fun scheduleRemove(
-        lifeMap: MutableMap<String, Triple<Long, Job, Int>>,
+        lifeMap: MutableMap<String, BubbleLife>,
         msgId: String,
         delayMs: Long
     ): Job = viewModelScope.launch {
-        if (delayMs <= 0) {
-            removeBubble(msgId)
-            lifeMap.remove(msgId)
-            return@launch
-        }
-        kotlinx.coroutines.delay(delayMs.milliseconds)
+        // 必须先让出一次再动 lifeMap：viewModelScope 用 Dispatchers.Main.immediate，
+        // delay(0) 不会挂起，协程体会同步跑在调用方写回 lifeMap 之前，
+        // 于是刚被摘掉的条目又被写回去，留下持有已完成 Job 的僵尸条目。
+        if (delayMs > 0) kotlinx.coroutines.delay(delayMs.milliseconds) else yield()
         removeBubble(msgId)
         lifeMap.remove(msgId)
     }
