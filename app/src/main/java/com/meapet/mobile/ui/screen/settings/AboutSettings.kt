@@ -95,7 +95,7 @@ internal fun AppInfoSection() {
 
     Spacer(Modifier.height(6.dp))
     Text(
-        "技术栈：Live2D Cubism · Jetpack Compose · Ktor · Coroutines",
+        "技术栈：Live2D Cubism · Jetpack Compose · Ktor · Markwon · Coroutines · GLSurfaceView",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = ALPHA_MUTED_TEXT),
         modifier = Modifier.padding(bottom = 8.dp)
