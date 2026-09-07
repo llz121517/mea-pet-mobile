@@ -1,31 +1,45 @@
 package com.meapet.mobile.ui.component
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.text.method.LinkMovementMethod
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.TextView
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import io.noties.markwon.Markwon
 import io.noties.markwon.core.CorePlugin
 import io.noties.markwon.ext.latex.JLatexMathPlugin
@@ -38,6 +52,7 @@ import ru.noties.jlatexmath.JLatexMathAndroid
 import org.scilab.forge.jlatexmath.TeXFormula
 import android.util.Log
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.roundToInt
 
 /**
  * LaTeX 初始化（一次性）。
@@ -95,6 +110,17 @@ internal fun normalizeLatexDelimiters(src: String): String {
 private data class MarkwonKey(val dark: Boolean, val textSizePx: Float, val tableBorder: Int)
 
 /**
+ * 表格斑马底色：中性低透明叠加色，浅/深色各一套。
+ *
+ * 表头行稍实（约 12%）、数据行极淡交替（5% / 透明）——让表格块与普通正文可辨，
+ * 又不抢戏。颜色不随气泡透明度衰减（与边框色同理，避免滑杆拖动时重建 Markwon），
+ * 想调整对比度改这三处即可。
+ */
+private fun tableHeaderRowBg(dark: Boolean): Int = if (dark) 0x1FFFFFFF else 0x1F000000
+private fun tableEvenRowBg(dark: Boolean): Int = if (dark) 0x0DFFFFFF else 0x0D000000
+private fun tableOddRowBg(dark: Boolean): Int = 0x00000000
+
+/**
  * Markdown 渲染工厂。
  *
  * Markwon 实例按 [MarkwonKey] 缓存（公式字体等插件初始化开销较大，避免逐条消息重建）。
@@ -113,6 +139,12 @@ private fun obtainMarkwon(context: Context, dark: Boolean, textSizePx: Float, ta
             .usePlugin(TablePlugin.create(
                 TableTheme.Builder()
                     .tableBorderColor(tableBorder)
+                    .tableHeaderRowBackgroundColor(tableHeaderRowBg(dark))
+                    .tableEvenRowBackgroundColor(tableEvenRowBg(dark))
+                    .tableOddRowBackgroundColor(tableOddRowBg(dark))
+                    .tableCellPadding(
+                        (TABLE_CELL_PADDING.value * context.resources.displayMetrics.density).roundToInt()
+                    )
                     .build()
             ))
             // LaTeX 公式：块级默认开启；显式打开行内（Markwon 4.6.2 行内默认关闭）。
@@ -157,8 +189,38 @@ internal fun markdownTableColumns(src: String): Int =
 /** 表格每列的最小宽度（dp）。约 6 个汉字，低于此值单元格就会逐字换行。 */
 private const val MIN_TABLE_COLUMN_WIDTH_DP = 88
 
+/**
+ * 单元格文字距格线/表边的内边距（dp，四边统一）。
+ * Markwon 默认 0 → 首列文字会贴它左边那根竖线；稍加一点更透气。
+ */
+private val TABLE_CELL_PADDING = 3.dp
+
 /** 表格与相邻段落之间的间距（dp）。拆成多个 TextView 后需手工补上原本的段间距。 */
 private val SEGMENT_SPACING = 8.dp
+
+/** 宽表格滚动窗内、首/末列距窗缘的内边距（dp）：最左列文字不贴窗缘，留点呼吸。 */
+private val TABLE_SCROLL_EDGE_INSET = 2.dp
+
+/** 底部横向缩略条的胶囊高度（dp）。 */
+private val SCROLL_INDICATOR_HEIGHT = 3.dp
+
+/** 表格末行之下为缩略条预留的空白区（dp），胶囊纵向居中于此，避免盖住末行。 */
+private val SCROLL_INDICATOR_RESERVE = 12.dp
+
+/** 胶囊透明度（乘到主题 primary 上，取淡）。 */
+private const val SCROLL_INDICATOR_ALPHA = 0.45f
+
+/** 胶囊最小长度（dp），超宽表格内容再多也保留可拖的视觉块。 */
+private val SCROLL_INDICATOR_MIN_WIDTH = 8.dp
+
+/** 拖过头(overscroll)时胶囊最大拉长量（dp）：超过后封顶，松手弹回。 */
+private val TABLE_OVERSCROLL_MAX = 18.dp
+
+/** 拖过头量累积时的阻尼（0..1）。 */
+private const val TABLE_OVERSCROLL_DAMPING = 0.5f
+
+/** 胶囊随 overscroll 拉长的放大系数（1.0 = 拉长量与过头量 1:1）。 */
+private const val PILL_OVERSCROLL_SCALE = 1.0f
 
 /**
  * 消息正文的分段：表格与普通文本必须分开渲染。
@@ -362,16 +424,19 @@ private fun MarkdownBody(
 }
 
 /**
- * 宽表格 → 可横向滚动的 TextView。
+ * 宽表格 → 固定内缩的可横向滚动窗，底部附主题色胶囊缩略条。
+ *
+ * 横向滚动窗整体在气泡内左右固定内缩 [horizontalPadding]（用 Compose `padding` 施加），
+ * 气泡底色在表格左右**恒定透出**——这是真正"可见"的留白。内容只在窗内滚动、不滑进边距，
+ * 因此不需要 `clipToPadding=false`。
  *
  * Markwon 的表格没有横向滚动能力：`TableRowSpan` 把行宽均分成列宽，而它拿到的宽度就是
  * TextView 的内容宽度（`SpanUtils.width` → `textView.width - 左右 padding`）。所以必须由
  * 外部把 TextView 撑到 [contentWidth] 再套进滚动容器——但**不能靠 `layoutParams.width`**，
  * 见 [FixedContentWidthScrollView]。
  *
- * [horizontalPadding] 加在滚动容器上并配 `clipToPadding=false`：静止时表格首/末列距气泡
- * 边缘留出内边距，滚动过程中内容却能画进内边距区域，不会在离气泡边缘还有一段的位置
- * 凭空消失（那正是"气泡边缘遮住文字"的观感来源）。
+ * 胶囊缩略条画在 Compose 层（下方给表格预留 [SCROLL_INDICATOR_RESERVE] 空白），
+ * 固定在窗内、只按滚动**比例**滑动，绝不会被画进内容里跟着整表平移。
  */
 @Composable
 private fun ScrollableMarkdownBody(
@@ -383,33 +448,93 @@ private fun ScrollableMarkdownBody(
     horizontalPadding: Dp,
 ) {
     val density = LocalDensity.current
-    val paddingPx = with(density) { horizontalPadding.roundToPx() }
     val contentWidthPx = with(density) { contentWidth.roundToPx() }
+    val edgeInsetPx = with(density) { TABLE_SCROLL_EDGE_INSET.roundToPx() }
+    val indicatorReservePx = with(density) { SCROLL_INDICATOR_RESERVE.roundToPx() }
+    val indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = SCROLL_INDICATOR_ALPHA)
+    // 滚动比例（0..1），驱动胶囊位置；在 Canvas 的 draw 里读它 → 只触发重绘、不整树重组
+    var fraction by remember { mutableFloatStateOf(0f) }
+    // 拖过头量（px），驱动胶囊被拉长；同样在 draw 里读
+    var overscrollPx by remember { mutableFloatStateOf(0f) }
     val parsed = remember(markwon, source) { markwon.toMarkdown(source) }
-    AndroidView(
-        factory = { ctx ->
-            FixedContentWidthScrollView(ctx).apply {
-                isHorizontalScrollBarEnabled = false
-                clipToPadding = false
-                addView(
-                    createMarkdownTextView(ctx),
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
+
+    BoxWithConstraints(modifier = Modifier.padding(horizontal = horizontalPadding)) {
+        // 内缩后的窗宽即可视宽；表格超宽时才滚动
+        val viewportPx = with(density) { maxWidth.roundToPx() }
+        val hasOverflow = contentWidthPx > viewportPx
+
+        Box {
+            AndroidView(
+                modifier = Modifier.fillMaxWidth(),
+                factory = { ctx ->
+                    FixedContentWidthScrollView(ctx).apply {
+                        isHorizontalScrollBarEnabled = false
+                        addView(
+                            createMarkdownTextView(ctx),
+                            FrameLayout.LayoutParams(
+                                ViewGroup.LayoutParams.WRAP_CONTENT,
+                                ViewGroup.LayoutParams.WRAP_CONTENT
+                            )
+                        )
+                    }
+                },
+                update = { scroll ->
+                    scroll.contentWidth = contentWidthPx
+                    // 底部预留 = 胶囊区（末行不延伸其下）；左右各留 [TABLE_SCROLL_EDGE_INSET]，
+                    // 最左列文字不贴窗缘
+                    scroll.setPadding(edgeInsetPx, 0, edgeInsetPx, indicatorReservePx)
+                    val tv = scroll.getChildAt(0) as TextView
+                    tv.setTextColor(textColor.toArgb())
+                    tv.setHintTextColor(codeBg.toArgb())
+                    tv.setLinkTextColor(ColorStateList.valueOf(textColor.toArgb()))
+                    markwon.setParsedMarkdown(tv, parsed)
+                    if (contentWidthPx > 0) {
+                        scroll.setOnScrollChangeListener { _, scrollX, _, _, _ ->
+                            val range = (contentWidthPx - scroll.width).coerceAtLeast(1)
+                            fraction = (scrollX.toFloat() / range).coerceIn(0f, 1f)
+                        }
+                    }
+                    scroll.onOverscroll = { px -> overscrollPx = px }
+                }
+            )
+
+            // 胶囊缩略条：固定在窗内下沿预留区，长度 = 可见比例，位置 = 滚动比例
+            if (hasOverflow) {
+                Canvas(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(SCROLL_INDICATOR_RESERVE)
+                ) {
+                    val vp = size.width
+                    if (contentWidthPx <= vp) return@Canvas
+                    val barH = with(density) { SCROLL_INDICATOR_HEIGHT.toPx() }
+                    val minW = with(density) { SCROLL_INDICATOR_MIN_WIDTH.toPx() }
+                    val baseW = (vp * vp / contentWidthPx).coerceAtLeast(minW)
+                    var w = baseW
+                    var l = (vp - baseW) * fraction
+                    val over = overscrollPx * PILL_OVERSCROLL_SCALE
+                    if (over > 0f) {
+                        if (fraction > 0.5f) {
+                            // 右端被拉过头：右缘钉住，往左拉长
+                            w = (baseW + over).coerceAtMost(vp)
+                            l = (vp - w).coerceAtLeast(0f)
+                        } else {
+                            // 左端被拉过头：左缘钉住，往右拉长
+                            w = (baseW + over).coerceAtMost(vp)
+                        }
+                    }
+                    val barY = (size.height - barH) / 2f
+                    drawRoundRect(
+                        color = indicatorColor,
+                        topLeft = Offset(l, barY),
+                        size = Size(w, barH),
+                        cornerRadius = CornerRadius(barH / 2f)
                     )
-                )
+                }
             }
-        },
-        update = { scroll ->
-            scroll.setPadding(paddingPx, 0, paddingPx, 0)
-            scroll.contentWidth = contentWidthPx
-            val tv = scroll.getChildAt(0) as TextView
-            tv.setTextColor(textColor.toArgb())
-            tv.setHintTextColor(codeBg.toArgb())
-            tv.setLinkTextColor(ColorStateList.valueOf(textColor.toArgb()))
-            markwon.setParsedMarkdown(tv, parsed)
         }
-    )
+    }
 }
 
 /**
@@ -437,6 +562,70 @@ private class FixedContentWidthScrollView(context: Context) : HorizontalScrollVi
                 requestLayout()
             }
         }
+
+    /** 拖过头(overscroll)量回调（px>0；松手动画归零）。驱动胶囊拉长。 */
+    var onOverscroll: ((Float) -> Unit)? = null
+
+    private var downX = 0f
+    private var overPx = 0f
+    private var springAnim: ValueAnimator? = null
+
+    private fun scrollRange(): Int =
+        (contentWidth - (width - paddingLeft - paddingRight)).coerceAtLeast(0)
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                springAnim?.cancel()
+                springAnim = null
+                overPx = 0f
+                downX = event.x
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.x - downX
+                downX = event.x
+                val range = scrollRange()
+                // 已到右端还往左拖 / 已到左端还往右拖 → 过头量
+                val atRightOver = range > 0 && scrollX >= range - 1 && dx < 0f
+                val atLeftOver = range > 0 && scrollX <= 1 && dx > 0f
+                val gain = when {
+                    atRightOver -> -dx
+                    atLeftOver -> dx
+                    else -> 0f
+                }
+                if (gain > 0f) {
+                    val maxPx = TABLE_OVERSCROLL_MAX.value * resources.displayMetrics.density
+                    overPx = (overPx + gain * TABLE_OVERSCROLL_DAMPING).coerceAtMost(maxPx)
+                    onOverscroll?.invoke(overPx)
+                } else if (overPx > 0f) {
+                    // 往回拖 = 释放：过头量随之减小，更跟手
+                    val releasing = if (scrollX >= range - 1) dx > 0f else dx < 0f
+                    if (releasing) {
+                        val back = if (dx > 0f) dx else -dx
+                        overPx = (overPx - back * TABLE_OVERSCROLL_DAMPING).coerceAtLeast(0f)
+                        onOverscroll?.invoke(overPx)
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> springBack()
+        }
+        return super.onTouchEvent(event)
+    }
+
+    private fun springBack() {
+        if (overPx <= 0f) return
+        val from = overPx
+        springAnim?.cancel()
+        springAnim = ValueAnimator.ofFloat(from, 0f).apply {
+            duration = 240L
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { anim ->
+                overPx = anim.animatedValue as Float
+                onOverscroll?.invoke(overPx)
+            }
+            start()
+        }
+    }
 
     override fun measureChild(child: View, parentWidthMeasureSpec: Int, parentHeightMeasureSpec: Int) {
         child.measure(
