@@ -30,7 +30,45 @@ val umengPolicyUrl: String = localProperties.getProperty("app.umengPolicyUrl", "
 // TTS 模型下载地址（开源分叉时按需替换；缺省为空表示未配置，设置里下载入口将提示）
 val ttsModelBaseUrl: String = localProperties.getProperty("app.ttsModelBaseUrl", "") ?: ""
 
+// 打包的原生库 ABI 过滤：gradle -PappAbi=v7a|v8a|both（缺省 both = v8a + v7a）。
+// 供 tools/build-release.* 依次产出分 ABI 的 release APK；v7a/v8a 各自只带对应 so。
+val appAbi: String = (project.findProperty("appAbi") as String?) ?: "both"
+
+// ── Release 签名 ──
+// 证书信息优先读环境变量，其次读根目录 keystore.properties（gitignored，模板见 keystore.properties.example）。
+// 四者齐备且 keystore 文件存在时才给 release 配置签名；否则保持未签名（无证书也能 assembleRelease）。
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
+}
+fun signingValue(envKey: String, propKey: String): String? =
+    System.getenv(envKey) ?: keystoreProperties.getProperty(propKey)
+val releaseStoreFile: File? = signingValue("KEYSTORE_STORE_FILE", "storeFile")?.let { path ->
+    File(path).let { if (it.isAbsolute) it else rootProject.file(path) }
+}
+val releaseStorePassword: String? = signingValue("KEYSTORE_STORE_PASSWORD", "storePassword")
+val releaseKeyAlias: String? = signingValue("KEYSTORE_KEY_ALIAS", "keyAlias")
+val releaseKeyPassword: String? = signingValue("KEYSTORE_KEY_PASSWORD", "keyPassword")
+val canSignRelease: Boolean =
+    releaseStoreFile != null && releaseStoreFile!!.isFile &&
+        !releaseStorePassword.isNullOrEmpty() &&
+        !releaseKeyAlias.isNullOrEmpty() &&
+        !releaseKeyPassword.isNullOrEmpty()
+
 android {
+    signingConfigs {
+        if (canSignRelease) {
+            create("release") {
+                storeFile = releaseStoreFile!!
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     namespace = "com.meapet.mobile"
     compileSdk {
         version = release(36) {
@@ -48,7 +86,12 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            // 按 -PappAbi 过滤原生库（v7a / v8a / both），供分 ABI 构建；注释见文件顶 appAbi
+            abiFilters += when (appAbi) {
+                "v7a" -> listOf("armeabi-v7a")
+                "v8a" -> listOf("arm64-v8a")
+                else -> listOf("arm64-v8a", "armeabi-v7a")
+            }
         }
 
         // 友盟 AppKey 通过 BuildConfig 注入，源码中不硬编码
@@ -75,6 +118,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // 证书齐备（keystore.properties / 环境变量）时签名，否则保持未签名
+            if (canSignRelease) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {

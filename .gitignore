@@ -18,3 +18,7 @@ local.properties
 /.idea/
 /.kotlin/
 /.claude/
+
+# 本地签名证书与构建产物
+/keystore.properties
+/dist/
