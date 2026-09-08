@@ -7,6 +7,10 @@ on:
     branches: [dev, main]
   workflow_dispatch:
 
+env:
+  # Live2D Cubism Core SDK 版本
+  CUBISM_SDK_VERSION: 5-r.5
+
 jobs:
   unit-test:
     name: 单元测试
@@ -15,7 +19,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 安装 JDK 21（与 gradle-daemon-jvm.properties 对齐）
+      - name: 安装 JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -23,13 +27,32 @@ jobs:
           cache: gradle
 
       # ubuntu runner 自带 Android SDK（含已接受许可证），AGP 会补齐缺失的 platform/build-tools
+
+      # Live2D Cubism Core 受 Live2D 专有许可保护、不随仓库提交（app/libs/.gitignore 排除），
+      # 在此从官方直链下载 Cubism Java SDK，解出 Core/android 下的 aar 再跑测试。
+      # 已本地验证：该直链 aar 与应用内使用的 aar md5 一致。
+      - name: 下载 Live2D Cubism Core
+        run: |
+          set -euo pipefail
+          CORE="app/libs/Live2DCubismCore.aar"
+          if [ ! -f "$CORE" ]; then
+            ZIP="CubismSdkForJava-${CUBISM_SDK_VERSION}.zip"
+            curl -fL --retry 3 --retry-delay 2 -o "$ZIP" \
+              "https://cubism.live2d.com/sdk-java/bin/${ZIP}?event=cubism_sdk_download&sdk_type=Java&user_status=update&user_type=&version=${CUBISM_SDK_VERSION}&lang=en"
+            unzip -o -q "$ZIP" "CubismSdkForJava-${CUBISM_SDK_VERSION}/Core/android/Live2DCubismCore.aar"
+            mkdir -p app/libs
+            cp "CubismSdkForJava-${CUBISM_SDK_VERSION}/Core/android/Live2DCubismCore.aar" "$CORE"
+            rm -f "$ZIP"
+          fi
+          ls -l "$CORE"
+
       # Windows 提交者常丢失 gradlew 的 exec 位，chmod 兜底（exit 126 Permission denied）
       - name: 跑 JVM 单元测试
         run: |
           chmod +x ./gradlew
           ./gradlew :app:testDebugUnitTest --stacktrace
 
-      - name: 上传测试报告（失败也可查）
+      - name: 上传测试报告
         if: always()
         uses: actions/upload-artifact@v4
         with:
