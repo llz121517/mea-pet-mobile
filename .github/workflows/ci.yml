@@ -23,8 +23,11 @@ jobs:
           cache: gradle
 
       # ubuntu runner 自带 Android SDK（含已接受许可证），AGP 会补齐缺失的 platform/build-tools
+      # Windows 提交者常丢失 gradlew 的 exec 位，chmod 兜底（exit 126 Permission denied）
       - name: 跑 JVM 单元测试
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:testDebugUnitTest --stacktrace
 
       - name: 上传测试报告（失败也可查）
         if: always()
