@@ -52,6 +52,7 @@ import com.meapet.mobile.ui.theme.MeaPetTheme
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -384,6 +385,13 @@ class MainActivity : ComponentActivity() {
             Live2dDelegate.getInstance().onStop()
         } catch (e: Exception) {
             Log.e(TAG, "onStop error: ${e.message}")
+        }
+        // 会话历史确定性落盘：persistAsync 是合并写队列，进程被系统回收时可能来不及
+        // 落盘最新快照。进后台时同步补写一次（快照仅数十条消息，写入极快）。
+        try {
+            runBlocking { container.conversationManager.flush() }
+        } catch (e: Exception) {
+            Log.w(TAG, "conversation flush on stop failed: ${e.message}")
         }
     }
 

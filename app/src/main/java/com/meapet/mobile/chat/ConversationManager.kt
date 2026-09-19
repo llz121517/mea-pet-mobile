@@ -181,6 +181,18 @@ class ConversationManager(
     }
 
     /**
+     * 同步落盘当前会话快照，直到写完才返回。
+     *
+     * [persistAsync] 是 conflate 合并写队列，进程被系统回收时排队中的最新快照
+     * 可能来不及落盘。在 `onStop` / `onTrimMemory` 等「即将进后台或被杀」的时机
+     * 调用本方法补一次确定性落盘。纯内存无 store 时为 no-op。
+     */
+    suspend fun flush() {
+        val snapshot = synchronized(lock) { messages.toList() }
+        store?.persist(snapshot)
+    }
+
+    /**
      * 必须在持有 [lock] 时调用。
      *
      * 超限时一次裁掉 [trimBatch] 条而非刚好一条：逐条裁剪会让每轮请求的消息前缀

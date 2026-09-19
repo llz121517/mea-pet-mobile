@@ -6,16 +6,15 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 /**
  * 应用设置管理器。
@@ -24,8 +23,10 @@ import kotlinx.coroutines.runBlocking
  * UI 层可响应式订阅变更。
  *
  * 同步 getter 读取的是构造时在 IO 协程里预热、并持续跟随 DataStore 变更的
- * 内存快照，正常路径不会产生磁盘 IO；仅在进程启动后的极短窗口内快照尚未
- * 就绪时，才退化为一次 runBlocking 读盘兜底。
+ * 内存快照，全程不产生磁盘 IO；进程启动后快照尚未就绪的极短窗口内，读取
+ * 退化为空快照（各 getter 落到 [SettingsKeys.Defaults]），绝不阻塞主线程。
+ * 首帧主题等需要真实值的场景由对应的 Flow（如 MainActivity 的主题订阅）
+ * 在快照就绪后自动修正。
  *
  * 该模块**不依赖**任何其他模块，可独立测试。
  *
@@ -193,10 +194,10 @@ class SettingsManager(context: Context) {
     }
 
     // ── 同步 getter（非 Flow 场景使用，如 Client 构造）──
-    // 读取内存快照，正常路径无磁盘 IO；快照未就绪时短暂 runBlocking 读一次兜底
+    // 读取内存快照，全程无磁盘 IO；快照未就绪时返回空快照，各 getter 落到 Defaults，
+    // 绝不在主线程阻塞读盘（首帧真实值由对应 Flow 就绪后修正）
 
-    private fun currentPrefs(): Preferences =
-        cachedPrefs ?: runBlocking { dataStore.data.first() }.also { cachedPrefs = it }
+    private fun currentPrefs(): Preferences = cachedPrefs ?: emptyPreferences()
 
     fun getApiKey(): String = currentPrefs()[KEY_API_KEY] ?: ""
     fun getApiUrl(): String = currentPrefs()[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL

@@ -119,6 +119,10 @@ class MemoryManager(
 
         val facts = repository.getPersonaFacts(maxCount = config.maxPersonaFacts)
         val recollections = repository.getRelevant(currentInput, maxCount = config.maxContextMemories)
+        // 查询与访问记账分离（读写分离）：命中后单独记一次 LRU 权重，整批只落盘一次
+        if (recollections.isNotEmpty()) {
+            repository.markAccessed(recollections.map { it.id })
+        }
 
         val stable = buildString {
             append(MemoryOpsProtocol.instructions())
