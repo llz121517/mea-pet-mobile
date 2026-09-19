@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **设置同步读取不再阻塞主线程** — `SettingsManager` 的同步 getter 在内存快照尚未预热时，原先会 `runBlocking` 读盘兜底；改为返回空快照、各项落到默认值，首帧真实值由对应 Flow 就绪后自动修正，全程零主线程磁盘阻塞。
+- **记忆库写放大收敛** — 模型一轮声明的多条记忆操作原先逐条落盘（每条全量重写整库）；现收集后经 `applyChanges` 一次落盘。
+- **记忆检索读写分离** — `getRelevant` 改为纯查询（不再每次命中就整库落盘），访问计数由调用方在注入后经 `markAccessed` 单独记账，一次落盘。
+
+### Fixed
+
+- **进后台可能丢失最新会话历史** — 会话落盘是 conflate 合并写队列，进程被系统回收时排队快照可能来不及写盘；`onStop` 时同步补写一次，确保最新对话不丢。
+
+---
+
 ## [1.8.0] - 2026-11-01
 
 ### Changed
@@ -46,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`NOTICE.md` 补 TTS 第三方组件** — sherpa-onnx / ONNX Runtime，以及模型与 G2P 数据（JMdict、open_jtalk 词典、CMUdict、pypinyin、ruleFsts）和随 APK 分发的派生产物。
 
 ---
+
 
 ## [1.7.2] - 2026-09-11
 

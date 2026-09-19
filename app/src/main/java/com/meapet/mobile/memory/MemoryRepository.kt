@@ -79,6 +79,34 @@ class MemoryRepository(
         }
     }
 
+    /**
+     * 在一次持锁内应用一批新增/覆盖 + 删除，**整批只落盘一次**。
+     *
+     * 模型一轮回复常声明多条记忆操作（[MemoryService.applyOps]），逐条
+     * [save]/[delete] 会把整个记忆库全量重写同样多次（写放大）。本方法先在内存
+     * 里应用完所有变更，再统一 [persistLocked] 一次。
+     *
+     * @param upserts 要新增或按 id 覆盖的条目（按入参顺序应用）
+     * @param deleteIds 要删除的条目 id
+     */
+    suspend fun applyChanges(upserts: List<MemoryItem>, deleteIds: Collection<String> = emptyList()) {
+        if (upserts.isEmpty() && deleteIds.isEmpty()) return
+        mutex.withLock {
+            ensureLoadedLocked()
+            upserts.forEach { item ->
+                val idx = memories.indexOfFirst { it.id == item.id }
+                if (idx >= 0) memories[idx] = item
+                else memories.add(item)
+            }
+            if (deleteIds.isNotEmpty()) {
+                val set = deleteIds.toSet()
+                memories.removeAll { it.id in set }
+            }
+            enforceCapacity()
+            persistLocked()
+        }
+    }
+
     /** 根据 ID 查询。 */
     suspend fun findById(id: String): MemoryItem? = mutex.withLock {
         ensureLoadedLocked()
@@ -167,11 +195,14 @@ class MemoryRepository(
     }
 
     /**
-     * 获取与当前用户输入相关的短期/长期记忆。
+     * 获取与当前用户输入相关的短期/长期记忆。**纯读，不产生副作用。**
      *
      * 只匹配大模型创建记忆时给出的 [MemoryItem.keywords]（不再对 content 做切词/bigram）：
      * 关键词是模型精选出的检索词，直接用 `input.contains(keyword)` 判断命中，
      * 中英文都适用。事实/特质不参与这里的检索——它们每轮全量注入，见 [getPersonaFacts]。
+     *
+     * 命中条目的访问计数（LRU 权重）不在此更新：读写分离，由调用方在拿到结果后
+     * 显式调用 [markAccessed]，避免每次纯查询都整库落盘一次。
      *
      * @param userInput 当前对话上下文/用户输入
      * @param maxCount 最大返回条数
@@ -184,25 +215,37 @@ class MemoryRepository(
         }
         if (candidates.isEmpty()) return@withLock emptyList()
 
-        val scored = candidates.mapNotNull { item ->
+        candidates.mapNotNull { item ->
             if (item.keywords.isEmpty()) return@mapNotNull null
             val matched = item.keywords.count { kw -> kw.isNotBlank() && input.contains(kw.lowercase()) }
             if (matched == 0) return@mapNotNull null
             item to (matched.toFloat() / item.keywords.size * item.importance)
         }
-
-        val result = scored
             .sortedByDescending { it.second }
             .take(maxCount)
-            .map { (item, _) ->
-                item.accessed().also { updated ->
-                    val idx = memories.indexOfFirst { m -> m.id == item.id }
-                    if (idx >= 0) memories[idx] = updated
+            .map { it.first }
+    }
+
+    /**
+     * 标记一批记忆被访问（更新 accessCount / lastAccessedAt 的 LRU 权重），整批只落盘一次。
+     *
+     * 与 [getRelevant] 配对：查询是纯读，访问记账作为独立命令由调用方
+     * （[MemoryManager.buildContext]）在注入后显式触发。找不到的 id 静默跳过。
+     */
+    suspend fun markAccessed(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        mutex.withLock {
+            ensureLoadedLocked()
+            var changed = false
+            ids.toSet().forEach { id ->
+                val idx = memories.indexOfFirst { it.id == id }
+                if (idx >= 0) {
+                    memories[idx] = memories[idx].accessed()
+                    changed = true
                 }
             }
-        // 命中记忆的 accessCount/lastAccessedAt 已更新，落盘以免重启后 LRU 权重回退
-        if (result.isNotEmpty()) persistLocked()
-        result
+            if (changed) persistLocked()
+        }
     }
 
     /** 获取统计数据。 */
