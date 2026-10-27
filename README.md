@@ -1,6 +1,6 @@
 # MeaPet —— 梅尔桌宠
 
-Android 上的 Live2D AI 桌宠：在主页与系统悬浮窗里渲染 Live2D 模型，接入 OpenAI 兼容 API 做多轮聊天，并带本地记忆与 Material You 主题。
+Android 上的 Live2D AI 桌宠
 
 本项目由 [suan-11/mea-pet-public](https://github.com/suan-11/mea-pet-public) 衍生。
 
@@ -159,6 +159,39 @@ enc_p.onnx  dp.onnx  flow.onnx  dec.onnx
 - **更新** — 启动时静默检测新版本，发现更新才提示（可在子页关闭）；此处也可手动「检查更新」（按钮 + 进度 + 结果文案与发布页链接）。
 - **隐私与数据** — 查看隐私政策全文（再往里一层）；导出日志（含设备 / 版本头信息、native 崩溃 tombstone、logcat），便于反馈问题；友盟统计 SDK 授权管理（可查看授权状态，取消授权后立即退出，确保停止上报）。
 
+## 发布（GitHub Actions 自动打包与签名）
+
+推 `v<版本>` tag 即自动构建签名并发布 Release，标题形如 **`v1.7.2 / 2026.9.11`**（tag / tag 日期）。
+构建复用 [`tools/build-release.sh`](tools/build-release.sh)，与本地产物同名同规则。
+
+**一次性配置**：Settings → Environments 新建 **`keystore`**，加 secrets：
+
+| Secret | 内容 |
+| --- | --- |
+| `KEYSTORE_BASE64` | 签名 keystore 文件的单行 base64（见下方命令） |
+| `KEYSTORE_PASSWORD` | keystore 主密码（`storePassword`） |
+| `KEY_ALIAS` | 签名 key 别名（`keyAlias`） |
+| `KEY_PASSWORD` | 签名 key 密码（`keyPassword`） |
+| `UMENG_APP_KEY` | 可选；不配则 CI 构建的 release 不初始化统计 |
+
+```bash
+base64 -w0 release.keystore    # Linux / macOS / Git Bash
+```
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes('release.keystore'))   # Windows PowerShell
+```
+
+`local.properties` 不入库，CI 以 `local.properties.example` 为模板生成（`umeng.appKey` 由上面的
+secret 注入），改公共配置请直接改模板。
+
+**发布**：`git tag v1.7.3 && git push origin v1.7.3`
+
+- tag 须在 `main` 上、且与 `versionName` 一致，否则不发布；`versionCode` 建议递增（未递增只告警）。
+- 带后缀的 tag（`v1.7.3-beta1`）照常发布，但标为 pre-release：不占 Latest，也不影响「检测更新」。
+- 重跑幂等（已存在的 Release 更新标题/正文并覆盖 APK）。
+- 本地预览正文 / 自检：`python tools/release_meta.py --tag v1.7.3 --notes-file -`、`python tools/test-release-meta.py`
+
 ## 技术栈
 
 ```
@@ -172,10 +205,6 @@ Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Markwon  ·  Coroutines  ·  G
 - [Bilibili — [Live2D模型分享 - 梅娅]](https://www.bilibili.com/video/BV1AoX7BXEaN)
 
 使用该模型时请遵循原作者的发布说明与授权要求。模型版权归原作者所有，与本仓库 MIT 许可证无关。
-
-## 贡献
-
-感谢所有为 MeaPet 做出贡献的开发者，名单见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。欢迎通过 [Issues](https://github.com/llz121517/mea-pet-mobile/issues) 或 [Pull Request](https://github.com/llz121517/mea-pet-mobile/pulls) 参与贡献。
 
 ## 许可证
 

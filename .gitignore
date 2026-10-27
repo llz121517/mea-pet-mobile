@@ -22,3 +22,6 @@ local.properties
 # 本地签名证书与构建产物
 /keystore.properties
 /dist/
+
+# Python 工具（tools/*.py）的字节码缓存
+__pycache__/
