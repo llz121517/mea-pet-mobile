@@ -66,7 +66,7 @@ internal fun AppInfoSection() {
     Text("MeaPet —— 梅尔桌宠", style = MaterialTheme.typography.titleMedium)
     Spacer(Modifier.height(2.dp))
     Text(
-        "一只基于 Live2D 的 AI 梅尔 非常不完善 但是初版花了我 0.14B Tokens",
+        "一只 Live2D AI 梅尔 似乎非常不完善",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -82,7 +82,7 @@ internal fun AppInfoSection() {
     Spacer(Modifier.height(10.dp))
 
     Text(
-        "Say my name when a tree susurrates\nOnce and again telling a story lost in time",
+        "我见青山多妩媚，料青山见我应如是。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
