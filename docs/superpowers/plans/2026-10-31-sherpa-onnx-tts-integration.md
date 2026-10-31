@@ -1805,7 +1805,7 @@ git rm app/src/main/assets/pinyin/zh_pinyin.txt app/src/main/assets/pinyin/zh_ph
 
 然后删掉 `TtsModelManager.kt` 里 Task 4 留的兼容 stub（`@Deprecated fun ensureNativeLoaded()` 整段），因为已无调用方。
 
-同时移除 Task 1 留的过渡依赖：`app/build.gradle.kts` 里的 `compileOnly(libs.onnxruntime.android)` 两行（含注释），以及 `gradle/libs.versions.toml` 里的 `onnxruntime` 版本与 `onnxruntime-android` 别名。删完跑一次 `.\gradlew.bat :app:dependencies --configuration debugRuntimeClasspath`（应无 onnxruntime）+ `.\gradlew.bat :app:assembleDebug`（buildMerge 通过）。
+同时移除 Task 1 留的过渡依赖：`app/build.gradle.kts` 里的 `compileOnly(libs.onnxruntime.android)` 两行（含注释）、`app/proguard-rules.pro` 里的 `-dontwarn ai.onnxruntime.**`（Task 1 fix 时加的过渡规则），以及 `gradle/libs.versions.toml` 里的 `onnxruntime` 版本与 `onnxruntime-android` 别名。删完跑一次 `.\gradlew.bat :app:dependencies --configuration debugRuntimeClasspath`（应无 onnxruntime）+ `.\gradlew.bat :app:assembleDebug`（buildMerge 通过）。
 
 **不要删** `TtsLegacyMigration.kt`：它是给 1.7.x 老用户升级用的一次性兼容，等后续版本确认没有老版本用户后整文件删除（连同 `TtsModelManager.init` 里对它的两行调用）。
 
