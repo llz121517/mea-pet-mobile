@@ -9,26 +9,25 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.utils.io.readAvailable
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.zip.ZipInputStream
 
 /**
- * TTS 模型（4 个 ONNX，共 ~73MB）的下载 / 校验 / 导入管理。
+ * TTS 模型（sherpa-onnx 音素化 VITS，6 个文件共约 84MB）的下载 / 校验 / 导入管理。
  *
  * ## 分发模型（不打进 APK，按需下载 / 本地 zip 导入以减小体积）
- * - 4 个 ONNX（共 ~73MB）→ `filesDir/tts_model/`
+ * - 6 个文件（共 ~84MB）→ `filesDir/tts_model/`，其中 3 个 fst 位于 `fsts/` 子目录
+ * - 远端平铺上传 basename（GitHub Release / 静态目录不能带子路径），本地路径见 [REQUIRED_MODEL_FILES]
  *
  * ## 原生库加载
- * ONNX Runtime 原生库（libonnxruntime.so）随 AAR 打包进 APK（仅 arm64-v8a / armeabi-v7a，
- * 见 app/build.gradle.kts 的 abiFilters）。首次推理前 [ensureNativeLoaded] 经
- * `System.loadLibrary("onnxruntime")` 直接加载，无需下载。
+ * JNI（libsherpa-onnx-jni.so）与 libonnxruntime.so 随 sherpa AAR 打包进 APK（仅 arm64-v8a /
+ * armeabi-v7a，见 app/build.gradle.kts 的 abiFilters），首次推理时由 sherpa 自动加载，
+ * 无需下载、也无需显式 `System.loadLibrary`。
  *
  * ## 配置
  * 远程地址经 BuildConfig 从 local.properties 注入到 AppConfig（`ttsModelBaseUrl`）。
@@ -40,15 +39,24 @@ class TtsModelManager(private val context: Context) {
         private const val TAG = "TtsModelManager"
         private const val MODEL_DIR = "tts_model"
 
-        /** 必需模型文件名（4 件齐全才算模型就绪）。 */
-        val REQUIRED_MODEL_FILES = listOf("enc_p.onnx", "dp.onnx", "flow.onnx", "dec.onnx")
+        /** 必需文件（相对 modelDir）。fsts/ 子目录由 App 维护，远端上传名是平铺的 basename。 */
+        val REQUIRED_MODEL_FILES = listOf(
+            "model.onnx",
+            "tokens.txt",
+            "lexicon.txt",
+            "fsts/phone.fst",
+            "fsts/date.fst",
+            "fsts/number.fst",
+        )
 
-        /** 4 个模型的预期大小（字节），用于下载完整性粗校验。 */
+        /** 各文件精确字节数（来源：.tools/tts-spike/dist/manifest.json，见 docs/tts/model-package.md）。 */
         val EXPECTED_SIZES = mapOf(
-            "enc_p.onnx" to 25_668_587L,
-            "dp.onnx" to 2_714_999L,
-            "flow.onnx" to 17_482_772L,
-            "dec.onnx" to 28_977_164L
+            "model.onnx" to 74_864_089L,
+            "tokens.txt" to 439L,
+            "lexicon.txt" to 8_915_316L,
+            "fsts/phone.fst" to 88_630L,
+            "fsts/date.fst" to 59_154L,
+            "fsts/number.fst" to 64_482L,
         )
     }
 
@@ -59,9 +67,6 @@ class TtsModelManager(private val context: Context) {
 
     private val _state = MutableStateFlow<TtsModelState>(TtsModelState.NotDownloaded)
     val state: StateFlow<TtsModelState> = _state.asStateFlow()
-
-    @Volatile
-    private var nativeLoaded = false
 
     /** 下载重入锁：防止并发下载写同一批 .part 临时文件。 */
     private val downloadLock = kotlinx.coroutines.sync.Mutex()
@@ -76,23 +81,35 @@ class TtsModelManager(private val context: Context) {
     }
 
     init {
+        TtsLegacyMigration.migrate(modelDir)
         refreshState()
-        // 一次性迁移：旧版本把 libonnxruntime.so 下载到 filesDir/tts_model/lib/<abi>/，
-        // 现改为随 APK 打包，异步清理老用户升级后的残留目录（~20MB，不阻塞启动）。
-        CoroutineScope(Dispatchers.IO).launch {
-            runCatching { File(modelDir, "lib").deleteRecursively() }
-        }
+        TtsLegacyMigration.cleanLegacyNativeLibDir(modelDir)
     }
 
-    /** 模型 4 件是否已就绪。 */
-    fun isModelReady(): Boolean =
-        REQUIRED_MODEL_FILES.all { File(modelDir, it).let { f -> f.exists() && f.length() > 0 } }
+    /** 模型 6 件是否齐全且大小精确匹配（下载/导入中断的半文件不会被误判就绪）。 */
+    fun isModelReady(): Boolean = REQUIRED_MODEL_FILES.all { rel ->
+        val file = File(modelDir, rel)
+        val expected = EXPECTED_SIZES[rel] ?: 0L
+        file.isFile && (expected <= 0L || file.length() == expected)
+    }
 
-    /** 模型就绪即可用（原生库随 APK 分发，无需单独下载）。 */
+    /** 模型目录绝对路径（sherpa 配置构造用）。 */
+    fun modelDir(): File = modelDir
+
+    /** 模型就绪即可用（原生库随 sherpa AAR 分发，无需单独下载）。 */
     fun isReady(): Boolean = isModelReady()
 
     /** 模型文件绝对路径（供 ONNX 引擎加载）。 */
     fun modelFile(name: String): File = File(modelDir, name)
+
+    /**
+     * 兼容旧引擎的加载入口：sherpa AAR 自带 JNI 库加载，这里不再需要显式 load。
+     * @deprecated 仅旧四模块引擎调用，Task 9 删除旧引擎后一并移除。
+     */
+    @Deprecated("sherpa AAR 自动加载原生库，无需显式调用")
+    fun ensureNativeLoaded() {
+        // no-op
+    }
 
     /** 启动/操作后按磁盘实际状态刷新状态流。 */
     fun refreshState() {
@@ -100,26 +117,19 @@ class TtsModelManager(private val context: Context) {
     }
 
     /**
-     * 由 baseUrl 生成下载清单（4 个模型）。baseUrl 为空返回空列表（未配置）。
-     * 约定：远端模型与本地同名（`$baseUrl/enc_p.onnx` 等）。
+     * 由 baseUrl 生成下载清单。远端是**平铺文件名**（GitHub Release / 静态目录不能带子路径），
+     * 本地落盘仍按 [REQUIRED_MODEL_FILES] 的相对路径（fsts/ 子目录）。
      */
     fun buildDownloadFiles(baseUrl: String): List<ModelFile> {
         if (baseUrl.isBlank()) return emptyList()
         val base = baseUrl.trimEnd('/')
-        return REQUIRED_MODEL_FILES.map { name ->
-            ModelFile(url = "$base/$name", relativePath = name, expectedSize = EXPECTED_SIZES[name] ?: 0L)
+        return REQUIRED_MODEL_FILES.map { rel ->
+            ModelFile(
+                url = "$base/${rel.substringAfterLast('/')}",
+                relativePath = rel,
+                expectedSize = EXPECTED_SIZES[rel] ?: 0L,
+            )
         }
-    }
-
-    /**
-     * 确保 APK 内嵌的 ONNX Runtime 原生库已加载（首次推理前调用）。幂等、线程安全。
-     */
-    @Synchronized
-    fun ensureNativeLoaded() {
-        if (nativeLoaded) return
-        System.loadLibrary("onnxruntime")   // AAR 内嵌 so，abiFilters 仅保留 v8a / v7a
-        nativeLoaded = true
-        Log.i(TAG, "ONNX Runtime 原生库已从 APK 加载")
     }
 
     /**
@@ -225,14 +235,12 @@ class TtsModelManager(private val context: Context) {
     /**
      * 从本地 zip 资源包手动导入（绕过 GitHub 下载，供网络受限用户使用）。
      *
-     * 约定格式：zip 内**平铺无目录**，只含 4 个 ONNX：`enc_p.onnx` / `dp.onnx` / `flow.onnx` /
-     * `dec.onnx`（原生库已随 APK 分发，资源包不再携带 so；旧资源包里多余的 so 会被跳过）。
+     * 兼容两种打包方式：条目平铺（`model.onnx`、`fsts/phone.fst`），或整体包一层目录
+     * （`tts-model-v1/model.onnx`、`tts-model-v1/fsts/phone.fst`）。定位规则见 [resolveModelEntries]。
      *
-     * 兼容打包时误嵌套子文件夹的情况：根级没有资源文件时，自动到子目录查找
-     * （最多 2 层），取第一个命中的资源所在目录作为基准，其余目录忽略。
-     *
-     * 逐文件 `.part` 临时写盘后原子改名（与 [download] 一致，中断不留半文件）；
-     * 完成后 [refreshState]，缺件/失败进 [TtsModelState.Error] 并列出缺项。
+     * 导入前先整体清空模型目录（避免残留半套模型 / 旧 fsts 混入），再逐文件 `.part` 临时写盘后
+     * 原子改名（与 [download] 一致，中断不留半文件）；完成后 [refreshState]，
+     * 缺件/失败进 [TtsModelState.Error]。
      */
     suspend fun importFromZip(uri: Uri): Result<String> = withContext(Dispatchers.IO) {
         _state.value = TtsModelState.Importing
@@ -241,7 +249,7 @@ class TtsModelManager(private val context: Context) {
             val stream = resolver.openInputStream(uri)
                 ?: return@withContext Result.failure(IllegalStateException("无法读取所选文件"))
 
-            // 第一遍：列出全部条目，确定资源所在基准目录（根级优先，最多下探 2 层）
+            // 第一遍：列出全部条目，定位模型包（根级平铺或包一层目录）
             val entries = ZipInputStream(stream).use { zis ->
                 buildList {
                     while (true) {
@@ -252,87 +260,47 @@ class TtsModelManager(private val context: Context) {
                 }
             }
             if (entries.isEmpty()) {
-                return@withContext Result.failure(IllegalStateException("zip 为空或无法解析"))
+                val msg = "zip 为空或无法解析"
+                _state.value = TtsModelState.Error(msg)
+                return@withContext Result.failure(IllegalStateException(msg))
             }
-            val baseDir = resolveBaseDir(entries)   // "" = 根级平铺
-            val resolve = { name: String ->
-                val rel = name.removePrefix(if (baseDir.isEmpty()) "" else "$baseDir/")
-                if (rel.contains('/')) null else rel
-            }
+            val mapping = resolveModelEntries(entries)
+                ?: run {
+                    val msg = "资源包缺少模型文件（需要 ${REQUIRED_MODEL_FILES.joinToString("、")}）"
+                    _state.value = TtsModelState.Error(msg)
+                    return@withContext Result.failure(IllegalStateException(msg))
+                }
+            val byEntry = mapping.entries.associate { (rel, entryName) -> entryName to rel }
 
-            // 写入目标：先清理旧文件再解压，防止残留半套模型
+            // 先整体清空再解压：避免残留半套模型 / 旧 fsts 混入
+            modelDir.deleteRecursively()
             modelDir.mkdirs()
-            modelDir.listFiles()?.forEach { if (it.isFile) it.delete() }
 
-            val seenModels = mutableSetOf<String>()
             val maxEntrySize = 256L * 1024 * 1024   // 单条目上限（zip 炸弹粗防御）
-
             resolver.openInputStream(uri).use { input ->
                 val zis = ZipInputStream(input)
                 val buf = ByteArray(64 * 1024)
                 while (true) {
                     val entry = zis.nextEntry ?: break
-                    val name = entry.name
-                    if (entry.isDirectory) { zis.closeEntry(); continue }
-                    val rel = resolve(name) ?: run { zis.closeEntry(); continue }
-
-                    if (rel in REQUIRED_MODEL_FILES) {
-                        writeEntry(zis, File(modelDir, rel), maxEntrySize, buf)
-                        seenModels.add(rel)
-                    }
-                    // 其他条目（旧资源包里多余的 so 等）：跳过不解压
+                    val rel = byEntry[entry.name]
+                    if (rel != null) writeEntry(zis, File(modelDir, rel), maxEntrySize, buf)
                     zis.closeEntry()
                 }
             }
-
-            val missing = REQUIRED_MODEL_FILES.filterNot { it in seenModels }
             refreshState()
-            when {
-                _state.value == TtsModelState.Ready -> {
-                    Log.i(TAG, "zip 导入完成：${seenModels.size} 个 onnx")
-                    Result.success("导入成功")
-                }
-                missing.isNotEmpty() -> {
-                    val msg = "资源包缺少模型：${missing.joinToString("、")}"
-                    _state.value = TtsModelState.Error(msg)
-                    Result.failure(IllegalStateException(msg))
-                }
-                else -> {
-                    val msg = "导入失败：文件不完整"
-                    _state.value = TtsModelState.Error(msg)
-                    Result.failure(IllegalStateException(msg))
-                }
+            if (_state.value == TtsModelState.Ready) {
+                Log.i(TAG, "zip 导入完成：${byEntry.size} 个文件")
+                Result.success("导入成功")
+            } else {
+                val msg = "导入失败：文件不完整或大小不符"
+                _state.value = TtsModelState.Error(msg)
+                Result.failure(IllegalStateException(msg))
             }
         } catch (e: Exception) {
             Log.e(TAG, "zip 导入失败", e)
             _state.value = TtsModelState.Error(e.message ?: "导入失败")
             Result.failure(e)
         }
-    }
-
-    /**
-     * 从全部条目里确定资源所在基准目录：根级有模型文件就用 ""，
-     * 否则从第一层子目录开始，最多下探 2 层，取第一个命中的目录；找不到返回 ""。
-     */
-    private fun resolveBaseDir(entries: List<String>): String {
-        val candidateDirs = mutableListOf("")
-        entries.map { it.substringBefore('/') }.filter { it.isNotEmpty() }.toSet()
-            .forEach { candidateDirs.add(it) }
-        // 第一层子目录的子目录（最多 2 层）
-        entries.mapNotNull { e ->
-            val parts = e.split('/')
-            if (parts.size >= 3 && parts[0].isNotEmpty()) parts[0] + "/" + parts[1] else null
-        }.toSet().forEach { candidateDirs.add(it) }
-
-        for (dir in candidateDirs) {
-            val prefix = if (dir.isEmpty()) "" else "$dir/"
-            val hasResource = entries.any { name ->
-                val rel = name.removePrefix(prefix)
-                !rel.contains('/') && rel in REQUIRED_MODEL_FILES
-            }
-            if (hasResource) return dir
-        }
-        return ""
     }
 
     /** 把当前 zip entry 逐块写入目标文件（`.part` 临时文件 + 原子改名）。 */
@@ -361,4 +329,15 @@ class TtsModelManager(private val context: Context) {
     }
 
     fun close() = client.close()
+}
+
+/**
+ * 在 zip 条目里定位模型包：允许条目平铺或包一层目录（取 model.onnx 所在目录作为基准）。
+ * @return 本地相对路径 → zip 条目名；缺任一必需文件返回 null。
+ */
+internal fun resolveModelEntries(entries: List<String>): Map<String, String>? {
+    val modelEntry = entries.firstOrNull { it == "model.onnx" || it.endsWith("/model.onnx") } ?: return null
+    val prefix = modelEntry.removeSuffix("model.onnx")
+    val mapping = TtsModelManager.REQUIRED_MODEL_FILES.associateWith { rel -> "$prefix$rel" }
+    return mapping.takeIf { m -> m.values.all { it in entries } }
 }
