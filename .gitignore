@@ -25,3 +25,6 @@ local.properties
 
 # Python 工具（tools/*.py）的字节码缓存
 __pycache__/
+
+# 本地 spike / 工具链（模型、样本、Python venv，不入库）
+/.tools/
