@@ -15,7 +15,7 @@
    ▼  sherpa C++ 内部
 ③ 句切分（。！？,.!?…）→ 按句合成（maxNumSentences=1，句子级回调）
 ④ ruleFsts：phone.fst → date.fst → number.fst（顺序重要！）
-⑤ CharacterLexicon 最长匹配（统一 lexicon_final.txt）
+⑤ CharacterLexicon 最长匹配（统一 lexicon.txt）
 ⑥ 符号 → ID（tokens.txt）+ add_blank
    ▼
 VITS 单图推理 → 22050Hz 音频
@@ -27,7 +27,7 @@ VITS 单图推理 → 22050Hz 音频
 |---|---|---|
 | model.onnx | 混合精度单图（enc_p/dp fp32 + flow/dec fp16），metadata：sample_rate=22050, add_blank=1, blank_id=0, n_speakers=1, comment=icefall, jieba=1 | 74.9MB |
 | tokens.txt | 实际 69 行、67 个唯一 ID（`_`/`^`/`$` 共用 ID 0，ID 58 缺号） | 439 B |
-| lexicon_final.txt | 中文词/字 89k + 英文词 126k + 假名/假名词 ~24k；**不含日文汉字词条** | 8.5MB |
+| lexicon.txt（源文件 lexicon_final3.txt） | 中文词/字 89k + 英文词 126k + 假名/假名词 ~24k；**不含日文汉字词条** | 8.5MB |
 | fsts/phone.fst, date.fst, number.fst | 数字/日期/电话归一化（phone 必须最先） | ~200KB |
 | ja_reading_map.json | 日文词形→假名 16,976 + 单字 1,071 + 动词词干 1,077 | 0.5MB |
 
@@ -58,7 +58,7 @@ VITS 单图推理 → 22050Hz 音频
 
 ## 5. tokens.txt 约定
 
-实际 **69 行、67 个唯一 ID**：`_`=0（blank，`^`/`$` 也映射 0，三行共用 ID 0）、标点 1-7、`N Q` 8-9、a-z 10-32、IPA 33-54、`⁼ ʰ` 55-56、反引号（U+0060）=57、**ID 58 缺号**、`#`=59 `*`=60 `=`=61、`ˈ`=62 `ˌ`=63、`→`=64 `↓`=65 `↑`=66、`␣`=67。
+实际 **69 行、67 个唯一 ID**：`_`=0（blank，`^`/`$` 也映射 0，三行共用 ID 0）、标点 1-7、`N Q` 8-9、23 个拉丁字母 10-32（缺 c/q/r）、IPA 33-54、`⁼ ʰ` 55-56、反引号（U+0060）=57、**ID 58 缺号**、`#`=59 `*`=60 `=`=61、`ˈ`=62 `ˌ`=63、`→`=64 `↓`=65 `↑`=66、`␣`=67。
 add_blank=1 → 运行时自动生成 `[0,s0,0,s1,…,sN,0]`。
 
 ## 6. 已验证结论
