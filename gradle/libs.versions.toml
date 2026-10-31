@@ -16,6 +16,7 @@ kotlinxCoroutines = "1.9.0"
 mockitoKotlin = "5.4.0"
 umengCommon = "9.9.2"
 umengAsms = "1.8.7.2"
+# TODO(T9): 删除本行（旧 VitsOnnxEngine 编译期过渡，Task 9 随旧引擎一并移除）
 onnxruntime = "1.24.3"
 sherpaOnnx = "v2.0.1"
 markwon = "4.6.2"
@@ -59,7 +60,7 @@ mockito-kotlin = { module = "org.mockito.kotlin:mockito-kotlin", version.ref = "
 umeng-umsdk-common = { group = "com.umeng.umsdk", name = "common", version.ref = "umengCommon" }  # 必选
 umeng-umsdk-asms = { group = "com.umeng.umsdk", name = "asms", version.ref = "umengAsms" }        # 必选
 
-# ONNX Runtime（旧 VitsOnnxEngine 编译期过渡依赖，Task 9 随旧引擎一并删除）
+# TODO(T9): ONNX Runtime（旧 VitsOnnxEngine 编译期过渡依赖，Task 9 随旧引擎一并删除）
 onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
 
 # sherpa-onnx（本地 VITS TTS 推理，AAR 内嵌 JNI + libonnxruntime.so）

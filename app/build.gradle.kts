@@ -132,8 +132,9 @@ android {
         compose = true
         buildConfig = true
     }
-    // sherpa-onnx AAR 内嵌 libsherpa-onnx-jni.so + libonnxruntime.so，由上方 abiFilters
-    // 限制为仅 arm64-v8a / armeabi-v7a 两份；ONNX 模型仍走运行时下载 / 本地导入。
+    // sherpa-onnx AAR 内嵌 libsherpa-onnx-c-api.so + libsherpa-onnx-cxx-api.so +
+    // libsherpa-onnx-jni.so + libonnxruntime.so 共四个 .so，由上方 abiFilters
+    // 限制为仅 arm64-v8a / armeabi-v7a 两个 ABI；ONNX 模型仍走运行时下载 / 本地导入。
     // OpenJTalk 词典/拼音表等大文本 assets 需禁压缩（否则 aapt 压缩后某些读取路径会失败）
     aaptOptions {
         noCompress += listOf("bin", "dic", "txt")

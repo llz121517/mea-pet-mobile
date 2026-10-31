@@ -12,6 +12,14 @@
 -keep class com.k2fsa.sherpa.onnx.** { *; }
 -dontwarn com.k2fsa.sherpa.onnx.**
 
+# ── ONNX Runtime（T1–T9 过渡期规则） ──
+# 旧 VitsOnnxEngine 仍按 compileOnly(libs.onnxruntime.android) 编译，并被下方
+# 「com.meapet.mobile.tts.**」规则全量保留；而 runtime 并无 ai.onnxruntime 类
+# （sherpa AAR 只内嵌 libonnxruntime.so，不含 Java API）。此处的唯一作用是让 R8
+# 不因这些缺失引用产生 missing-class 警告（严格模式下可能直接中断 shrink）。
+# TODO(T9): 删除旧引擎时，与 compileOnly(libs.onnxruntime.android) 一起删除本行。
+-dontwarn ai.onnxruntime.**
+
 # ── TTS 语音包 ─────────────────────────────────────────
 # 自有 TTS 代码宽保留：G2P / ONNX 引擎 / 播放器 / 模型管理，与 native 层和文件路径交互多，
 # 保留全量避免混淆引入隐性问题
