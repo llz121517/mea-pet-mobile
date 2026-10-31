@@ -35,6 +35,9 @@
   - `OfflineTtsVitsModelConfig(model, lexicon, tokens, dataDir, dictDir, noiseScale, noiseScaleW, lengthScale)`。
   - `GenerationConfig(silenceScale, speed, sid, referenceAudio, referenceSampleRate, referenceText, numSteps, extra, phonemeCodepoints, tokens)`。
   - `GeneratedAudio(samples: FloatArray, sampleRate: Int)`。
+- **AAR 内嵌的 ONNX Runtime = 1.28.2**（实测 libonnxruntime.so 内有 VERS_1.28.2 与版本字符串）。来源：sherpa v2.0.1 的 arm64 构建脚本默认 SHERPA_ONNX_ONNXRUNTIME_VERSION=1.28.2 且 BUILD_SHARED_LIBS=ON，即从 csukuangfj/onnxruntime-libs v1.28.2 预编译包取官方 ORT Android 库，构建元信息：NDK r27d / clang 18.0.4 / ANDROID_PLATFORM=android-21。
+- **SIGILL（非法指令）风险基线**（实测 ELF 属性）：arm64 版无 `.note.gnu.property`（无 BTI/PAC 强制）、LOAD `p_align=0x4000`（16KB 对齐）；armeabi-v7a 版 `.ARM.attributes` = `Tag_CPU_arch=10`(ARMv7-A) / `Tag_FP_arch=3`(VFPv3) / `Tag_Advanced_SIMD_arch=1`(NEON)，不含 v7ve/ARMv8 专属指令要求。
+- **历史 SIGILL 修复参考（本仓库 commit `db097864`）**：旧版 ORT **1.23.2** 的 KleidiAI SME MatMul 在部分骁龙设备触发 SIGILL（[onnxruntime#26921](https://github.com/microsoft/onnxruntime/issues/26921)），升级 **1.24.3** 修复。本 AAR 内嵌 **1.28.2 > 1.24.3**，该修复已包含，**不做降级方案**（用户决定，勿在实现里写降级分支）。Task 10 保留一条 SIGILL 真机验收项（记录机型/ABI/SoC），出现即视为阻塞上报。
 - 模型包体积（当前 spike 产物实测字节数，Task 2 脚本会再核对一次）：
 
 | 相对路径 | 大小（B） | sha256 在 Task 2 生成 |
@@ -63,7 +66,9 @@
 | `app/src/test/java/com/meapet/mobile/tts/engine/SherpaDependencyTest.kt` | 依赖接入+API 签名验证（Task 1） |
 | `app/src/test/java/com/meapet/mobile/tts/engine/SherpaTtsEngineConfigTest.kt` | `buildSherpaTtsConfig()` 纯函数验证（Task 5） |
 | `app/src/test/java/com/meapet/mobile/tts/text/TtsTextNormalizerTest.kt` | 改写规则单测（Task 3） |
+| `app/src/main/java/com/meapet/mobile/tts/model/TtsLegacyMigration.kt` | 旧版 4 模块/native 残留清理（一次性兼容，后续整文件删除） |
 | `app/src/test/java/com/meapet/mobile/tts/model/TtsModelPackageTest.kt` | 包清单/zip 条目匹配纯函数单测（Task 4） |
+| `app/src/test/java/com/meapet/mobile/tts/model/TtsLegacyMigrationTest.kt` | 旧版迁移单测（Task 4） |
 | `app/src/test/java/com/meapet/mobile/tts/audio/TtsAudioPlayerTest.kt` | float→PCM16 转换单测（Task 6） |
 | `app/src/test/java/com/meapet/mobile/tts/TtsManagerTest.kt` | 语速换算/采样率/空白跳过（Task 7） |
 | `docs/tts/architecture.md` | 最终 G2P 架构（Task 2 复制自 spike 并修正） |
@@ -180,8 +185,13 @@ sherpa-onnx = { module = "com.github.k2-fsa.sherpa-onnx:sherpa-onnx", version.re
 
 ```kotlin
     // 本地 VITS TTS：sherpa-onnx AAR（内含 JNI + libonnxruntime.so，仅 v8a/v7a 会被 abiFilters 打包进 APK；
-    // 模型仍走运行时下载，见 TtsModelManager）。不要再引入 onnxruntime-android，否则 so 重复。
+    // 模型仍走运行时下载，见 TtsModelManager）。
     implementation(libs.sherpa.onnx)
+
+    // 过渡依赖（Task 9 删除）：旧 VitsOnnxEngine 仍 import ai.onnxruntime.*，但绝不能进运行时——
+    // compileOnly 不打包、不在 runtimeClasspath，避免与 sherpa AAR 内嵌的 libonnxruntime.so 冲突
+    // （两份同名 .so 会让 mergeDebugNativeLibs 直接失败）。
+    compileOnly(libs.onnxruntime.android)
 ```
 
 同时更新 `aaptOptions` 上方注释里「ONNX Runtime 原生库（libonnxruntime.so）随 AAR 打包进 APK」为「sherpa-onnx AAR 内嵌 libsherpa-onnx-jni.so + libonnxruntime.so」。
@@ -203,7 +213,7 @@ Expected: PASS（`BUILD SUCCESSFUL`，1 test passed）。
 - [ ] **Step 5: 确认依赖树里没有两份 ORT**
 
 Run: `.\gradlew.bat :app:dependencies --configuration debugRuntimeClasspath | Select-String -Pattern "sherpa|onnxruntime"`
-Expected: 只出现 `com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1`，**没有** `com.microsoft.onnxruntime:onnxruntime-android`。
+Expected: 只出现 `com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1`，**没有** `com.microsoft.onnxruntime:onnxruntime-android`（它只在 `compileOnlyClasspath`，Task 9 删除）。
 
 - [ ] **Step 6: 提交**
 
@@ -640,7 +650,9 @@ git commit -m "feat(tts): 新增文本归一化与日语上下文改写"
 
 **Files:**
 - Modify: `app/src/main/java/com/meapet/mobile/tts/model/TtsModelManager.kt`
+- Create: `app/src/main/java/com/meapet/mobile/tts/model/TtsLegacyMigration.kt`（旧版兼容独立成文件，后续不再需要时整文件删除）
 - Test: `app/src/test/java/com/meapet/mobile/tts/model/TtsModelPackageTest.kt`
+- Test: `app/src/test/java/com/meapet/mobile/tts/model/TtsLegacyMigrationTest.kt`
 
 **Interfaces:**
 - Consumes: 模型包布局（Task 2）；`TtsModelState`
@@ -651,6 +663,7 @@ git commit -m "feat(tts): 新增文本归一化与日语上下文改写"
   - `fun buildDownloadFiles(baseUrl: String): List<ModelFile>`（远端平铺名 → 本地 `fsts/` 路径）
   - `suspend fun importFromZip(uri: Uri): Result<String>`（支持 `fsts/` 子目录与 zip 内嵌一级目录）
   - `internal fun resolveModelEntries(entries: List<String>): Map<String, String>?`（纯函数，可单测）
+  - `internal object TtsLegacyMigration { fun hasLegacyModel(modelDir: File): Boolean; fun migrate(modelDir: File); fun cleanLegacyNativeLibDir(modelDir: File) }`（旧版兼容独立文件，主逻辑只调它）
   - `ensureNativeLoaded()` 改为 `@Deprecated` 空实现（旧引擎还在调用，Task 9 随旧代码一起删）
 
 - [ ] **Step 1: 先写失败的单测**
@@ -700,10 +713,49 @@ class TtsModelPackageTest {
 }
 ```
 
+再写旧版迁移的单测（新建文件 `TtsLegacyMigrationTest.kt`）：
+
+```kotlin
+package com.meapet.mobile.tts.model
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
+
+class TtsLegacyMigrationTest {
+
+    @get:Rule
+    val tmp = TemporaryFolder()
+
+    @Test
+    fun `旧版四模块模型会被整目录清理`() {
+        val dir = tmp.newFolder("tts_model")
+        listOf("enc_p.onnx", "dp.onnx", "flow.onnx", "dec.onnx").forEach {
+            File(dir, it).writeBytes(ByteArray(8))
+        }
+        assertTrue(TtsLegacyMigration.hasLegacyModel(dir))
+        TtsLegacyMigration.migrate(dir)
+        assertFalse(dir.exists())
+    }
+
+    @Test
+    fun `新模型目录不受迁移影响`() {
+        val dir = tmp.newFolder("tts_model")
+        File(dir, "model.onnx").writeBytes(ByteArray(8))
+        File(dir, "fsts").mkdirs()
+        TtsLegacyMigration.migrate(dir)
+        assertTrue(File(dir, "model.onnx").exists())
+    }
+}
+```
+
 - [ ] **Step 2: 运行测试，确认失败**
 
-Run: `.\gradlew.bat :app:testDebugUnitTest --tests "com.meapet.mobile.tts.model.TtsModelPackageTest"`
-Expected: FAIL（`Unresolved reference: resolveModelEntries` / `EXPECTED_SIZES` 大小不符）。
+Run: `.\gradlew.bat :app:testDebugUnitTest --tests "com.meapet.mobile.tts.model.*"`
+Expected: FAIL（`Unresolved reference: resolveModelEntries` / `TtsLegacyMigration`）。
 
 - [ ] **Step 3: 改常量与就绪判定**
 
@@ -733,32 +785,66 @@ Expected: FAIL（`Unresolved reference: resolveModelEntries` / `EXPECTED_SIZES` 
             "fsts/date.fst" to 59_154L,
             "fsts/number.fst" to 64_482L,
         )
-
-        /** 旧版 4 模块模型文件名：升级时清理，避免 73MB 垃圾常驻。 */
-        private val LEGACY_MODEL_FILES = listOf("enc_p.onnx", "dp.onnx", "flow.onnx", "dec.onnx")
     }
 ```
 
-`init` 改为：
+`init` 改为（旧版兼容逻辑全部委托给独立文件，主逻辑里不留迁移细节）：
 
 ```kotlin
     init {
-        migrateLegacyModel()
+        TtsLegacyMigration.migrate(modelDir)
         refreshState()
-        // 一次性迁移：旧版本把 libonnxruntime.so 下载到 filesDir/tts_model/lib/<abi>/，
-        // 现改为随 AAR 打包，异步清理老用户升级后的残留目录（~20MB，不阻塞启动）。
+        TtsLegacyMigration.cleanLegacyNativeLibDir(modelDir)
+    }
+```
+
+新建独立文件 `TtsLegacyMigration.kt`（**一次性兼容代码**：等老用户升级完后，删掉本文件 + `init` 里两行调用即可）：
+
+```kotlin
+package com.meapet.mobile.tts.model
+
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.io.File
+
+/**
+ * 旧版本 TTS 兼容清理（1.7.x → 1.8.0 升级路径）。
+ *
+ * 独立成文件的目的：这是**一次性兼容代码**，等老版本用户基本升级完之后，
+ * 直接删掉本文件 + [TtsModelManager.init] 里对它的两行调用即可，不需要在主逻辑里翻找。
+ *
+ * 负责两件事：
+ * 1. 旧版 4 模块 ONNX（enc_p/dp/flow/dec，~73MB）→ 整目录删除，按「未下载」引导重新下载 sherpa 模型包；
+ * 2. 旧版曾把 libonnxruntime.so 下载到 `tts_model/lib/<abi>/`（~20MB）→ 异步清理残留
+ *    （现 native 库随 sherpa AAR 打包进 APK，不再需要下载）。
+ */
+internal object TtsLegacyMigration {
+    private const val TAG = "TtsLegacyMigration"
+
+    /** 旧版 4 模块模型文件名。 */
+    private val LEGACY_MODEL_FILES = listOf("enc_p.onnx", "dp.onnx", "flow.onnx", "dec.onnx")
+
+    /** 是否存在旧版模型文件。 */
+    fun hasLegacyModel(modelDir: File): Boolean =
+        LEGACY_MODEL_FILES.any { File(modelDir, it).exists() }
+
+    /** 升级迁移：检测到旧版模型即整目录清空（同步、幂等）。 */
+    fun migrate(modelDir: File) {
+        if (!hasLegacyModel(modelDir)) return
+        Log.i(TAG, "检测到旧版 4 模块模型，清理后需重新下载 sherpa 模型包")
+        runCatching { modelDir.deleteRecursively() }
+            .onFailure { Log.w(TAG, "清理旧版模型失败", it) }
+    }
+
+    /** 异步清掉旧版下载的 native 库目录（不阻塞启动）。 */
+    fun cleanLegacyNativeLibDir(modelDir: File) {
         CoroutineScope(Dispatchers.IO).launch {
             runCatching { File(modelDir, "lib").deleteRecursively() }
         }
     }
-
-    /** 旧版 4 模块 ONNX（enc_p/dp/flow/dec）不再使用：整目录清掉后按未下载态引导重新下载。 */
-    private fun migrateLegacyModel() {
-        if (LEGACY_MODEL_FILES.any { File(modelDir, it).exists() }) {
-            Log.i(TAG, "检测到旧版 4 模块模型，清理后需重新下载 sherpa 模型包")
-            runCatching { modelDir.deleteRecursively() }
-        }
-    }
+}
 ```
 
 `isModelReady` 改为严格大小校验，并新增 `modelDir()`：
@@ -876,8 +962,8 @@ internal fun resolveModelEntries(entries: List<String>): Map<String, String>? {
 
 - [ ] **Step 5: 运行测试，确认通过**
 
-Run: `.\gradlew.bat :app:testDebugUnitTest --tests "com.meapet.mobile.tts.model.TtsModelPackageTest"`
-Expected: PASS（4 tests）。
+Run: `.\gradlew.bat :app:testDebugUnitTest --tests "com.meapet.mobile.tts.model.*"`
+Expected: PASS（TtsModelPackageTest 4 + TtsLegacyMigrationTest 2 = 6 tests）。
 
 - [ ] **Step 6: 全量单测仍绿（此时旧引擎还在、SettingsViewModel 用的是 mock，不应受影响）**
 
@@ -887,7 +973,10 @@ Expected: 全部 PASS。
 - [ ] **Step 7: 提交**
 
 ```bash
-git add app/src/main/java/com/meapet/mobile/tts/model/TtsModelManager.kt app/src/test/java/com/meapet/mobile/tts/model/TtsModelPackageTest.kt
+git add app/src/main/java/com/meapet/mobile/tts/model/TtsModelManager.kt `\
+        app/src/main/java/com/meapet/mobile/tts/model/TtsLegacyMigration.kt `\
+        app/src/test/java/com/meapet/mobile/tts/model/TtsModelPackageTest.kt `\
+        app/src/test/java/com/meapet/mobile/tts/model/TtsLegacyMigrationTest.kt
 git commit -m "feat(tts): 模型管理切换到 sherpa 模型包（严格校验/旧包迁移/zip 嵌套导入）"
 ```
 
@@ -1716,6 +1805,10 @@ git rm app/src/main/assets/pinyin/zh_pinyin.txt app/src/main/assets/pinyin/zh_ph
 
 然后删掉 `TtsModelManager.kt` 里 Task 4 留的兼容 stub（`@Deprecated fun ensureNativeLoaded()` 整段），因为已无调用方。
 
+同时移除 Task 1 留的过渡依赖：`app/build.gradle.kts` 里的 `compileOnly(libs.onnxruntime.android)` 两行（含注释），以及 `gradle/libs.versions.toml` 里的 `onnxruntime` 版本与 `onnxruntime-android` 别名。删完跑一次 `.\gradlew.bat :app:dependencies --configuration debugRuntimeClasspath`（应无 onnxruntime）+ `.\gradlew.bat :app:assembleDebug`（buildMerge 通过）。
+
+**不要删** `TtsLegacyMigration.kt`：它是给 1.7.x 老用户升级用的一次性兼容，等后续版本确认没有老版本用户后整文件删除（连同 `TtsModelManager.init` 里对它的两行调用）。
+
 - [ ] **Step 3: 全量单测 + 编译**
 
 Run: `.\gradlew.bat :app:testDebugUnitTest ; .\gradlew.bat :app:assembleDebug`
@@ -1797,6 +1890,7 @@ Expected:`model.onnx` 74864089、`lexicon.txt` 8915316、`tokens.txt` 439、三�
 - [ ] 连续朗读 10 条后：`adb shell dumpsys meminfo com.meapet.mobile | Select-String TOTAL` 无持续增长、无 OOM 崩溃（记录 PSS）
 - [ ] 朗读中点停止/新回复到达：立即停、只有最新一条发声
 - [ ] 悬浮窗语音开关同理可读（OverlayMenu 喇叭图标随播放变色）
+- [ ] logcat 无 `Fatal signal 4 (SIGILL)`；记录机型/ABI/SoC：`adb shell getprop ro.product.cpu.abilist`、`ro.board.platform`、`ro.soc.model`（历史坑见 commit `db097864` 与 onnxruntime#26921；本项目不做降级方案，出现即阻塞上报）
 - [ ] 设置页「删除模型」→ `adb shell "run-as com.meapet.mobile ls files/tts_model"` 目录消失；再「从本地导入」选 `dist/tts-model-v1.zip` 恢复，重试试听成功
 - [ ] 覆盖安装旧包（含 4 个 onnx）升级：启动后模型状态为未下载，`files/tts_model` 里旧文件被清空
 
