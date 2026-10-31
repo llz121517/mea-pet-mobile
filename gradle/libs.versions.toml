@@ -17,6 +17,7 @@ mockitoKotlin = "5.4.0"
 umengCommon = "9.9.2"
 umengAsms = "1.8.7.2"
 onnxruntime = "1.24.3"
+sherpaOnnx = "v2.0.1"
 markwon = "4.6.2"
 
 [libraries]
@@ -58,8 +59,11 @@ mockito-kotlin = { module = "org.mockito.kotlin:mockito-kotlin", version.ref = "
 umeng-umsdk-common = { group = "com.umeng.umsdk", name = "common", version.ref = "umengCommon" }  # 必选
 umeng-umsdk-asms = { group = "com.umeng.umsdk", name = "asms", version.ref = "umengAsms" }        # 必选
 
-# ONNX Runtime（本地 VITS TTS 推理）
+# ONNX Runtime（旧 VitsOnnxEngine 编译期过渡依赖，Task 9 随旧引擎一并删除）
 onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
+
+# sherpa-onnx（本地 VITS TTS 推理，AAR 内嵌 JNI + libonnxruntime.so）
+sherpa-onnx = { module = "com.github.k2-fsa.sherpa-onnx:sherpa-onnx", version.ref = "sherpaOnnx" }
 
 # Markwon（AI 回复 Markdown 渲染：公式/表格/删除线/链接；代码块样式由 core 提供）
 markwon-core = { group = "io.noties.markwon", name = "core", version.ref = "markwon" }

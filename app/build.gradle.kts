@@ -132,7 +132,7 @@ android {
         compose = true
         buildConfig = true
     }
-    // ONNX Runtime 原生库（libonnxruntime.so）随 AAR 打包进 APK，由上方 abiFilters
+    // sherpa-onnx AAR 内嵌 libsherpa-onnx-jni.so + libonnxruntime.so，由上方 abiFilters
     // 限制为仅 arm64-v8a / armeabi-v7a 两份；ONNX 模型仍走运行时下载 / 本地导入。
     // OpenJTalk 词典/拼音表等大文本 assets 需禁压缩（否则 aapt 压缩后某些读取路径会失败）
     aaptOptions {
@@ -202,8 +202,14 @@ dependencies {
         compileOnly(libs.umeng.umsdk.asms)
     }
 
-    // 本地 VITS TTS：ONNX Runtime（原生 so 随 AAR 打包进 APK，仅 v8a/v7a；模型仍走运行时下载，见 TtsModelManager）
-    implementation(libs.onnxruntime.android)
+    // 本地 VITS TTS：sherpa-onnx AAR（内含 JNI + libonnxruntime.so，仅 v8a/v7a 会被 abiFilters 打包进 APK；
+    // 模型仍走运行时下载，见 TtsModelManager）。
+    implementation(libs.sherpa.onnx)
+
+    // 过渡依赖（Task 9 删除）：旧 VitsOnnxEngine 仍 import ai.onnxruntime.*，但绝不能进运行时——
+    // compileOnly 不打包、不在 runtimeClasspath，避免与 sherpa AAR 内嵌的 libonnxruntime.so 冲突
+    // （两份同名 .so 会让 mergeDebugNativeLibs 直接失败）。
+    compileOnly(libs.onnxruntime.android)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

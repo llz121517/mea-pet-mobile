@@ -19,6 +19,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // sherpa-onnx Android AAR（含 JNI + libonnxruntime.so），仅该 group 走 JitPack，避免拖慢其它依赖解析
+        maven("https://jitpack.io") {
+            content { includeGroup("com.github.k2-fsa.sherpa-onnx") }
+        }
     }
 }
 
