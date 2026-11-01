@@ -89,8 +89,8 @@ class TtsModelManager(private val context: Context) {
     /** 模型 6 件是否齐全且大小精确匹配（下载/导入中断的半文件不会被误判就绪）。 */
     fun isModelReady(): Boolean = REQUIRED_MODEL_FILES.all { rel ->
         val file = File(modelDir, rel)
-        val expected = EXPECTED_SIZES[rel] ?: 0L
-        file.isFile && (expected <= 0L || file.length() == expected)
+        // 缺少预期大小即视为不可就绪（fail closed），避免清单漏项时误判
+        EXPECTED_SIZES[rel]?.let { expected -> file.isFile && file.length() == expected } ?: false
     }
 
     /** 模型目录绝对路径（sherpa 配置构造用）。 */
@@ -191,12 +191,10 @@ class TtsModelManager(private val context: Context) {
         }
     }
 
-    /** 文件已存在且大小符合预期（配置了预期大小时）即视为已下载完成。 */
+    /** 文件存在且大小严格等于预期大小才算已完成；未配置预期大小视为未完成（fail closed）。 */
     private fun isFileComplete(file: ModelFile): Boolean {
         val target = File(modelDir, file.relativePath)
-        if (!target.exists() || target.length() == 0L) return false
-        // 配置了预期大小则严格比对；未配置则只要非空即视为完成
-        return file.expectedSize <= 0 || target.length() == file.expectedSize
+        return file.expectedSize > 0L && target.isFile && target.length() == file.expectedSize
     }
 
     /** 流式下载单个文件到临时文件，完成后原子改名 + 大小校验。 */
@@ -247,7 +245,12 @@ class TtsModelManager(private val context: Context) {
         try {
             val resolver = context.contentResolver
             val stream = resolver.openInputStream(uri)
-                ?: return@withContext Result.failure(IllegalStateException("无法读取所选文件"))
+                ?: run {
+                    // 早退必须落 Error，否则 UI 会一直停在 Importing 转圈
+                    val msg = "无法读取所选文件"
+                    _state.value = TtsModelState.Error(msg)
+                    return@withContext Result.failure(IllegalStateException(msg))
+                }
 
             // 第一遍：列出全部条目，定位模型包（根级平铺或包一层目录）
             val entries = ZipInputStream(stream).use { zis ->
@@ -332,12 +335,19 @@ class TtsModelManager(private val context: Context) {
 }
 
 /**
- * 在 zip 条目里定位模型包：允许条目平铺或包一层目录（取 model.onnx 所在目录作为基准）。
+ * 在 zip 条目里定位模型包：优先根级平铺，其次逐个尝试嵌套目录
+ * （取 model.onnx 所在目录作为基准），避免嵌套的同名 model.onnx 抢先匹配。
  * @return 本地相对路径 → zip 条目名；缺任一必需文件返回 null。
  */
 internal fun resolveModelEntries(entries: List<String>): Map<String, String>? {
-    val modelEntry = entries.firstOrNull { it == "model.onnx" || it.endsWith("/model.onnx") } ?: return null
-    val prefix = modelEntry.removeSuffix("model.onnx")
-    val mapping = TtsModelManager.REQUIRED_MODEL_FILES.associateWith { rel -> "$prefix$rel" }
-    return mapping.takeIf { m -> m.values.all { it in entries } }
+    val candidates = buildList {
+        if ("model.onnx" in entries) add("model.onnx")
+        entries.forEach { if (it != "model.onnx" && it.endsWith("/model.onnx")) add(it) }
+    }
+    for (modelEntry in candidates) {
+        val prefix = modelEntry.removeSuffix("model.onnx")
+        val mapping = TtsModelManager.REQUIRED_MODEL_FILES.associateWith { rel -> "$prefix$rel" }
+        if (mapping.values.all { it in entries }) return mapping
+    }
+    return null
 }
