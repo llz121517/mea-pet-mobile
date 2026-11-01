@@ -207,11 +207,6 @@ dependencies {
     // 模型仍走运行时下载，见 TtsModelManager）。
     implementation(libs.sherpa.onnx)
 
-    // 过渡依赖（Task 9 删除）：旧 VitsOnnxEngine 仍 import ai.onnxruntime.*，但绝不能进运行时——
-    // compileOnly 不打包、不在 runtimeClasspath，避免与 sherpa AAR 内嵌的 libonnxruntime.so 冲突
-    // （两份同名 .so 会让 mergeDebugNativeLibs 直接失败）。
-    compileOnly(libs.onnxruntime.android)
-
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

@@ -102,15 +102,6 @@ class TtsModelManager(private val context: Context) {
     /** 模型文件绝对路径（供 ONNX 引擎加载）。 */
     fun modelFile(name: String): File = File(modelDir, name)
 
-    /**
-     * 兼容旧引擎的加载入口：sherpa AAR 自带 JNI 库加载，这里不再需要显式 load。
-     * @deprecated 仅旧四模块引擎调用，Task 9 删除旧引擎后一并移除。
-     */
-    @Deprecated("sherpa AAR 自动加载原生库，无需显式调用")
-    fun ensureNativeLoaded() {
-        // no-op
-    }
-
     /** 启动/操作后按磁盘实际状态刷新状态流。 */
     fun refreshState() {
         _state.value = if (isReady()) TtsModelState.Ready else TtsModelState.NotDownloaded
