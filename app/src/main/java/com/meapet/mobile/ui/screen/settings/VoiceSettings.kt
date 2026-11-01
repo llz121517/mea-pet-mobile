@@ -11,13 +11,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,6 +97,41 @@ internal fun TtsSection(
         modifier = Modifier.fillMaxWidth(),
         colors = SliderDefaults.colors(inactiveTrackColor = sliderTrackColor(darkTheme))
     )
+
+    // Debug 专用：任意文本试听，方便真机验证数字/日期/日语/中英混排（release 不显示）
+    if (com.meapet.mobile.BuildConfig.DEBUG) {
+        Spacer(Modifier.height(8.dp))
+        var previewText by remember { mutableStateOf("你好喵，今天天气真好。我今年18岁，电话是13800138000。") }
+        var showDialog by remember { mutableStateOf(false) }
+        OutlinedButton(
+            onClick = { showDialog = true },
+            enabled = modelReady,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("试听文本（Debug）") }
+        if (showDialog) {
+            AlertDialog(
+                onDismissRequest = { showDialog = false },
+                title = { Text("输入试听文本") },
+                text = {
+                    OutlinedTextField(
+                        value = previewText,
+                        onValueChange = { previewText = it },
+                        minLines = 3,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDialog = false
+                        viewModel.previewTts(previewText)
+                    }) { Text("朗读") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDialog = false }) { Text("取消") }
+                },
+            )
+        }
+    }
 }
 
 /** 语音模型下载状态卡：状态显示 + 下载/导入/进度/删除。 */
@@ -116,7 +154,7 @@ private fun TtsModelCard(state: SettingsUiState, viewModel: SettingsViewModel) {
                 is com.meapet.mobile.tts.model.TtsModelState.Ready -> {
                     Text("语音模型已就绪", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "模型与已下载，语音功能可用",
+                        "模型已下载，语音功能可用",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -164,7 +202,7 @@ private fun TtsModelCard(state: SettingsUiState, viewModel: SettingsViewModel) {
                     Text("语音模型未下载", style = MaterialTheme.typography.bodyLarge)
                     Text(
                         if (state.ttsModelUrlConfigured)
-                            "约 72MB，下载后开放语音功能；网络受限可从本地 zip 导入"
+                            "约 84MB，下载后开放语音功能；网络受限可从本地 zip 导入"
                         else
                             "未配置模型下载地址，可从本地 zip 导入",
                         style = MaterialTheme.typography.bodySmall,

@@ -275,6 +275,11 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch { settingsManager.setTtsLengthScale(scale) }
     }
 
+    /** 设置页试听：直接把给定文本交给 TTS（跳过来源开关，仅要求模型就绪）。 */
+    fun previewTts(text: String) {
+        container.ttsManager.speakPreview(text)
+    }
+
     // ── 界面外观 ──────────────────────────────────────
 
     /** 更新主页聊天气泡透明度（0.2~1.0）。 */
