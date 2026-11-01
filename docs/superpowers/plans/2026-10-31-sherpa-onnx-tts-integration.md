@@ -1608,15 +1608,18 @@ class TtsManager(
     fun release() {
         stop()
         player.release()
-    }
-
     /**
-     * 删除模型前调用：停止播放/合成并释放底层 OfflineTts（75MB 模型 + 8.9MB lexicon 的 native 内存）。
+     * 删除/导入模型前调用：停止播放/合成并释放底层 OfflineTts（75MB 模型 + 8.9MB lexicon 的 native 内存）。
      * 之后若重新下载模型，引擎会在下次合成时按新模型懒加载重建。
+     *
+     * **必须是 suspend**：sherpa 的 generateWithConfig 是阻塞 native 调用，stop() 取消不掉；
+     * 这里用同一把 [synthMutex] 等完在途合成再释放，避免 release 与 synthesize 并发访问已释放的 native 对象。
+     * 调用点（SettingsViewModel 的 importTtsModelZip / deleteTtsModel）已在 viewModelScope.launch 内，无需改。
      */
-    fun releaseEngine() {
+    suspend fun releaseEngine() {
         stop()
-        engine.release()
+        synthMutex.withLock { engine.release() }
+    }
     }
 
     /** 对应来源的语音开关是否开启。 */
