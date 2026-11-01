@@ -16,6 +16,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- 暂无可记录变更 -->
 
+## [1.8.0] - 2026-11-01
+
+### Changed
+
+- **语音合成迁移到 sherpa-onnx** — 自写的 VITS 推理与 G2P 链路整体换为 sherpa-onnx（JitPack `v2.0.1`）：自有 Mea VITS2 单图 + 统一 lexicon，中 / 日 / 英混排由**一个模型**完成，不按语言切引擎。App 侧只做轻量上下文改写（拉丁转小写、连续汉字段紧挨假名时按读音映射改写为假名），数字 / 日期 / 电话号码交由 ruleFsts 归一化朗读（`fsts/phone.fst` → `fsts/date.fst` → `fsts/number.fst`，顺序固定；电话逐位、年龄与时间按数词）。
+- **模型包改为 6 个文件（约 84MB）** — `model.onnx`（74.9MB）、`tokens.txt`、`lexicon.txt`（8.5MB）、`fsts/{phone,date,number}.fst`。旧版 4 文件模型（enc_p / dp / flow / dec，约 73MB）与新引擎不兼容：升级后由独立的一次性兼容代码 `TtsLegacyMigration` 自动清理并引导重新下载，网络受限可在设置页「从本地导入」使用本地 zip（`dist/tts-model-v1.zip`，约 71MB）。
+- **移除 onnxruntime-android 依赖** — 原生库改由 sherpa AAR 提供（内嵌 ONNX Runtime 1.28.2），每个 ABI 只带一份 `libonnxruntime.so` + `libsherpa-onnx-{c-api,cxx-api,jni}.so`，不再有重复 so；仅保留 arm64-v8a / armeabi-v7a 两个 ABI。
+- **播放器采样率改为跟随引擎输出** — `TtsAudioPlayer` 按引擎实际输出的采样率建 `AudioTrack`（不再硬编码 22050Hz），换模型/换采样率不会变速或变调。
+- **删除自写 G2P 与拼音资产** — `VitsOnnxEngine`、`TtsSynthesizer`、`DurationExpander`、`g2p/*` 与 `assets/pinyin/*`（约 8.9 万行词表）全部移除，APK 减小约 1.65MB；模型包状态判定改为按文件清单 + 精确大小校验。
+
+### Notes
+
+- **中文声调准确度为模型语料上限** — 该模型以日语语料微调，少数多音字声调仍不完美（如「今」）；听感与旧版一致，已确认接受，不作为本版回归项。
+- **历史 SIGILL 坑已包含修复** — 1.7.1 记录的 ORT 1.23.2 KleidiAI SME 崩溃（[onnxruntime#26921](https://github.com/microsoft/onnxruntime/issues/26921)）在 sherpa 内嵌的 1.28.2 中已含修复；仍建议按 `docs/tts/device-test-checklist.md` 在骁龙机型上确认 `logcat` 无 `Fatal signal 4 (SIGILL)`。
+- **设置页 Debug 构建新增「试听文本」入口** — 任意文本直接合成，便于真机验证数字 / 日期 / 日语 / 中英混排；release 构建不显示该入口。
+- 版本号升至 1.8.0（versionCode 14）；applicationId 与签名不变，可覆盖安装，但**升级后必须重新准备语音模型**（见上）。
+- 真机验收清单见 [`docs/tts/device-test-checklist.md`](docs/tts/device-test-checklist.md)。
+
+---
+
 ## [1.7.2] - 2026-09-11
 
 ### Fixed
