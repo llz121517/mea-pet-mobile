@@ -82,7 +82,7 @@ internal fun AppInfoSection() {
     Spacer(Modifier.height(10.dp))
 
     Text(
-        "我见青山多妩媚，料青山见我应如是。",
+        "又是逢初度，霜轻叶落时。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
