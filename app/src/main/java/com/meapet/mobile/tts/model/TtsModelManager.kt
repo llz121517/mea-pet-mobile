@@ -99,8 +99,15 @@ class TtsModelManager(private val context: Context) {
     /** 模型就绪即可用（原生库随 sherpa AAR 分发，无需单独下载）。 */
     fun isReady(): Boolean = isModelReady()
 
-    /** 模型文件绝对路径（供 ONNX 引擎加载）。 */
-    fun modelFile(name: String): File = File(modelDir, name)
+    /**
+     * 模型目录即将被替换/删除，先让 speak 门禁失效；操作结束后用 [refreshState] 收尾。
+     *
+     * 调用时机必须在释放引擎（`TtsManager.releaseEngine()`）**之前**：释放要等在途合成结束，
+     * 这段窗口里新回复若仍看到 Ready 就会排队合成，并在模型目录被删除/替换期间重建 OfflineTts。
+     */
+    fun markMutating() {
+        _state.value = TtsModelState.Importing
+    }
 
     /** 启动/操作后按磁盘实际状态刷新状态流。 */
     fun refreshState() {

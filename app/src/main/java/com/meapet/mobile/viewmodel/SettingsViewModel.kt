@@ -350,20 +350,27 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch { settingsManager.setWallpaperBlur(blur) }
     }
 
-    /** 下载 TTS 模型（4 个 onnx）。地址未配置则进入 Error 提示。 */
+    /** 下载 TTS 模型（6 个文件）。地址未配置则进入 Error 提示。 */
     fun downloadTtsModel() {
         viewModelScope.launch {
             val files = ttsModelManager.buildDownloadFiles(container.config.ttsModelBaseUrl)
+            // 已有旧引擎时先置非就绪再释放：避免释放等待在途合成期间新回复继续合成，
+            // 在模型文件被逐个替换的过程中重建 OfflineTts。无模型时等价空操作。
+            ttsModelManager.markMutating()
+            container.ttsManager.releaseEngine()
             ttsModelManager.download(files)
         }
     }
 
     /**
      * 从本地 zip 资源包手动导入 TTS 模型（绕过 GitHub 下载）。
-     * 导入前先停播并释放引擎，避免旧 session 占用即将被覆盖的模型文件。
+     * 导入前先置非就绪并释放引擎，避免旧 session 占用即将被覆盖的模型文件。
      */
     fun importTtsModelZip(uri: android.net.Uri) {
         viewModelScope.launch {
+            // 顺序不可换：先关 speak 门禁，再等 releaseEngine 结束在途合成，
+            // 否则等待窗口内新回复仍会重建引擎并读到正在被替换的模型目录
+            ttsModelManager.markMutating()
             container.ttsManager.releaseEngine()
             ttsModelManager.importFromZip(uri)
         }
@@ -372,8 +379,9 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
     /** 删除模型，并强制关闭两个语音开关。 */
     fun deleteTtsModel() {
         viewModelScope.launch {
-            // 先停播并关闭 ONNX session（73MB+ native 内存），再删磁盘文件，
-            // 避免旧 session 持有已删模型的内存映射
+            // 先置非就绪（门禁失效）+ 停播并关闭 OfflineTts session（75MB 模型 + 8.9MB lexicon 的
+            // native 内存），再删磁盘文件，避免 releaseEngine 等待窗口内有新合成重建引擎
+            ttsModelManager.markMutating()
             container.ttsManager.releaseEngine()
             ttsModelManager.deleteModel()
             settingsManager.setTtsMainEnabled(false)

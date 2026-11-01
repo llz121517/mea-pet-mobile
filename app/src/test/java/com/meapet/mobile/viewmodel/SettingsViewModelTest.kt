@@ -4,6 +4,7 @@ import com.meapet.mobile.app.AppContainer
 import com.meapet.mobile.app.MeaPetApplication
 import com.meapet.mobile.config.AppConfig
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.tts.TtsManager
 import com.meapet.mobile.tts.model.TtsModelManager
 import com.meapet.mobile.tts.model.TtsModelState
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +26,7 @@ import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyBlocking
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.wheneverBlocking
 
 /**
  * [SettingsViewModel] 交互测试。
@@ -141,5 +143,63 @@ class SettingsViewModelTest {
         vm.fetchModels("key", "")
 
         assertEquals("请先填写 API 地址", vm.state.value.modelsError)
+    }
+
+    /**
+     * 删除模型：`markMutating()` 必须早于 `releaseEngine()`。
+     *
+     * 若顺序反了，releaseEngine 等待在途合成的窗口里 state 仍是 Ready，新回复会排队合成，
+     * 并在模型目录删除期间重建 OfflineTts（静默加载失败/播到已删文件）。
+     * 断言方式：记录 releaseEngine 被调用那一刻的 state —— 必须是 Importing（非 Ready）。
+     */
+    @Test
+    fun `删除模型先关 speak 门禁再释放引擎`() = runTest(dispatcher.scheduler) {
+        val ttsManager: TtsManager = mock()
+        Mockito.doReturn(ttsManager).`when`(container).ttsManager
+
+        val modelState = MutableStateFlow<TtsModelState>(TtsModelState.Ready)
+        whenever(ttsModelManager.state).thenReturn(modelState)
+        whenever(ttsModelManager.markMutating()).thenAnswer {
+            modelState.value = TtsModelState.Importing
+        }
+        var stateWhenReleased: TtsModelState? = null
+        wheneverBlocking { ttsManager.releaseEngine() }.thenAnswer {
+            stateWhenReleased = modelState.value
+        }
+
+        val vm = FakeSettingsViewModel(application)
+        vm.deleteTtsModel()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(TtsModelState.Importing, stateWhenReleased)
+        verify(ttsModelManager).markMutating()
+        verifyBlocking(ttsManager) { releaseEngine() }
+        verifyBlocking(ttsModelManager) { deleteModel() }
+    }
+
+    /** 下载前同样要先置非就绪再释放旧引擎（模型文件会被逐个替换）。 */
+    @Test
+    fun `下载模型前先关 speak 门禁并释放引擎`() = runTest(dispatcher.scheduler) {
+        val ttsManager: TtsManager = mock()
+        Mockito.doReturn(ttsManager).`when`(container).ttsManager
+
+        val modelState = MutableStateFlow<TtsModelState>(TtsModelState.Ready)
+        whenever(ttsModelManager.state).thenReturn(modelState)
+        whenever(ttsModelManager.markMutating()).thenAnswer {
+            modelState.value = TtsModelState.Importing
+        }
+        var stateWhenReleased: TtsModelState? = null
+        wheneverBlocking { ttsManager.releaseEngine() }.thenAnswer {
+            stateWhenReleased = modelState.value
+        }
+
+        val vm = FakeSettingsViewModel(application)
+        vm.downloadTtsModel()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(TtsModelState.Importing, stateWhenReleased)
+        verify(ttsModelManager).markMutating()
+        verifyBlocking(ttsManager) { releaseEngine() }
+        verifyBlocking(ttsModelManager) { download(any()) }
     }
 }

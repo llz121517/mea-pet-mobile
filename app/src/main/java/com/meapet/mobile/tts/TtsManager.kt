@@ -29,7 +29,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * - [speakSeq]：native 合成无法被 `Job.cancel()` 打断，合成完成后要校验自己仍是最新，
  *   否则旧消息的协程会在合成完成后盖掉新消息的播放（表现为"最新回复无声"）。
  * - [synthMutex]：sherpa 的 `generateWithConfig` 非线程安全，且取消挡不住在途 native 调用，
- *   用互斥锁把在途合成串行化；拿到锁后先复查序号，过期直接放弃，不浪费一次推理。
+ *   用互斥锁把在途合成串行化；拿到锁后先复查序号与模型状态（非 Ready 视为模型目录正被替换/删除），
+ *   过期或模型未就绪直接放弃，不浪费一次推理、也不会在删除/替换期间重建 OfflineTts。
  *   [releaseEngine] 用**同一把锁**，保证释放不会与在途合成并发（否则是 native use-after-free）。
  */
 class TtsManager(
@@ -158,12 +159,17 @@ class TtsManager(
                 }
                 Log.d(TAG, "$tag: 开始合成 '${normalized.take(20)}' (${normalized.length} 字, speed=$speed)")
 
-                // 串行化在途合成；拿到锁后复查序号，过期不再浪费一次推理
+                // 串行化在途合成；拿到锁后复查序号与模型状态：
+                // 序号过期 → 不再浪费一次推理；模型已非 Ready → 目录可能正被替换/删除
+                // （SettingsViewModel 会先 markMutating 再 releaseEngine），此时重建 OfflineTts
+                // 会加载到半套/已删文件，直接放弃。
                 val audio = synthMutex.withLock {
                     if (mySeq != speakSeq.get()) return@withLock null
+                    if (modelManager.state.value != TtsModelState.Ready) return@withLock null
                     engine.synthesize(normalized, speed)
                 } ?: run {
-                    Log.d(TAG, "$tag: 合成前已被更新的 speak/stop 取代（seq=$mySeq），放弃")
+                    Log.d(TAG, "$tag: 合成前已被更新的 speak/stop 取代或模型已非就绪（seq=$mySeq），放弃")
+                    if (mySeq == speakSeq.get()) _isPlaying.value = false
                     return@launch
                 }
 
