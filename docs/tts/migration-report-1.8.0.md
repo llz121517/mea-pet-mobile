@@ -228,4 +228,12 @@ docs/tts/{architecture,model-package,device-test-checklist}.md
 
 ---
 
-*本报告由实施过程逐任务记录汇总（ledger：`.superpowers/sdd/2026-10-31-sherpa-onnx-tts-integration/progress.md`）。final review 结果出来后将在 §7 补充。*
+## 11. 最终审查结论
+
+- **整分支 final review（`9cda4ca..fc70902`）**：集成层面（数据流、引擎/播放器、生命周期、并发、R8/ABI/16KB、模型包校验）全部干净；提出 2 个 Important —— ①模型目录替换期间 TTS 可能重建引擎（状态序缺陷）、②README 仍描述旧 4-ONNX 包。
+- **修复**：`cf37b7b`（`TtsModelManager.markMutating()` + 导入/删除/下载流程先失效 `speak` 门禁再 `releaseEngine()`，`synthMutex` 内复查 Ready；193 tests）+ `7e35e0f`（README/architecture/checklist/计划文档同步）。
+- **scoped re-review**：4 项全部 **ADDRESSED**，无新破坏，**Verdict: approved**。
+- **最终结论：代码 SHIP-READY**。发布前仅剩两项仓库外动作：上传 6 个模型文件（平铺名）到 `app.ttsModelBaseUrl`，以及按 `docs/tts/device-test-checklist.md` 跑真机验证（SIGILL/音频/升级迁移）。
+- Deferred triage：`must-fix-before-merge = none`；历史工具的 minor 全部 acceptable。
+
+*本报告由实施过程逐任务记录汇总。*
