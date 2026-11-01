@@ -125,12 +125,12 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 本地 VITS 语音合成，回复以梅尔音色端侧朗读（离线、不走云端）。模型不打包进 APK，首次使用需先就绪语音模型。
 
-**语音模型**（状态卡）：
+**语音模型**（状态卡）：6 个文件、约 84MB —— `model.onnx` / `tokens.txt` / `lexicon.txt` / `fsts/{phone,date,number}.fst`。
 
 | 操作 | 说明 |
 |------|------|
-| **下载模型** | 从 GitHub Releases 拉取约 73MB（4 个 ONNX 模型；ONNX Runtime 原生库随 APK 打包，无需下载），支持断点续传 |
-| **从本地导入** | 网络受限无法访问 GitHub 时，从本地 zip 资源包导入（详见下文「资源包格式」）。导入完成后自动切换为就绪状态 |
+| **下载模型** | 从 GitHub Releases 拉取上述 6 个文件（约 84MB；ONNX Runtime 原生库随 APK 打包，无需下载），支持断点续传 |
+| **从本地导入** | 网络受限无法访问 GitHub 时，从本地 zip 资源包导入（详见下文「本地导入」）。导入完成后自动切换为就绪状态 |
 | **删除模型** | 已就绪时显示，删除模型释放空间（会同时关闭语音开关） |
 
 **发声**（模型就绪后开放，未就绪置灰）：
@@ -141,15 +141,19 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | **悬浮窗语音** | 悬浮窗回复朗读 |
 | **语速** | 滑杆调节朗读速度 0.5x–2.0x（半速 / 原速 / 双倍速） |
 
-**资源包获取**：从 [Releases · tts-resource-pack](https://github.com/llz121517/mea-pet-mobile/releases/tag/tts-resource-pack) 下载 `TTS-Resource-Pack.zip` 到手机后选择导入。
+**在线下载**：远端以**平铺文件名**上传（GitHub Release 里是 `model.onnx`、`lexicon.txt`、`tokens.txt`、`phone.fst`、`date.fst`、`number.fst`），App 下载后落到 `filesDir/tts_model/`，3 个 `.fst` 仍保留在 `fsts/` 子目录。
 
-资源包 zip 约定格式（平铺、无目录）：
+**本地导入**：从 [Releases · tts-resource-pack](https://github.com/llz121517/mea-pet-mobile/releases/tag/tts-resource-pack) 下载 `tts-model-v1.zip` 到手机后选择导入。
+
+资源包 zip 约定格式（**保持 `fsts/` 目录结构**）：
 
 ```
-enc_p.onnx  dp.onnx  flow.onnx  dec.onnx
+model.onnx  tokens.txt  lexicon.txt  fsts/phone.fst  fsts/date.fst  fsts/number.fst
 ```
 
-导入规则：**4 个 ONNX 全量导入**（ONNX Runtime 原生库随 APK 分发，资源包无需携带；旧资源包里多余的 so 会被跳过）。兼容打包时误嵌套子文件夹的情况（自动在子目录中查找，最多 2 层）。
+导入规则：**6 个文件全量导入**；兼容条目平铺，或整体套一层顶层目录（如 `tts-model-v1/`）两种打包方式。原生库（`libonnxruntime.so` 等）随 APK 分发，资源包无需携带。
+
+> 升级提示：1.7.x 的旧版 4-ONNX 模型包升级到 1.8.0 后会被自动清理，必须重新下载 / 导入（约 84MB）。
 
 #### 关于
 

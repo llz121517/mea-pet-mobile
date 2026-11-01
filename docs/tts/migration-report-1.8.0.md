@@ -39,7 +39,7 @@
   ├─ ④ ruleFsts：phone.fst → date.fst → number.fst（顺序固定）
   ├─ ⑤ CharacterLexicon 最长匹配（统一 lexicon.txt，jieba=1 触发）
   ├─ ⑥ 符号 → ID（tokens.txt，add_blank=1）
-  └─ ⑦ VITS2 单图推理（enc_p/dp fp32 + flow/dec fp16，混合精度拼接）
+  └─ ⑦ VITS2 单图推理（prior encoder / duration predictor 为 fp32，flow / decoder 为 fp16，混合精度拼接）
   │
   └→ GeneratedAudio（22050Hz，采样率由引擎给出）→ TtsAudioPlayer.play(samples, sampleRate)
 ```

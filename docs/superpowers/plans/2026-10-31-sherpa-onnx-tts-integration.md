@@ -19,7 +19,8 @@
 - **采样率不写死**：一律用 `GeneratedAudio.sampleRate`（当前模型 22050）。
 - 合成参数：`noiseScale = 0.55f`、`noiseScaleW = 0.7f`、`maxNumSentences = 1`、`numThreads = 2`、`provider = "cpu"`、`debug = false`。
 - 单次朗读文本上限 200 字（保留现有 `MAX_SYNTH_CHARS`，防 OOM）。
-- **`TtsManager` 对外 API 不变**：`speak(ChatMessage, Source)` / `stop()` / `release()` / `releaseEngine()` / `isPlaying` / `sessionMuted` / `toggleSessionMute()` / `Source.MAIN|OVERLAY` / 静态 `onPlaybackStart`。ChatViewModel、FloatingLive2dService、OverlayMenu、Live2dDelegate 均不改。
+- **`TtsManager` 调用方式不变**：`speak(ChatMessage, Source)` / `stop()` / `release()` / `releaseEngine()` / `isPlaying` / `sessionMuted` / `toggleSessionMute()` / `Source.MAIN|OVERLAY` / 静态 `onPlaybackStart`。ChatViewModel、FloatingLive2dService、OverlayMenu、Live2dDelegate 均不改。
+  - **唯一签名变更（commit 9f89ff3 修订）**：`releaseEngine()` 改为 `suspend fun`。sherpa 的 `generateWithConfig` 是阻塞 native 调用，`stop()` 取消不掉，释放必须与在途合成**共用同一把 `synthMutex`** 串行：`suspend fun releaseEngine() { stop(); synthMutex.withLock { engine.release() } }`。调用方（SettingsViewModel 的导入/删除/下载）须在协程里 await 它返回**之后**再替换/删除模型目录，且释放前先把模型状态置为非 Ready，阻止新合并在替换窗口内重建 `OfflineTts`。
 - 旧依赖 `com.microsoft.onnxruntime:onnxruntime-android` 必须移除（sherpa AAR 已内嵌 `libonnxruntime.so`，双份会冲突）。
 - R8 必须保留 `com.k2fsa.sherpa.onnx.**`（JNI 按类名/方法名注册，AAR 自带 proguard.txt 为空）。
 - 16KB page size：已核对 AAR 内 `arm64-v8a/libsherpa-onnx-jni.so`、`libonnxruntime.so` 的 PT_LOAD `p_align = 0x4000`，满足。

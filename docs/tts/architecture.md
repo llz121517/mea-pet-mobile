@@ -25,11 +25,12 @@ VITS 单图推理 → 22050Hz 音频
 
 | 文件 | 内容 | 大小 |
 |---|---|---|
-| model.onnx | 混合精度单图（enc_p/dp fp32 + flow/dec fp16），metadata：sample_rate=22050, add_blank=1, blank_id=0, n_speakers=1, comment=icefall, jieba=1 | 74.9MB |
+| model.onnx | 混合精度单图（prior encoder / duration predictor 为 fp32，flow / decoder 为 fp16），metadata：sample_rate=22050, add_blank=1, blank_id=0, n_speakers=1, comment=icefall, jieba=1 | 74.9MB |
 | tokens.txt | 实际 69 行、67 个唯一 ID（`_`/`^`/`$` 共用 ID 0，ID 58 缺号） | 439 B |
 | lexicon.txt（源文件 lexicon_final3.txt） | 中文词/字 89k + 英文词 126k + 假名/假名词 ~24k；**不含日文汉字词条** | 8.5MB |
 | fsts/phone.fst, date.fst, number.fst | 数字/日期/电话归一化（phone 必须最先） | ~200KB |
-| ja_reading_map.json | 日文词形→假名 16,976 + 单字 1,071 + 动词词干 1,077 | 0.5MB |
+
+> `ja_reading_map.json`（日文词形→假名 16,976 + 单字 1,071 + 动词词干 1,077，0.5MB）**不在模型包内**：它随 APK `assets/tts/` 分发（见 `docs/tts/model-package.md`），模型包只含上表 6 个文件。
 
 ## 3. 上下文改写规则（App 侧核心逻辑）
 
@@ -70,9 +71,10 @@ add_blank=1 → 运行时自动生成 `[0,s0,0,s1,…,sN,0]`。
 - 英文：126k 词覆盖，字母兜底；中英混排正常。
 - 综合样本：samples/comprehensive/（13 条）。
 
-## 7. 待办（Android 集成前）
+## 7. 集成后剩余（真机验证等）
 
-1. 真机验证 lexicon 8.5MB + 模型 75MB 的加载时间/内存；
-2. sherpa AAR 集成（移除 onnxruntime-android，避免双份 so；16KB page size；R8 keep）；
-3. `TtsEngine`/`SherpaTtsEngine`/动态采样率流式播放器/模型包管理改造；
-4. App 侧实现第 3 节改写规则（需嵌入 ja_reading_map.json）。
+1.8.0 已完成 Android 侧集成（sherpa AAR、`SherpaTtsEngine`、动态采样率播放器、模型包管理、第 3 节日文改写规则），以下仅剩真机确认项，逐条见 `docs/tts/device-test-checklist.md`：
+
+1. 真机验证 lexicon 8.5MB + 模型 75MB 的加载时间与内存占用；
+2. 真机验证 16KB page size / SIGILL（sherpa AAR 内嵌 ORT 1.28.2）、打断抢占、悬浮窗朗读、删除后重新导入；
+3. 旧版 1.7.x 四模块模型覆盖安装后的自动清理（升级后需重新下载 / 导入模型）。
