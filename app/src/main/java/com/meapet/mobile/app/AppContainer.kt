@@ -18,12 +18,12 @@ import com.meapet.mobile.memory.MemoryRepository
 import com.meapet.mobile.memory.MemoryService
 import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.tts.TtsManager
-import com.meapet.mobile.tts.TtsSynthesizer
-import com.meapet.mobile.tts.VitsOnnxEngine
 import com.meapet.mobile.tts.audio.TtsAudioPlayer
-import com.meapet.mobile.tts.g2p.ChineseG2p
-import com.meapet.mobile.tts.g2p.G2pProcessor
+import com.meapet.mobile.tts.engine.SherpaTtsEngine
+import com.meapet.mobile.tts.engine.TtsEngine
 import com.meapet.mobile.tts.model.TtsModelManager
+import com.meapet.mobile.tts.text.JaReadingMapLoader
+import com.meapet.mobile.tts.text.TtsTextNormalizer
 import com.meapet.mobile.update.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -159,29 +159,30 @@ class AppContainer(
 
     // ── TTS 语音 ──────────────────────────────────────
 
-    /** TTS 模型/词典下载与状态管理。 */
+    /** TTS 模型包（model.onnx + lexicon + tokens + fsts）下载与状态管理。 */
     val ttsModelManager: TtsModelManager by lazy {
         TtsModelManager(context)
     }
 
-    /** VITS 四模块 ONNX 推理引擎（懒加载 73MB 权重）。 */
-    private val vitsEngine: VitsOnnxEngine by lazy {
-        VitsOnnxEngine(ttsModelManager)
+    /** sherpa-onnx 合成引擎（懒加载 75MB 模型 + 8.9MB lexicon）。 */
+    private val sherpaTtsEngine: TtsEngine by lazy {
+        SherpaTtsEngine(ttsModelManager)
     }
 
-    /** G2P 编排：中文走拼音映射。 */
-    private val g2pProcessor: G2pProcessor by lazy {
-        G2pProcessor(chinese = ChineseG2p(context))
+    /** 文本归一化：拉丁小写 + 日语上下文改写（首次合成时加载 ja_reading_map.json）。 */
+    private val ttsTextNormalizer: TtsTextNormalizer by lazy {
+        TtsTextNormalizer { JaReadingMapLoader.load(context) }
     }
 
-    /** TTS 门面：开关判断、整段合成播放。 */
+    /** TTS 门面：开关判断、归一化、整段合成播放。 */
     val ttsManager: TtsManager by lazy {
         TtsManager(
             settingsManager = settingsManager,
             modelManager = ttsModelManager,
-            synthesizer = TtsSynthesizer(vitsEngine, g2pProcessor),
+            engine = sherpaTtsEngine,
+            normalizer = ttsTextNormalizer,
             player = TtsAudioPlayer(),
-            scope = applicationScope
+            scope = applicationScope,
         ).also { wireVoiceMutex() }
     }
 

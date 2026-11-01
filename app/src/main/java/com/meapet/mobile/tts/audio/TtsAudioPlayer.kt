@@ -6,10 +6,9 @@ import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.meapet.mobile.tts.TtsSynthesizer
 
 /**
- * TTS 音频播放器：AudioTrack 播放 22050Hz 单声道 PCM16。
+ * TTS 音频播放器：AudioTrack 播放单声道 PCM16，采样率由合成结果给出（当前模型 22050Hz）。
  *
  * 整段一次播放：[play] 提交到**专用守护线程**写完即播；[stop] 打断。线程安全。
  *
@@ -39,7 +38,6 @@ class TtsAudioPlayer {
 
     companion object {
         private const val TAG = "TtsAudioPlayer"
-        const val SAMPLE_RATE = TtsSynthesizer.SAMPLE_RATE
 
         /** stop/release 后等待写线程退出的最长毫秒数。 */
         private const val JOIN_TIMEOUT_MS = 500L
@@ -72,25 +70,27 @@ class TtsAudioPlayer {
     private var generation = 0
 
     /**
-     * fp32 波形（[-1,1]）→ int16 并播放。对应参考 `audio * 32767` 转 int16。
+     * fp32 波形 → int16 并播放。采样率由合成结果给出（当前模型 22050），不再写死。
      * 新段到达会先停止旧段。
      */
-    fun play(audio: FloatArray) {
-        Log.d(TAG, "play: audio=${audio.size} 样本 (~${audio.size / (SAMPLE_RATE / 1000f) / 1000f}s)，thread=${Thread.currentThread().name}")
+    fun play(audio: FloatArray, sampleRate: Int) {
+        Log.d(
+            TAG,
+            "play: audio=${audio.size} 样本 sr=$sampleRate (~${audio.size / (sampleRate / 1000f) / 1000f}s)，" +
+                "thread=${Thread.currentThread().name}",
+        )
         // PCM 转换放锁外：与段调度无关，长段转换不应阻塞 stop（触摸语音互斥路径）
-        val pcm = ShortArray(audio.size) { i ->
-            (audio[i].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
-        }
+        val pcm = floatToPcm16(audio)
         synchronized(playLock) {
             // 先停旧段（含 join 等待其写线程退出），再发新段
             stopInternal()
             val gen = synchronized(generationLock) { ++generation }
             isPlaying = true
-            playThread = Thread({ writePcm(pcm, gen) }, "TtsAudioPlayer").apply {
+            playThread = Thread({ writePcm(pcm, gen, sampleRate) }, "TtsAudioPlayer").apply {
                 isDaemon = true
                 start()
             }
-            Log.d(TAG, "play: 已提交写线程 gen=$gen")
+            Log.d(TAG, "play: 已提交写线程 gen=$gen sr=$sampleRate")
         }
     }
 
@@ -176,14 +176,14 @@ class TtsAudioPlayer {
     private fun isCurrent(gen: Int): Boolean =
         synchronized(generationLock) { gen == generation }
 
-    private fun writePcm(pcm: ShortArray, gen: Int) {
+    private fun writePcm(pcm: ShortArray, gen: Int, sampleRate: Int) {
         try {
             if (!isCurrent(gen)) {
                 Log.d(TAG, "writePcm gen=$gen: 已过期（被 stop/新段取代），丢弃")
                 return
             }
-            val t = obtainTrack(pcm.size)
-            Log.d(TAG, "writePcm gen=$gen: track 已创建 session=${t.audioSessionId} buffer=${t.bufferSizeInFrames} 帧")
+            val t = obtainTrack(pcm.size, sampleRate)
+            Log.d(TAG, "writePcm gen=$gen: track 已创建 sr=$sampleRate session=${t.audioSessionId} buffer=${t.bufferSizeInFrames} 帧")
             // 注册末尾帧标记：硬件播到最后一帧时回调（真实播放完成）
             t.setPositionNotificationPeriod(pcm.size)   // 周期回调（兜底）
             t.notificationMarkerPosition = pcm.size     // 末尾帧标记
@@ -247,9 +247,9 @@ class TtsAudioPlayer {
      * 调用前提：playLock 已串行化段调度，正常路径下旧写线程已退出；
      * 兜底 release 仅兜底 join 超时等异常残留。
      */
-    private fun obtainTrack(minSamples: Int): AudioTrack {
+    private fun obtainTrack(minSamples: Int, sampleRate: Int): AudioTrack {
         val minBuf = AudioTrack.getMinBufferSize(
-            SAMPLE_RATE,
+            sampleRate,
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT
         )
@@ -268,7 +268,7 @@ class TtsAudioPlayer {
                 )
                 .setAudioFormat(
                     AudioFormat.Builder()
-                        .setSampleRate(SAMPLE_RATE)
+                        .setSampleRate(sampleRate)
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                         .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                         .build()
@@ -282,3 +282,10 @@ class TtsAudioPlayer {
         }
     }
 }
+
+/**
+ * fp32 波形（[-1,1]）→ PCM16。越界值裁剪到 [-1,1]，与参考实现 `audio * 32767` 一致；
+ * 抽成顶层函数便于 JVM 单测（不触发 AudioTrack）。
+ */
+internal fun floatToPcm16(audio: FloatArray): ShortArray =
+    ShortArray(audio.size) { i -> (audio[i].coerceIn(-1f, 1f) * 32767f).toInt().toShort() }
