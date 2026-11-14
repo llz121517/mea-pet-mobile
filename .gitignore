@@ -28,3 +28,6 @@ __pycache__/
 
 # 本地 spike / 工具链（模型、样本、Python venv，不入库）
 /.tools/
+
+# 子代理/SDD 工作区（临时报告，不入库）
+/.superpowers/
