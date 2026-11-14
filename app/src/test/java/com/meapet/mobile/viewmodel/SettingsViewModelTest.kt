@@ -216,10 +216,10 @@ class SettingsViewModelTest {
 
     @Test
     fun `恢复默认提示词后可撤销`() = runTest(dispatcher.scheduler) {
-        whenever(settingsManager.getSystemPrompt()).thenReturn("自定义人格")
         val vm = FakeSettingsViewModel(application)
 
-        vm.resetSystemPrompt()
+        // 快照取 UI 传入的旧文本（而不是 DataStore：用户常常还没失焦保存）
+        vm.resetSystemPrompt("自定义人格")
         dispatcher.scheduler.runCurrent()
 
         verifyBlocking(settingsManager) { setSystemPrompt(SettingsKeys.Defaults.SYSTEM_PROMPT) }
@@ -234,6 +234,17 @@ class SettingsViewModelTest {
         // 撤销后写回原值，不能写回默认值
         verifyBlocking(settingsManager) { setSystemPrompt("自定义人格") }
         assertNull(vm.state.value.pendingUndo)
+    }
+
+    @Test
+    fun `文本已是默认值时恢复默认不产生撤销条`() = runTest(dispatcher.scheduler) {
+        val vm = FakeSettingsViewModel(application)
+
+        vm.resetSystemPrompt(SettingsKeys.Defaults.SYSTEM_PROMPT)
+        dispatcher.scheduler.runCurrent()
+
+        assertNull("默认值没有可撤销的差异", vm.state.value.pendingUndo)
+        verifyBlocking(settingsManager, never()) { setSystemPrompt(any()) }
     }
 
     @Test

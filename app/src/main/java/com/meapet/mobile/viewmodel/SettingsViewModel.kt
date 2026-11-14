@@ -273,18 +273,21 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
      *
      * 立即生效，同时开一个撤销窗口（撤销条见 [SettingsUndo.ResetPrompt]）：
      * 快照取的是执行前的原提示词，窗口内点撤销即写回。
+     *
+     * @param current 文本框当前显示的内容。快照取它而**不是** DataStore：
+     *   用户常常是改完文本、还没失焦保存就点「恢复默认」，此时 DataStore 里仍是旧值，
+     *   拿它当快照撤销回来会把用户眼前的内容丢掉；同理也不能拿 DataStore 判"是否已是默认值"。
      */
-    fun resetSystemPrompt() {
+    fun resetSystemPrompt(current: String) {
         viewModelScope.launch {
-            val previous = settingsManager.getSystemPrompt()
-            // 已是默认值：没有可撤销的差异，不必弹撤销条
-            if (previous == SettingsKeys.Defaults.SYSTEM_PROMPT) return@launch
+            // 已经就是默认值：没有可撤销的差异（UI 上也把按钮置灰，这里兜底）
+            if (current == SettingsKeys.Defaults.SYSTEM_PROMPT) return@launch
             settingsManager.setSystemPrompt(SettingsKeys.Defaults.SYSTEM_PROMPT)
             beginUndo(
                 SettingsUndo.ResetPrompt(
                     id = nextUndoId(),
                     deadlineMs = nextUndoDeadline(),
-                    previousPrompt = previous
+                    previousPrompt = current
                 )
             )
         }

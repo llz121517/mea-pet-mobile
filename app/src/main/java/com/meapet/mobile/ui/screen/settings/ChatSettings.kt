@@ -47,12 +47,18 @@ internal fun SystemPromptSection(
 
         Spacer(Modifier.height(8.dp))
 
-        // 恢复默认：先改本地编辑态让文本框立刻变化，再异步落盘并开撤销窗口
+        // 恢复默认：先改本地编辑态让文本框立刻变化，再异步落盘并开撤销窗口。
+        // 快照由 ViewModel 从传入的旧文本取——用户可能改完还没失焦保存，
+        // 用 DataStore 里的值当快照会把眼前内容丢掉。
+        val isDefault = local.systemPrompt == SettingsKeys.Defaults.SYSTEM_PROMPT
         OutlinedButton(
             onClick = {
+                val previous = local.systemPrompt
                 local.systemPrompt = SettingsKeys.Defaults.SYSTEM_PROMPT
-                viewModel.resetSystemPrompt()
+                viewModel.resetSystemPrompt(previous)
             },
+            // 已是默认值就置灰：没有可重置的内容（与背景壁纸的「恢复默认」一致）
+            enabled = !isDefault,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
