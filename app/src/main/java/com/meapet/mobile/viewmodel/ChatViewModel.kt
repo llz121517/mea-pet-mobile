@@ -508,8 +508,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         undoTimer = viewModelScope.launch {
             // 用剩余时间而非窗口全长：被别的操作顶掉前若已过去一段时间，这里自然对齐
             delay((undo.deadlineMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
-            undoTimer = null
-            _state.update { it.copy(pendingUndo = null) }
+            // 只结算自己这一代：期间可能已被更新的操作顶掉，
+            // 那时槽里是别人的快照，不该由这条定时器关闭
+            if (_state.value.pendingUndo?.id == undo.id) {
+                undoTimer = null
+                _state.update { it.copy(pendingUndo = null) }
+            }
         }
     }
 

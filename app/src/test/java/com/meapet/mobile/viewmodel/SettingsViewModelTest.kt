@@ -248,6 +248,37 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `新操作顶掉旧窗口时旧定时器不得提前关闭新窗口`() = runTest(dispatcher.scheduler) {
+        val vm = FakeSettingsViewModel(application)
+
+        vm.resetSystemPrompt("第一版")
+        dispatcher.scheduler.runCurrent()
+        val first = vm.state.value.pendingUndo as SettingsUndo.ResetPrompt
+
+        // 旧窗口走了一半，用户又触发一次（换掉了共享槽里的快照）
+        dispatcher.scheduler.advanceTimeBy(UNDO_WINDOW_MS / 2)
+        dispatcher.scheduler.runCurrent()
+        vm.resetSystemPrompt("第二版")
+        dispatcher.scheduler.runCurrent()
+        val second = vm.state.value.pendingUndo as SettingsUndo.ResetPrompt
+        assertEquals("第二版", second.previousPrompt)
+        assertTrue("每次操作必须拿到新的代次", first.id != second.id)
+
+        // 越过旧窗口的截止时刻：旧定时器若还在，会把新窗口一起关掉
+        dispatcher.scheduler.advanceTimeBy(UNDO_WINDOW_MS / 2 + 100)
+        dispatcher.scheduler.runCurrent()
+        assertTrue(
+            "旧定时器到点不应清算新快照",
+            vm.state.value.pendingUndo is SettingsUndo.ResetPrompt
+        )
+
+        // 新窗口自己走完才作废
+        dispatcher.scheduler.advanceTimeBy(UNDO_WINDOW_MS)
+        dispatcher.scheduler.runCurrent()
+        assertNull(vm.state.value.pendingUndo)
+    }
+
+    @Test
     fun `移除壁纸在撤销窗口内不删文件到期才删`() = runTest(dispatcher.scheduler) {
         val wallpaperStore: WallpaperStore = mock()
         Mockito.doReturn(wallpaperStore).`when`(container).wallpaperStore

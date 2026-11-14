@@ -468,13 +468,21 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
 
     /** 登记一个撤销窗口：把快照放进状态，并起一个到期的提交定时器。 */
     private fun beginUndo(undo: SettingsUndo) {
-        // 新操作顶掉旧的：上一条窗口已关门，先把它的延迟清理做掉
+        // 新操作顶掉旧的：先关掉上一条窗口的定时器，再做它的延迟清理。
+        // 只调 finalizePending 是不够的——旧定时器仍在跑，到点还会再调一次
+        // finalizePending()，而那时槽里已经换成新快照，等于把新窗口提前关掉
+        // （现象：新撤销条沿用上一条的倒计时，没走完就消失）。
+        endUndoWindow()
         finalizePending()
         _state.update { it.copy(pendingUndo = undo) }
         undoTimer = viewModelScope.launch {
             delay((undo.deadlineMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
-            undoTimer = null
-            finalizePending()
+            // 只结算自己这一代：期间可能已被更新的操作顶掉，
+            // 那时交回撤销条的是别人的快照，不该由这条定时器关闭
+            if (_state.value.pendingUndo?.id == undo.id) {
+                undoTimer = null
+                finalizePending()
+            }
         }
     }
 
