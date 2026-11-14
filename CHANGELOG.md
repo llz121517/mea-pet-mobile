@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 
 - **中文声调准确度为模型语料上限** — 该模型以日语语料微调，少数多音字声调仍不完美（如「今」）；听感与旧版一致，已确认接受，不作为本版回归项。
-- **历史 SIGILL 坑已包含修复** — 1.7.1 记录的 ORT 1.23.2 KleidiAI SME 崩溃（[onnxruntime#26921](https://github.com/microsoft/onnxruntime/issues/26921)）在 sherpa 内嵌的 1.28.2 中已含修复；仍建议按 `docs/tts/device-test-checklist.md` 在骁龙机型上确认 `logcat` 无 `Fatal signal 4 (SIGILL)`。
+- **历史 SIGILL 坑已包含修复** — 1.7.1 记录的 ORT 1.23.2 KleidiAI SME 崩溃（[onnxruntime#26921](https://github.com/microsoft/onnxruntime/issues/26921)）在 sherpa 内嵌的 1.28.2 中已含修复。
 - **设置页 Debug 构建新增「试听文本」入口** — 任意文本直接合成，便于真机验证数字 / 日期 / 日语 / 中英混排；release 构建不显示该入口。
 - 版本号升至 1.8.0（versionCode 14）；applicationId 与签名不变，可覆盖安装，但**升级后必须重新准备语音模型**（见上）。
 - 真机验收清单见 [`docs/tts/device-test-checklist.md`](docs/tts/device-test-checklist.md)。
