@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "package": "tts-model-v1",
+  "comment": "已发布模型包（app 侧 1.8.0 使用的 tts-model-v1）的产物指纹。verify_assets.py 以此为准。level 含义：bit-identical=字节必须完全一致；content-identical=内容一致、允许行序差异（见 note）；record-only=仅记录，不由本管线生成。",
+  "published_from_commit": "17e0441",
+  "artifacts": [
+    {
+      "path": "tokens.txt",
+      "size": 439,
+      "sha256": "a1511ff2233d31364008ac483ee02d7d60f89c19b507224ef10604938bd68120",
+      "level": "bit-identical",
+      "generated_by": "build_tokens.py",
+      "note": "68 符号 + ^/$（^ 与 $ 均映射 blank id 0）；UTF-8 + CRLF。"
+    },
+    {
+      "path": "lexicon.txt",
+      "size": 8916530,
+      "sha256": "97e2b4fb7da877f399df0fac0aafec82d2b3992a2c988172e95999859f37dfae",
+      "level": "content-identical",
+      "generated_by": "build_lexicon_zh.py + build_lexicon_ja.py + build_lexicon_en.py（extras 由 build_lexicon_en.py 产出）",
+      "lines": 239739,
+      "sections": {
+        "zh_chars": 41923,
+        "zh_phrases": 47111,
+        "ja": 24616,
+        "en": 126048,
+        "extras": 41
+      },
+      "content_sha256": "295140197187a0468ac8db4b651b8b63b378eafc86a3278d56b07aced91d337e",
+      "content_sha256_definition": "sha256(('\\n'.join(sorted(lexicon 的全部非空行)) + '\\n').encode('utf-8'))，即忽略行序的内容指纹",
+      "note": "词条集合与每个词条的 token 与发布包完全一致（239,739 行：zh 单字 41,923 + zh 词组 47,111 + ja 24,616 + en 126,048 + extras 41）。字节差异仅来自前 41,923 条单字的**行序**：旧脚本 rebuild_zh_lexicon.py 用 Python set() 遍历字符表（str hash 随机化），行序不可复现；新生成器改用 pypinyin.pinyin_dict 的插入顺序。content_sha256（排序后取 sha）相同 ⇒ 内容一致，只是单字段排列不同。"
+    },
+    {
+      "path": "ja_reading_map.json",
+      "size": 514556,
+      "sha256": "5d92d21265804b88ffc922abbb1659ea0b3635935ebd045b17ac491febd029b2",
+      "level": "bit-identical",
+      "generated_by": "build_lexicon_ja.py",
+      "note": "word 16,976 / char_full 1,071 / char_stem 1,077；json.dump(ensure_ascii=False) 紧凑格式。随 APK assets 分发，不进模型包。"
+    },
+    {
+      "path": "en_words.bloom",
+      "size": 524288,
+      "sha256": "5057e2869e40dc87808db3b60e5ef685f71edc65effc249c524f12c754b34523",
+      "level": "bit-identical",
+      "generated_by": "build_bloom.py",
+      "note": "裸 bitset：m=1<<22 bits、k=3、FNV-1a 双种子（0x811C9DC5 / 0x01000193），无文件头。算法与 App 的 EnglishBloomHash 完全一致。随 APK assets 分发。"
+    },
+    {
+      "path": "fsts/phone.fst",
+      "size": 88630,
+      "sha256": "1ac2b6fa56b1442320c4de7db08353bab8963a2b57f365eebcdd3a2d3562f8d7",
+      "level": "bit-identical",
+      "generated_by": "download_data.py",
+      "note": "外部下载，不由本管线生成；sha256 由 data-sources.json 与 artifacts.json 双重校验。"
+    },
+    {
+      "path": "fsts/date.fst",
+      "size": 59154,
+      "sha256": "eb8aa079ae3cb81d8f4404992f39d61a0cb990947512b5b8d1e54d1f6980e718",
+      "level": "bit-identical",
+      "generated_by": "download_data.py",
+      "note": "外部下载；ruleFsts 顺序：phone → date → number。"
+    },
+    {
+      "path": "fsts/number.fst",
+      "size": 64482,
+      "sha256": "743f402181fcfebf76cc2f0546b71fa26476e626fbe4e460fb7b4c3a7a8bd5bd",
+      "level": "bit-identical",
+      "generated_by": "download_data.py",
+      "note": "外部下载；ruleFsts 顺序：phone → date → number。"
+    },
+    {
+      "path": "model.onnx",
+      "size": 74864089,
+      "sha256": "2d4f52c6b6fdabf62a8b027bdfd53183342c0ddf8b8867bc45edbc6171b026f5",
+      "level": "record-only",
+      "generated_by": "（不在本管线）",
+      "note": "需要外部训练 checkpoint G_latest.pth + 4 模块 ONNX 拼接，见 tools/tts/build_model.md。build_package.py 通过 --model 引用，不重新生成。"
+    }
+  ],
+  "package_files_not_asserted": {
+    "comment": "dist/ 下的 zip 与 manifest 每次打包都会变（zip 内嵌文件时间戳、manifest 只是当次清单），不作为一致性断言；仅记录发布时的实测值。",
+    "tts-model-v1.zip": {
+      "size": 71137797,
+      "sha256": "cf10d9207d70dc9f5f4d32f301eb26af5bf35abb60dfbbe18c29409876ed5f04"
+    },
+    "manifest.json": {
+      "size": 859,
+      "sha256": "33e0065bfb636370e66523db77eb21b723b47b20252174e8116904c85166cd2d"
+    }
+  }
+}

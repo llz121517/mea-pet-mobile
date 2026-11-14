@@ -1,0 +1,20 @@
+# tools/tts 的生成产物与下载数据（不入库，用 README 的命令重建）
+#
+# 根 .gitignore 已忽略 /dist/（仅仓库根）与 __pycache__/，但不会覆盖这里，所以单独列出。
+# 注意：gitignore 不支持行尾注释，注释必须独占一行。
+
+# build_tokens / build_lexicon_* / build_bloom 的产物（含 8.9MB lexicon.txt）
+out/
+
+# download_data.py 下载的 JMdict / open_jtalk 词典 / fsts（约 130MB）
+data/
+
+# build_package.py 的模型包（model.onnx 75MB + zip 71MB）
+dist/
+
+# build_samples.py 的试听 wav
+samples/
+
+# 脚本字节码
+__pycache__/
+*.pyc
