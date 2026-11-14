@@ -219,7 +219,7 @@ class AppContainer(
             listOf(
                 launch { memoryRepository.loadFromDisk() },
                 launch { conversationManager.restore(conversationStore.load()) },
-                // 旧版兼容迁移：启动时异步执行（预计 1.9.0 随 legacy 模块整体删除）
+                // 版本迁移：启动时异步执行（框架长期保留；当前 TTS step 预计 1.9.0 移除，见 docs/legacy-compat.md）
                 launch { LegacyMigration.run(context, settingsManager, ttsModelManager) },
                 // Live2D 模型文件预读到内存缓存：模型加载在 GL 线程同步执行，
                 // asset 读取是最大耗时（阻塞主线程 onPause 数秒）。预热后 GL 线程
