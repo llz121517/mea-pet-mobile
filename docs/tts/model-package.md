@@ -25,7 +25,17 @@ App 支持两种：
 ## 重新生成
 
 ```powershell
-.\.tools\tts-venv\Scripts\python.exe .tools\tts-spike\scripts\build_app_model_package.py
+python tools/tts/download_data.py
+python tools/tts/build_tokens.py     --out tools/tts/out
+python tools/tts/build_lexicon_zh.py --out tools/tts/out
+python tools/tts/build_lexicon_en.py --out tools/tts/out
+python tools/tts/build_lexicon_ja.py --out tools/tts/out
+python tools/tts/build_bloom.py      --lexicon tools/tts/out/lexicon.txt --out tools/tts/out/en_words.bloom
+python tools/tts/verify_assets.py    --assets tools/tts/out
+python tools/tts/build_package.py    --assets tools/tts/out --model <path/to/model.onnx> --out tools/tts/dist
 ```
 
-源数据（lexicon/model）由 `.tools/tts-spike/scripts/{build_lexicon_v3,build_lexicon_en,build_lexicon_ja,rebuild_zh_lexicon,test_final_design}.py` 生成；英文 OOV 补条与 Bloom 资产由 `build_lexicon_extras.py` 生成（`lexicon_final3.txt` → `lexicon_final4.txt`，打包脚本从 final4 复制为 `dist/lexicon.txt`）。链路见 `docs/tts/architecture.md`。
+G2P / 词表生成管线已从 `.tools/tts-spike/scripts/` 收编到 `tools/tts/`（新 clone + 联网下载
+即可复现）：命令与产物清单见 [`g2p-pipeline.md`](g2p-pipeline.md)，细节与已知差异见
+[`tools/tts/README.md`](../../tools/tts/README.md)。`model.onnx` 不在该管线内（需要外部训练
+checkpoint），来源说明见 [`tools/tts/build_model.md`](../../tools/tts/build_model.md)。
