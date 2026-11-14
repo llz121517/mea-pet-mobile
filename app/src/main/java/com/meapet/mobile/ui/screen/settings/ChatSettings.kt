@@ -11,32 +11,28 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import com.meapet.mobile.settings.SettingsKeys
 import com.meapet.mobile.viewmodel.SettingsUiState
 import com.meapet.mobile.viewmodel.SettingsViewModel
-import com.meapet.mobile.settings.SettingsKeys
 
 // ═══════════════════════════════════════════════════
 //  对话：System Prompt 与记忆系统
 // ═══════════════════════════════════════════════════
 
-/** System Prompt 编辑区。 */
+/**
+ * System Prompt 编辑区。
+ *
+ * 「恢复默认」立即生效（本地编辑态 + 落盘），随后由设置页的撤销条给一次反悔机会：
+ * 撤销条是页面级能力，不属于这个叶子组件。
+ */
 @Composable
 internal fun SystemPromptSection(
     viewModel: SettingsViewModel,
     local: SettingsLocalState
 ) {
     SectionTitle("System Prompt")
-
-    // 内联二次确认：true=已变「确认恢复？」等待再次点击
-    var confirmReset by remember { mutableStateOf(false) }
 
     Column {
         OutlinedTextField(
@@ -51,34 +47,18 @@ internal fun SystemPromptSection(
 
         Spacer(Modifier.height(8.dp))
 
-        // 恢复默认：首次点击变红字「确认恢复？」，再次点击才执行；失焦/超时自动还原
+        // 恢复默认：先改本地编辑态让文本框立刻变化，再异步落盘并开撤销窗口
         OutlinedButton(
             onClick = {
-                if (confirmReset) {
-                    confirmReset = false
-                    // 1. 立即更新本地编辑状态（文本框内容瞬间变化）
-                    local.systemPrompt = SettingsKeys.Defaults.SYSTEM_PROMPT
-                    // 2. 异步写入 DataStore
-                    viewModel.resetSystemPrompt()
-                } else {
-                    confirmReset = true
-                }
+                local.systemPrompt = SettingsKeys.Defaults.SYSTEM_PROMPT
+                viewModel.resetSystemPrompt()
             },
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = if (confirmReset) "确认恢复？" else "恢复默认",
-                color = if (confirmReset) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.primary
+                text = "恢复默认",
+                color = MaterialTheme.colorScheme.primary
             )
-        }
-    }
-
-    // 确认状态 3 秒无操作自动还原，避免误留
-    LaunchedEffect(confirmReset) {
-        if (confirmReset) {
-            kotlinx.coroutines.delay(3000)
-            confirmReset = false
         }
     }
 }

@@ -163,4 +163,41 @@ class ConversationManagerTest {
             .filter { it.role == ChatRole.assistant }
         assertEquals(listOf("漏了1", "漏了2"), assistants.map { it.content })
     }
+
+    // ── 撤销：整体替换历史 ────────────────────────────
+
+    @Test
+    fun replaceAllRestoresSnapshotVerbatim() {
+        val mgr = ConversationManager()
+        val snapshot = listOf(
+            ChatMessage(role = ChatRole.user, content = "旧问题", timestamp = 1_000L),
+            ChatMessage(role = ChatRole.assistant, content = "旧回答", timestamp = 2_000L),
+        )
+
+        mgr.replaceAll(snapshot)
+
+        // 撤销要的是「回到清空前的精确状态」：顺序、条数、内容都不能被合并策略改动
+        assertEquals(snapshot, mgr.getMessages())
+    }
+
+    @Test
+    fun replaceAllDiscardsCurrentMessages() {
+        val mgr = ConversationManager()
+        mgr.addMessage(ChatMessage(role = ChatRole.user, content = "清空后残留"))
+
+        mgr.replaceAll(emptyList())
+
+        assertTrue(mgr.getMessages().isEmpty())
+    }
+
+    @Test
+    fun replaceAllOverwritesInsteadOfAppending() {
+        val mgr = ConversationManager()
+        mgr.addMessage(ChatMessage(role = ChatRole.user, content = "残留"))
+        val snapshot = listOf(ChatMessage(role = ChatRole.user, content = "恢复"))
+
+        mgr.replaceAll(snapshot)
+
+        assertEquals(snapshot, mgr.getMessages())
+    }
 }

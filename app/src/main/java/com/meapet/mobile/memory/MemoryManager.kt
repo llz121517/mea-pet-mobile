@@ -177,6 +177,20 @@ class MemoryManager(
         Log.i(TAG, "Memory manager reset")
     }
 
+    /**
+     * 用快照恢复记忆（撤销「清除全部」用）。
+     *
+     * 只负责记忆条目；[clearAll] 顺带重置的对话轮数计数由调用方（ChatViewModel）
+     * 一并还原——那是设置项的职责，不在记忆模块里越界处理。
+     *
+     * @param snapshot [clearAll] 之前 [getAllMemories] 的结果
+     */
+    suspend fun restoreAll(snapshot: List<MemoryItem>) {
+        if (snapshot.isEmpty()) return
+        repository.saveAll(snapshot)
+        Log.i(TAG, "Restored ${snapshot.size} memories from undo snapshot")
+    }
+
     private fun typeLabel(type: MemoryType): String = when (type) {
         MemoryType.SHORT_TERM -> "短期"
         MemoryType.LONG_TERM -> "长期"

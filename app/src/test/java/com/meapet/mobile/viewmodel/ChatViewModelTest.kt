@@ -3,11 +3,14 @@ package com.meapet.mobile.viewmodel
 import com.meapet.mobile.chat.ChatMessage
 import com.meapet.mobile.chat.ChatRole
 import com.meapet.mobile.chat.ChatService
+import com.meapet.mobile.chat.ChatUndo
 import com.meapet.mobile.app.AppContainer
+import com.meapet.mobile.core.UNDO_WINDOW_MS
 import com.meapet.mobile.app.MeaPetApplication
 import com.meapet.mobile.memory.MemoryItem
 import com.meapet.mobile.memory.MemoryManager
 import com.meapet.mobile.memory.MemoryStats
+import com.meapet.mobile.memory.MemoryType
 import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.tts.TtsManager
 import com.meapet.mobile.update.UpdateCheckResult
@@ -23,6 +26,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -30,8 +34,10 @@ import org.mockito.Mockito
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argThat
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.verifyBlocking
 import org.mockito.kotlin.wheneverBlocking
 
 /**
@@ -295,5 +301,101 @@ class ChatViewModelTest {
 
         org.mockito.kotlin.verify(chatService, org.mockito.kotlin.never())
             .retryMessage(any<ChatMessage>())
+    }
+
+    // ── 撤销窗口 ──────────────────────────────────────
+
+    @Test
+    fun `清除对话后可在撤销窗口内还原历史`() = runTest(dispatcher.scheduler) {
+        val history = listOf(
+            ChatMessage(role = ChatRole.user, content = "你好", timestamp = 1_000L),
+            ChatMessage(role = ChatRole.assistant, content = "喵~", timestamp = 2_000L)
+        )
+        whenever(chatService.getHistory()).thenReturn(history)
+        val vm = ChatViewModel(application)
+        vm.advance()
+
+        vm.onEvent(ChatEvent.ClearConversation)
+        dispatcher.scheduler.runCurrent()
+
+        assertTrue(vm.state.value.messages.isEmpty())
+        assertTrue(
+            "清空后应留下可撤销快照",
+            vm.state.value.pendingUndo is ChatUndo.ClearConversation
+        )
+
+        vm.undoPending()
+        vm.advance()
+
+        verify(chatService).restoreHistory(history)
+        assertEquals(history, vm.state.value.messages)
+        assertNull(vm.state.value.pendingUndo)
+    }
+
+    @Test
+    fun `撤销窗口到期后丢弃快照不再还原`() = runTest(dispatcher.scheduler) {
+        whenever(chatService.getHistory())
+            .thenReturn(listOf(ChatMessage(role = ChatRole.user, content = "你好", timestamp = 1_000L)))
+        val vm = ChatViewModel(application)
+        vm.advance()
+
+        vm.onEvent(ChatEvent.ClearConversation)
+        dispatcher.scheduler.runCurrent()
+        assertNotNull(vm.state.value.pendingUndo)
+
+        // 窗口走完：快照作废，不能再还原
+        dispatcher.scheduler.advanceTimeBy(UNDO_WINDOW_MS + 1)
+        dispatcher.scheduler.runCurrent()
+
+        assertNull("到期后快照应丢弃", vm.state.value.pendingUndo)
+        verify(chatService, never()).restoreHistory(any())
+    }
+
+    @Test
+    fun `清除全部记忆后可撤销并还原条目与轮数`() = runTest(dispatcher.scheduler) {
+        val memories = listOf(
+            MemoryItem(id = "m1", content = "喜欢下雨天", type = MemoryType.SHORT_TERM),
+            MemoryItem(id = "m2", content = "猫叫 Mea", type = MemoryType.FACTUAL)
+        )
+        wheneverBlocking { memoryManager.getAllMemories() }.thenReturn(memories)
+        whenever(settingsManager.getExchangeCount()).thenReturn(7)
+        val vm = ChatViewModel(application)
+        vm.advance()
+
+        vm.onEvent(ChatEvent.ClearMemory)
+        dispatcher.scheduler.runCurrent()
+
+        assertTrue(
+            "清空后应留下可撤销快照",
+            vm.state.value.pendingUndo is ChatUndo.ClearMemory
+        )
+
+        vm.undoPending()
+        vm.advance()
+
+        verifyBlocking(memoryManager) { restoreAll(memories) }
+        verifyBlocking(settingsManager) { setExchangeCount(7) }
+        assertNull(vm.state.value.pendingUndo)
+    }
+
+    @Test
+    fun `发送新消息会作废清除对话的撤销窗口`() = runTest(dispatcher.scheduler) {
+        whenever(chatService.getHistory())
+            .thenReturn(listOf(ChatMessage(role = ChatRole.user, content = "旧消息", timestamp = 1_000L)))
+        wheneverBlocking { chatService.sendMessage(any<ChatMessage>()) }
+            .thenReturn(Result.failure(RuntimeException("network")))
+        val vm = ChatViewModel(application)
+        vm.advance()
+
+        vm.onEvent(ChatEvent.ClearConversation)
+        dispatcher.scheduler.runCurrent()
+        assertNotNull(vm.state.value.pendingUndo)
+
+        vm.onEvent(ChatEvent.SendMessage("新消息"))
+        dispatcher.scheduler.runCurrent()
+
+        // 新消息已产生：再撤销会把这条新消息一起抹掉，因此旧窗口必须作废
+        assertNull("发送新消息后快照应作废", vm.state.value.pendingUndo)
+        verify(chatService, never()).restoreHistory(any())
     }
 }

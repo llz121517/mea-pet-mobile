@@ -27,9 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
@@ -59,10 +57,12 @@ import com.meapet.mobile.chat.ChatUiState
 import com.meapet.mobile.chat.MemoryDialogUi
 import com.meapet.mobile.memory.MemoryType
 import com.meapet.mobile.settings.SettingsKeys
+import com.meapet.mobile.ui.component.AppSnackbarHost
 import com.meapet.mobile.ui.component.ChatBubble
 import com.meapet.mobile.ui.component.ChatInputBar
 import com.meapet.mobile.ui.component.ErrorBubble
 import com.meapet.mobile.ui.component.OverlayMenu
+import com.meapet.mobile.ui.component.UndoSnackbarEffect
 import com.meapet.mobile.ui.screen.settings.SettingsScreen
 import com.meapet.mobile.viewmodel.ChatViewModel
 
@@ -155,6 +155,14 @@ private fun ChatPage(
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // 破坏性操作是「立即执行 + 可撤销」：执行结果与撤销快照都在
+    // state.pendingUndo 里，本页只负责把撤销条显示出来。
+    UndoSnackbarEffect(
+        pending = state.pendingUndo,
+        hostState = snackbarHostState,
+        onUndo = { chatViewModel.undoPending() }
+    )
+
     // 主页聊天气泡透明度：订阅设置流（默认 1.0 不透明），实时反映设置页的滑杆
     val context = LocalContext.current
     val bubbleAlphaFlow = remember(context) {
@@ -170,14 +178,6 @@ private fun ChatPage(
         val lastIndex = state.messages.size - 1 + if (state.error != null) 1 else 0
         if (lastIndex >= 0) {
             listState.animateScrollToItem(lastIndex)
-        }
-    }
-
-    // 清除记忆/对话后回显 Snackbar
-    LaunchedEffect(state.memoryContextInfo) {
-        state.memoryContextInfo?.let {
-            snackbarHostState.showSnackbar(it)
-            chatViewModel.onEvent(ChatEvent.DismissMemoryInfo)
         }
     }
 
@@ -216,6 +216,7 @@ private fun ChatPage(
         OverlayMenu(
             onToggleOverlay = onToggleOverlay,
             onClearConversation = {
+                // 立即清空，随后由撤销条给一次反悔机会（见 UndoSnackbarEffect）
                 chatViewModel.onEvent(ChatEvent.ClearConversation)
             },
             onShowMemories = {
@@ -234,21 +235,14 @@ private fun ChatPage(
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
-        // ── Layer 4: Snackbar ──
-        // 动作文案（如「查看」）跟随主题 primary，避免默认 inversePrimary 固定偏蓝
-        val snackbarActionColor = MaterialTheme.colorScheme.primary
-        SnackbarHost(
+        // ── Layer 4: Snackbar（提示 + 破坏性操作的二次确认） ──
+        // 动作文案跟随主题 primary，见 AppSnackbarHost
+        AppSnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 100.dp)
-        ) { data ->
-            Snackbar(
-                snackbarData = data,
-                actionColor = snackbarActionColor,
-                actionContentColor = snackbarActionColor
-            )
-        }
+        )
 
         // ── Layer 5: 记忆查看对话框 ──
         state.memoryDialog?.let { dialog ->
@@ -256,7 +250,12 @@ private fun ChatPage(
                 dialog = dialog,
                 onDismiss = { chatViewModel.onEvent(ChatEvent.DismissMemories) },
                 onDeleteMemory = { id -> chatViewModel.onEvent(ChatEvent.DeleteMemory(id)) },
-                onClearAll = { chatViewModel.onEvent(ChatEvent.ClearMemory) }
+                onClearAll = {
+                    // 先关对话框再清空：撤销条在主窗口，Dialog 是独立窗口且带遮罩，
+                    // 不关掉它提示条会被压在后面看不见也点不到
+                    chatViewModel.onEvent(ChatEvent.DismissMemories)
+                    chatViewModel.onEvent(ChatEvent.ClearMemory)
+                }
             )
         }
     }
@@ -342,7 +341,11 @@ private fun MessageList(
 
 
 /**
- * 记忆查看对话框：统计 + 条目列表 + 单条删除 + 清除全部（带确认）。
+ * 记忆查看对话框：统计 + 条目列表 + 单条删除 + 清除全部。
+ *
+ * 「清除全部」只上报点击（[onClearAll]）：清空与撤销条都由页面负责，
+ * 本对话框不自己维护任何确认态——对话框是独立窗口，在这里做确认反而
+ * 会被自己的遮罩挡住提示条。
  */
 @Composable
 private fun MemoryDialog(
@@ -351,8 +354,6 @@ private fun MemoryDialog(
     onDeleteMemory: (String) -> Unit,
     onClearAll: () -> Unit
 ) {
-    var confirmClearAll by remember { mutableStateOf(false) }
-
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -450,17 +451,11 @@ private fun MemoryDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    if (confirmClearAll) {
-                        TextButton(onClick = { confirmClearAll = false; onClearAll() }) {
-                            Text("确认清除？", color = MaterialTheme.colorScheme.error)
-                        }
-                    } else {
-                        TextButton(
-                            onClick = { confirmClearAll = true },
-                            enabled = dialog.memories.isNotEmpty()
-                        ) {
-                            Text("清除全部")
-                        }
+                    TextButton(
+                        onClick = onClearAll,
+                        enabled = dialog.memories.isNotEmpty()
+                    ) {
+                        Text("清除全部")
                     }
                     TextButton(onClick = onDismiss) {
                         Text("关闭")

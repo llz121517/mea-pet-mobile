@@ -31,9 +31,6 @@ sealed interface ChatEvent {
     /** 清除错误。 */
     data object DismissError : ChatEvent
 
-    /** 清除记忆信息提示（Snackbar 已显示）。 */
-    data object DismissMemoryInfo : ChatEvent
-
     /** 启动静默检测更新提示已展示。 */
     data object DismissUpdateNotice : ChatEvent
 }

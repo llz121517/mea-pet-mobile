@@ -8,10 +8,12 @@ import com.meapet.mobile.chat.ChatMessage
 import com.meapet.mobile.chat.ChatRole
 import com.meapet.mobile.chat.ChatService
 import com.meapet.mobile.chat.ChatUiState
+import com.meapet.mobile.chat.ChatUndo
 import com.meapet.mobile.chat.SystemBubblePolicy
 import com.meapet.mobile.chat.MemoryDialogUi
 import com.meapet.mobile.chat.UpdateNoticeUi
 import com.meapet.mobile.app.MeaPetApplication
+import com.meapet.mobile.core.undoWindowMs
 import com.meapet.mobile.live2d.Live2dDelegate
 import com.meapet.mobile.live2d.Live2dManager
 import com.meapet.mobile.memory.MemoryManager
@@ -20,6 +22,7 @@ import com.meapet.mobile.update.UpdateCheckResult
 import com.meapet.mobile.update.UpdateChecker
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -66,6 +69,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** 在途发送任务；清空会话时取消，避免回复回写到已清空的会话。 */
     private var sendJob: Job? = null
 
+    /** 撤销窗口的到期定时器（窗口内撤销会取消它）。 */
+    private var undoTimer: Job? = null
+
+    /** 快照唯一标识递增源：同一操作连续触发时让 UI 的撤销条重新弹出。 */
+    private var undoSeq = 0L
+
+    /** 本机撤销窗口时长（无障碍开启时由系统建议值延长）。 */
+    private val undoWindow: Long by lazy { undoWindowMs(getApplication()) }
 
     init {
         // 初始化时从 ConversationManager 加载已有消息
@@ -241,7 +252,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             is ChatEvent.DeleteMemory -> deleteMemory(event.id)
             is ChatEvent.RetryLastMessage -> retryLastMessage()
             is ChatEvent.DismissError -> dismissError()
-            is ChatEvent.DismissMemoryInfo -> dismissMemoryInfo()
             is ChatEvent.DismissUpdateNotice -> dismissUpdateNotice()
         }
     }
@@ -250,6 +260,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun sendMessage(content: String) {
         if (content.isBlank()) return
+        // 新的对话已经产生：清除前的快照不再代表当前会话，撤销会把新消息一起抹掉
+        discardPendingUndo()
 
         val userMessage = ChatMessage(role = ChatRole.user, content = content)
         _state.update {
@@ -295,6 +307,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun retryLastMessage() {
         val lastUserMsg = _state.value.messages.lastOrNull { it.isUser }
             ?: return
+        // 重试会产生新的消息对，与「清除前快照」冲突，先作废旧窗口
+        discardPendingUndo()
 
         _state.update {
             it.copy(
@@ -351,6 +365,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // 取消在途发送，否则回复到达后会把消息回写进已清空的会话
         sendJob?.cancel()
         sendJob = null
+        // 快照必须在清空之前取：撤销窗口内这是唯一的回滚依据
+        val snapshot = chatService.getHistory()
         chatService.clearHistory()
         _state.update {
             // 只清对话相关字段，保留 updateNotice / memoryDialog 等无关状态
@@ -358,22 +374,42 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 messages = emptyList(),
                 isLoading = false,
                 error = null,
-                inputText = "",
-                memoryContextInfo = "对话已清除"
+                inputText = ""
+            )
+        }
+        if (snapshot.isNotEmpty()) {
+            beginUndo(
+                ChatUndo.ClearConversation(
+                    id = nextUndoId(),
+                    deadlineMs = nextUndoDeadline(),
+                    snapshot = snapshot
+                )
             )
         }
     }
 
     private fun clearMemory() {
         viewModelScope.launch {
+            // 快照含对话轮数：clearAll 会把它一并归零，撤销要一起还原
+            val snapshot = memoryManager.getAllMemories()
+            val exchangeCount = container.settingsManager.getExchangeCount()
             memoryManager.clearAll()
             _state.update {
                 it.copy(
-                    memoryContextInfo = "记忆已全部清除",
                     // 对话框开着时同步清空列表
                     memoryDialog = it.memoryDialog?.copy(
                         memories = emptyList(),
                         stats = MemoryStats()
+                    )
+                )
+            }
+            if (snapshot.isNotEmpty()) {
+                beginUndo(
+                    ChatUndo.ClearMemory(
+                        id = nextUndoId(),
+                        deadlineMs = nextUndoDeadline(),
+                        snapshot = snapshot,
+                        exchangeCount = exchangeCount
                     )
                 )
             }
@@ -405,6 +441,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** 删除单条记忆并刷新对话框列表。 */
     private fun deleteMemory(id: String) {
         val mm = memoryManager
+        // 记忆已被单独修改：整批清除的快照不再等同于当前状态
+        discardPendingUndo()
         viewModelScope.launch {
             mm.delete(id)
             _state.update { current ->
@@ -423,9 +461,61 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(error = null) }
     }
 
-    private fun dismissMemoryInfo() {
-        _state.update { it.copy(memoryContextInfo = null) }
+    // ── 撤销窗口 ──────────────────────────────────────
+
+    /**
+     * 撤销最近一次破坏性操作（Snackbar 的「撤销」键）。
+     *
+     * 用 pendingUndo 里携带的快照回滚；回滚完成后立即清空 pendingUndo，
+     * 让 UI 的撤销条随之消失。
+     */
+    fun undoPending() {
+        val undo = _state.value.pendingUndo ?: return
+        undoTimer?.cancel()
+        undoTimer = null
+        when (undo) {
+            is ChatUndo.ClearConversation -> {
+                chatService.restoreHistory(undo.snapshot)
+                _state.update { it.copy(messages = undo.snapshot, pendingUndo = null) }
+            }
+            is ChatUndo.ClearMemory -> {
+                viewModelScope.launch {
+                    memoryManager.restoreAll(undo.snapshot)
+                    container.settingsManager.setExchangeCount(undo.exchangeCount)
+                    _state.update { it.copy(pendingUndo = null) }
+                }
+            }
+        }
     }
+
+    /**
+     * 丢弃未到期的撤销窗口（不做任何回滚）。
+     *
+     * 用于「同一份状态已被新的写入覆盖」的场景（发了新消息、删了单条记忆）：
+     * 旧快照已不代表当前状态，此时撤销会把新内容一起抹掉。
+     */
+    private fun discardPendingUndo() {
+        if (_state.value.pendingUndo == null) return
+        undoTimer?.cancel()
+        undoTimer = null
+        _state.update { it.copy(pendingUndo = null) }
+    }
+
+    /** 登记一个撤销窗口：把快照放进状态，并起一个到期丢弃的定时器。 */
+    private fun beginUndo(undo: ChatUndo) {
+        undoTimer?.cancel()
+        _state.update { it.copy(pendingUndo = undo) }
+        undoTimer = viewModelScope.launch {
+            // 用剩余时间而非窗口全长：被别的操作顶掉前若已过去一段时间，这里自然对齐
+            delay((undo.deadlineMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
+            undoTimer = null
+            _state.update { it.copy(pendingUndo = null) }
+        }
+    }
+
+    private fun nextUndoId(): Long = ++undoSeq
+
+    private fun nextUndoDeadline(): Long = SystemClock.elapsedRealtime() + undoWindow
 
     private fun dismissUpdateNotice() {
         _state.update { it.copy(updateNotice = null) }

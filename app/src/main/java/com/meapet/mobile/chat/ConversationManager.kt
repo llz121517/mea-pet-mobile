@@ -134,6 +134,23 @@ class ConversationManager(
         Log.i(TAG, "Conversation cleared")
     }
 
+    /**
+     * 用给定列表整体替换会话历史（撤销「清除对话」用）。
+     *
+     * 与 [restore] 的区别：不插队、不去重，按传入顺序**原样**恢复并落盘——
+     * 撤销要求的是"回到清空前的精确状态"，任何合并策略都可能改变原结果。
+     *
+     * @param snapshot 清空前的 [getMessages] 快照
+     */
+    fun replaceAll(snapshot: List<ChatMessage>) {
+        synchronized(lock) {
+            messages.clear()
+            messages.addAll(snapshot)
+            persistLocked()
+        }
+        Log.i(TAG, "Conversation restored from undo snapshot (${snapshot.size} messages)")
+    }
+
     /** 按 id 移除消息。@return 是否有消息被移除 */
     fun removeMessage(id: String): Boolean = synchronized(lock) {
         val removed = messages.removeAll { it.id == id }

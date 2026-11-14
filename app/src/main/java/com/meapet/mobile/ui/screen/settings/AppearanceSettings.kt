@@ -74,7 +74,12 @@ import kotlinx.coroutines.withContext
 //  外观：背景壁纸、气泡透明度、主题模式与配色预设
 // ═══════════════════════════════════════════════════
 
-/** 背景壁纸：当前预览 + 从相册选图 + 恢复默认 + 模糊强度。 */
+/**
+ * 背景壁纸：当前预览 + 从相册选图 + 恢复默认 + 模糊强度。
+ *
+ * 「恢复默认」立即切回纯色背景，随后由设置页的撤销条给一次反悔机会
+ * （撤销窗口内壁纸文件仍保留，见 SettingsViewModel.clearWallpaper）。
+ */
 @Composable
 internal fun BackgroundWallpaperSection(
     state: SettingsUiState,
@@ -174,6 +179,7 @@ internal fun BackgroundWallpaperSection(
             Text("从相册选择")
         }
         OutlinedButton(
+            // 立即切纯色，撤销条由设置页统一显示
             onClick = { viewModel.clearWallpaper() },
             enabled = state.wallpaperPath.isNotBlank(),
             modifier = Modifier.weight(1f)

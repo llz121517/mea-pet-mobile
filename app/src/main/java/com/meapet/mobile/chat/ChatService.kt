@@ -212,4 +212,14 @@ class ChatService(
         conversationManager.clear()
         Log.i(TAG, "Chat history cleared")
     }
+
+    /**
+     * 用快照恢复历史（撤销「清除对话」用）。
+     *
+     * @param snapshot 清空前的 [getHistory] 结果
+     */
+    fun restoreHistory(snapshot: List<ChatMessage>) {
+        conversationManager.replaceAll(snapshot)
+        Log.i(TAG, "Chat history restored from undo snapshot (${snapshot.size} messages)")
+    }
 }

@@ -3,10 +3,14 @@ package com.meapet.mobile.viewmodel
 import com.meapet.mobile.app.AppContainer
 import com.meapet.mobile.app.MeaPetApplication
 import com.meapet.mobile.config.AppConfig
+import com.meapet.mobile.core.UNDO_WINDOW_MS
+import com.meapet.mobile.core.WallpaperStore
+import com.meapet.mobile.settings.SettingsKeys
 import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.tts.TtsManager
 import com.meapet.mobile.tts.model.TtsModelManager
 import com.meapet.mobile.tts.model.TtsModelState
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +21,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.mockito.Mockito
@@ -40,7 +46,10 @@ import org.mockito.kotlin.wheneverBlocking
 class SettingsViewModelTest {
 
     /** 屏蔽静态依赖的测试替身。 */
-    private class FakeSettingsViewModel(application: MeaPetApplication) : SettingsViewModel(application) {
+    private class FakeSettingsViewModel(
+        application: MeaPetApplication,
+        override val ioDispatcher: CoroutineDispatcher = Dispatchers.Unconfined
+    ) : SettingsViewModel(application) {
         override fun privacyAgreedFlow() = MutableStateFlow(false)
         override fun isPrivacyAgreed() = false
         override fun readAppVersion() = "1.0.0"
@@ -201,5 +210,76 @@ class SettingsViewModelTest {
         verify(ttsModelManager).markMutating()
         verifyBlocking(ttsManager) { releaseEngine() }
         verifyBlocking(ttsModelManager) { download(any()) }
+    }
+
+    // ── 撤销窗口 ──────────────────────────────────────
+
+    @Test
+    fun `恢复默认提示词后可撤销`() = runTest(dispatcher.scheduler) {
+        whenever(settingsManager.getSystemPrompt()).thenReturn("自定义人格")
+        val vm = FakeSettingsViewModel(application)
+
+        vm.resetSystemPrompt()
+        dispatcher.scheduler.runCurrent()
+
+        verifyBlocking(settingsManager) { setSystemPrompt(SettingsKeys.Defaults.SYSTEM_PROMPT) }
+        assertTrue(
+            "重置后应留下可撤销快照",
+            vm.state.value.pendingUndo is SettingsUndo.ResetPrompt
+        )
+
+        vm.undoPending()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // 撤销后写回原值，不能写回默认值
+        verifyBlocking(settingsManager) { setSystemPrompt("自定义人格") }
+        assertNull(vm.state.value.pendingUndo)
+    }
+
+    @Test
+    fun `移除壁纸在撤销窗口内不删文件到期才删`() = runTest(dispatcher.scheduler) {
+        val wallpaperStore: WallpaperStore = mock()
+        Mockito.doReturn(wallpaperStore).`when`(container).wallpaperStore
+        whenever(settingsManager.getWallpaperPath()).thenReturn("/data/user/0/wall.jpg")
+        val vm = FakeSettingsViewModel(application, dispatcher)
+
+        vm.clearWallpaper()
+        dispatcher.scheduler.runCurrent()
+
+        verifyBlocking(settingsManager) { setWallpaperPath("") }
+        // 撤销窗口内文件必须保留，否则撤销时无图可恢复
+        verify(wallpaperStore, never()).clearAll()
+
+        // 窗口走完：快照作废，此时才真正删文件
+        dispatcher.scheduler.advanceTimeBy(UNDO_WINDOW_MS + 1)
+        dispatcher.scheduler.runCurrent()
+
+        verify(wallpaperStore).clearAll()
+        assertNull(vm.state.value.pendingUndo)
+    }
+
+    @Test
+    fun `导入新壁纸会作废旧的撤销窗口且不删新图`() = runTest(dispatcher.scheduler) {
+        val wallpaperStore: WallpaperStore = mock()
+        Mockito.doReturn(wallpaperStore).`when`(container).wallpaperStore
+        whenever(settingsManager.getWallpaperPath()).thenReturn("/data/user/0/old.jpg")
+        wheneverBlocking { wallpaperStore.importFromContentUri(any()) }
+            .thenReturn("/data/user/0/new.jpg")
+        val vm = FakeSettingsViewModel(application, dispatcher)
+
+        vm.clearWallpaper()
+        dispatcher.scheduler.runCurrent()
+        assertTrue(vm.state.value.pendingUndo is SettingsUndo.ClearWallpaper)
+
+        vm.importWallpaper(mock())
+        dispatcher.scheduler.runCurrent()
+
+        assertNull("导入新图后旧快照必须作废", vm.state.value.pendingUndo)
+        verifyBlocking(settingsManager) { setWallpaperPath("/data/user/0/new.jpg") }
+
+        // 窗口到期也不能再 clearAll：那会删掉刚导入的这张
+        dispatcher.scheduler.advanceTimeBy(UNDO_WINDOW_MS + 1)
+        dispatcher.scheduler.runCurrent()
+        verify(wallpaperStore, never()).clearAll()
     }
 }

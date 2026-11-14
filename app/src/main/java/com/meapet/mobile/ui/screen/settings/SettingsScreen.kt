@@ -28,6 +28,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -46,10 +47,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meapet.mobile.R
+import com.meapet.mobile.ui.component.AppSnackbarHost
+import com.meapet.mobile.ui.component.UndoSnackbarEffect
 import com.meapet.mobile.ui.component.PrivacyPolicyContent
 import com.meapet.mobile.ui.theme.findPreset
 import com.meapet.mobile.ui.theme.isDarkTheme
 import com.meapet.mobile.viewmodel.SettingsUiState
+import com.meapet.mobile.viewmodel.SettingsUndo
 import com.meapet.mobile.viewmodel.SettingsViewModel
 
 /**
@@ -94,9 +98,26 @@ fun SettingsScreen(
 
     var page by remember { mutableStateOf(SettingsPage.ROOT) }
 
+    // 设置页的 Snackbar 宿主：供「可撤销操作」的撤销条使用。
+    // 提到 Scaffold 层，子页切换（AnimatedContent 重建）时撤销条不会丢。
+    val snackbarHostState = remember { SnackbarHostState() }
+
     // 本地编辑状态（进入设置时取一次已存值，失焦/离开设置时才写回）。
     // 提到根页持有，这样在子页之间来回切不会丢掉正在编辑的内容。
     val local = rememberSettingsLocalState(state)
+
+    // ── 可撤销操作的撤销条 ──
+    // 快照与到期定时器都在 SettingsViewModel 里：转屏、切子页都不影响窗口，
+    // 本页只负责把 pendingUndo 画成带倒计时的 Snackbar。
+    UndoSnackbarEffect(
+        pending = state.pendingUndo,
+        hostState = snackbarHostState,
+        onUndo = { undo ->
+            settingsViewModel.undoPending()
+            // 文本框是本地编辑态、不跟随 DataStore 流，撤销后要手动同步回原值
+            if (undo is SettingsUndo.ResetPrompt) local.systemPrompt = undo.previousPrompt
+        }
+    )
 
     // 离开整个设置页时兜底保存（焦点还留在输入框内的场景）
     DisposableEffect(Unit) {
@@ -120,6 +141,7 @@ fun SettingsScreen(
     }
 
     Scaffold(
+        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(page.title) },
@@ -181,13 +203,24 @@ fun SettingsScreen(
                     }
 
                     SettingsPage.CHAT -> {
-                        SettingsCard { SystemPromptSection(settingsViewModel, local) }
+                        SettingsCard {
+                            SystemPromptSection(
+                                viewModel = settingsViewModel,
+                                local = local
+                            )
+                        }
                         SettingsCard { MemorySection(state, settingsViewModel, local, darkTheme) }
                     }
 
                     // AppearanceSection 内部已含背景壁纸 / 气泡透明度 / 主题三小节
                     SettingsPage.APPEARANCE -> {
-                        SettingsCard { AppearanceSection(state, settingsViewModel, darkTheme) }
+                        SettingsCard {
+                            AppearanceSection(
+                                state = state,
+                                viewModel = settingsViewModel,
+                                darkTheme = darkTheme
+                            )
+                        }
                     }
 
                     SettingsPage.VOICE -> {

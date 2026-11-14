@@ -1,6 +1,7 @@
 package com.meapet.mobile.viewmodel
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.meapet.mobile.client.OpenAiCompatibleClient
@@ -8,6 +9,8 @@ import com.meapet.mobile.client.exception.ApiException
 import com.meapet.mobile.client.model.ApiResponse
 import com.meapet.mobile.core.AppInfo
 import com.meapet.mobile.core.PrivacyConsentManager
+import com.meapet.mobile.core.UndoableAction
+import com.meapet.mobile.core.undoWindowMs
 import com.meapet.mobile.app.MeaPetApplication
 import com.meapet.mobile.settings.SettingsKeys
 import com.meapet.mobile.settings.SettingsManager
@@ -16,8 +19,10 @@ import com.meapet.mobile.tts.model.TtsModelState
 import com.meapet.mobile.update.UpdateCheckResult
 import com.meapet.mobile.update.UpdateChecker
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -74,8 +79,39 @@ data class SettingsUiState(
     /** 主界面背景壁纸文件绝对路径（空串 = 默认纯色）。 */
     val wallpaperPath: String = SettingsKeys.Defaults.WALLPAPER_PATH,
     /** 主界面背景壁纸模糊强度（0~1，0 = 不模糊）。 */
-    val wallpaperBlur: Double = SettingsKeys.Defaults.WALLPAPER_BLUR
+    val wallpaperBlur: Double = SettingsKeys.Defaults.WALLPAPER_BLUR,
+    /** 刚执行、仍在撤销窗口内的破坏性操作（null = 无可撤销项）。 */
+    val pendingUndo: SettingsUndo? = null
 )
+
+/**
+ * 设置页可撤销的破坏性操作。
+ *
+ * 快照是撤销窗口内唯一的回滚依据；窗口到期后由 ViewModel 丢弃。
+ * 壁纸这类「移出配置但文件暂时保留」的操作，到期时才真正清理文件
+ * （见 [SettingsViewModel.finalizePending]）。
+ */
+sealed interface SettingsUndo : UndoableAction {
+    override val undoLabel: String get() = "撤销"
+
+    /** 恢复默认 System Prompt：快照为原提示词。 */
+    data class ResetPrompt(
+        override val id: Long,
+        override val deadlineMs: Long,
+        val previousPrompt: String
+    ) : SettingsUndo {
+        override val message: String get() = "System Prompt 已恢复默认"
+    }
+
+    /** 移除背景壁纸：快照为原路径（文件在窗口内保留，到期才删）。 */
+    data class ClearWallpaper(
+        override val id: Long,
+        override val deadlineMs: Long,
+        val previousPath: String
+    ) : SettingsUndo {
+        override val message: String get() = "背景壁纸已移除"
+    }
+}
 
 open class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -86,6 +122,18 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
 
     /** 手动检测更新的在途任务，重复点击时取消上一次。 */
     private var checkUpdateJob: Job? = null
+
+    /** 撤销窗口的到期定时器（窗口内撤销会取消它）。 */
+    private var undoTimer: Job? = null
+
+    /** 快照唯一标识递增源：同一操作连续触发时让 UI 的撤销条重新弹出。 */
+    private var undoSeq = 0L
+
+    /** 本机撤销窗口时长（无障碍开启时由系统建议值延长）。 */
+    private val undoWindow: Long by lazy { undoWindowMs(getApplication()) }
+
+    /** 延迟清理（删除壁纸文件）用的调度器；单测覆写为测试调度器以验证到期时序。 */
+    protected open val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 
     private val _state = MutableStateFlow(initialState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -214,14 +262,31 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
     fun saveSystemPrompt(prompt: String) {
         viewModelScope.launch {
             if (prompt == settingsManager.getSystemPrompt()) return@launch
+            // 用户已经写出新值：旧的「恢复默认」快照不再代表当前状态，撤销会把它覆盖掉
+            discardPendingUndo()
             settingsManager.setSystemPrompt(prompt)
         }
     }
 
-    /** 将 System Prompt 恢复为默认值并持久化。 */
+    /**
+     * 将 System Prompt 恢复为默认值并持久化。
+     *
+     * 立即生效，同时开一个撤销窗口（撤销条见 [SettingsUndo.ResetPrompt]）：
+     * 快照取的是执行前的原提示词，窗口内点撤销即写回。
+     */
     fun resetSystemPrompt() {
         viewModelScope.launch {
+            val previous = settingsManager.getSystemPrompt()
+            // 已是默认值：没有可撤销的差异，不必弹撤销条
+            if (previous == SettingsKeys.Defaults.SYSTEM_PROMPT) return@launch
             settingsManager.setSystemPrompt(SettingsKeys.Defaults.SYSTEM_PROMPT)
+            beginUndo(
+                SettingsUndo.ResetPrompt(
+                    id = nextUndoId(),
+                    deadlineMs = nextUndoDeadline(),
+                    previousPrompt = previous
+                )
+            )
         }
     }
 
@@ -333,17 +398,104 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
     fun importWallpaper(uri: android.net.Uri) {
         viewModelScope.launch {
             val path = container.wallpaperStore.importFromContentUri(uri) ?: return@launch
+            // 导入成功后旧壁纸文件已被新图清理逻辑删掉，「移除壁纸」的撤销窗口必须作废：
+            // 否则窗口到期时会删掉整个目录，把刚导入的这张也删了
+            discardPendingUndo()
             settingsManager.setWallpaperPath(path)
         }
     }
 
-    /** 恢复默认纯色背景：清空壁纸文件并置空路径。 */
+    /**
+     * 移除背景壁纸，恢复默认纯色背景。
+     *
+     * 立即切纯色，但**只清路径、不删文件**——撤销窗口内文件必须还在，
+     * 否则撤销时无图可恢复。到期（或被新操作顶掉）时才真正删除目录，
+     * 见 [finalizePending]。
+     */
     fun clearWallpaper() {
         viewModelScope.launch {
-            container.wallpaperStore.clearAll()
+            val previousPath = settingsManager.getWallpaperPath()
+            // 本来就没有壁纸：没有可撤销的内容
+            if (previousPath.isBlank()) return@launch
             settingsManager.setWallpaperPath("")
+            beginUndo(
+                SettingsUndo.ClearWallpaper(
+                    id = nextUndoId(),
+                    deadlineMs = nextUndoDeadline(),
+                    previousPath = previousPath
+                )
+            )
         }
     }
+
+    // ── 撤销窗口 ──────────────────────────────────────
+
+    /**
+     * 撤销最近一次破坏性操作（Snackbar 的「撤销」键）。
+     *
+     * 用 pendingUndo 携带的快照回滚；回滚后清空 pendingUndo，UI 的撤销条随之消失。
+     */
+    fun undoPending() {
+        val undo = _state.value.pendingUndo ?: return
+        endUndoWindow()
+        when (undo) {
+            is SettingsUndo.ResetPrompt -> viewModelScope.launch {
+                settingsManager.setSystemPrompt(undo.previousPrompt)
+                _state.update { it.copy(pendingUndo = null) }
+            }
+            is SettingsUndo.ClearWallpaper -> viewModelScope.launch {
+                settingsManager.setWallpaperPath(undo.previousPath)
+                _state.update { it.copy(pendingUndo = null) }
+            }
+        }
+    }
+
+    /**
+     * 丢弃未到期的撤销窗口，**不做**延迟清理。
+     *
+     * 用于「同一份状态已被新的写入覆盖」的场景（保存了新提示词、导入了新壁纸）：
+     * 此时旧快照已不代表当前状态，撤销只会把新值覆盖掉；也不该再做 [finalizePending]
+     * 的清理——例如导入壁纸时旧文件已被清理逻辑带走，再 clearAll 会把新图删掉。
+     */
+    private fun discardPendingUndo() {
+        if (_state.value.pendingUndo == null) return
+        endUndoWindow()
+        _state.update { it.copy(pendingUndo = null) }
+    }
+
+    /** 登记一个撤销窗口：把快照放进状态，并起一个到期的提交定时器。 */
+    private fun beginUndo(undo: SettingsUndo) {
+        // 新操作顶掉旧的：上一条窗口已关门，先把它的延迟清理做掉
+        finalizePending()
+        _state.update { it.copy(pendingUndo = undo) }
+        undoTimer = viewModelScope.launch {
+            delay((undo.deadlineMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
+            undoTimer = null
+            finalizePending()
+        }
+    }
+
+    /**
+     * 窗口结束（到期 / 被新操作顶掉）：丢弃快照并执行延迟清理。
+     *
+     * 目前只有壁纸需要清理——文件在窗口内一直保留，确认用户不会再撤销后才删。
+     */
+    private fun finalizePending() {
+        val undo = _state.value.pendingUndo ?: return
+        _state.update { it.copy(pendingUndo = null) }
+        if (undo is SettingsUndo.ClearWallpaper) {
+            viewModelScope.launch(ioDispatcher) { container.wallpaperStore.clearAll() }
+        }
+    }
+
+    private fun endUndoWindow() {
+        undoTimer?.cancel()
+        undoTimer = null
+    }
+
+    private fun nextUndoId(): Long = ++undoSeq
+
+    private fun nextUndoDeadline(): Long = SystemClock.elapsedRealtime() + undoWindow
 
     /** 更新背景壁纸模糊强度（0~1，0 = 不模糊）。 */
     fun updateWallpaperBlur(blur: Double) {
