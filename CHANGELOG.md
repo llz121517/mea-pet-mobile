@@ -20,12 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **语音合成迁移到 sherpa-onnx** — 自写的 VITS 推理与 G2P 链路整体换为 sherpa-onnx（JitPack `v2.0.1`）：自有 Mea VITS2 单图 + 统一 lexicon，中 / 日 / 英混排由**一个模型**完成，不按语言切引擎。App 侧只做轻量上下文改写（拉丁转小写、连续汉字段紧挨假名时按读音映射改写为假名），数字 / 日期 / 电话号码交由 ruleFsts 归一化朗读（`fsts/phone.fst` → `fsts/date.fst` → `fsts/number.fst`，顺序固定；电话逐位、年龄与时间按数词）。
-- **模型包改为 6 个文件（约 84MB）** — `model.onnx`（74.9MB）、`tokens.txt`、`lexicon.txt`（8.5MB）、`fsts/{phone,date,number}.fst`。旧版 4 文件模型（enc_p / dp / flow / dec，约 73MB）与新引擎不兼容：升级后由一次性兼容模块 `com.meapet.mobile.legacy` 在 App 启动时异步清理（命中残留时同时关闭主界面与悬浮窗两个语音开关），并引导重新下载；网络受限可在设置页「从本地导入」使用本地 zip（`dist/tts-model-v1.zip`，约 71MB）。
-- **移除 onnxruntime-android 依赖** — 原生库改由 sherpa AAR 提供（内嵌 ONNX Runtime 1.28.2），每个 ABI 只带一份 `libonnxruntime.so` + `libsherpa-onnx-{c-api,cxx-api,jni}.so`，不再有重复 so；仅保留 arm64-v8a / armeabi-v7a 两个 ABI。
-- **播放器采样率改为跟随引擎输出** — `TtsAudioPlayer` 按引擎实际输出的采样率建 `AudioTrack`（不再硬编码 22050Hz），换模型/换采样率不会变速或变调。
-- **删除自写 G2P 与拼音资产** — `VitsOnnxEngine`、`TtsSynthesizer`、`DurationExpander`、`g2p/*` 与 `assets/pinyin/*`（约 8.9 万行词表）全部移除，APK 减小约 1.65MB；模型包状态判定改为按文件清单 + 精确大小校验。
-- **破坏性操作统一为「立即执行 + 可撤销」** — 「清除对话」「清除全部记忆」「恢复默认 System Prompt」「恢复默认壁纸」四处原先范式各异：`AlertDialog` 弹窗、「按钮变红字『确认恢复？』+ 3 秒超时自动还原」的两段式点击、以及干脆没有任何提示的直接删除。现统一为 Gmail 式撤销：点击即执行，底部弹出「提示语 + 撤销键 + 倒计时进度条」，窗口内点撤销用快照回滚，进度条走完即提交。窗口默认 5 秒，开启无障碍时按 `AccessibilityManager.getRecommendedTimeoutMillis` 延长；截止时刻用 `elapsedRealtime` 单调时钟，改系统时间不影响窗口。同一份状态被新的写入覆盖时（发出新消息、导入新壁纸、保存新提示词、删除单条记忆）撤销窗口立即作废——旧快照已不代表当前状态，此时撤销只会把新内容一起抹掉；其中导入新壁纸还必须作废，否则窗口到期会删掉刚导入的图。**快照存放在 ViewModel 而非 UI**：`ChatUiState.pendingUndo` / `SettingsUiState.pendingUndo` 携带执行前状态（会话历史、记忆条目 + 对话轮数、原提示词、原壁纸路径），到期定时器也由 ViewModel 持有，因此转屏、切页、重建都不会误提交或丢失撤销机会，重弹时进度条从剩余时间接着走而非重来。壁纸是唯一需要改行为的：移除时只清 DataStore 路径、**不删文件**，窗口到期才真正删除目录，否则撤销时无图可恢复（进程在窗口内被杀会残留一个旧文件，下次导入/移除时由既有清理逻辑带走）。新增公共件 `ui/component/UndoSnackbar.kt`（`UndoSnackbarEffect` + 自定义 `SnackbarVisuals` + 带倒计时进度条的自定义 `AppSnackbarHost`）与 `core/UndoableAction.kt`（撤销契约 + 无障碍窗口换算），主界面与设置页共用同一套外观与语义；原先只在主界面覆写 `actionColor` 的写法一并收敛。随「清除对话/记忆」的旧提示路径（`ChatUiState.memoryContextInfo`、`DismissMemoryInfo`）删除——撤销条已覆盖该反馈，留着会重复弹两次；记忆对话框的「清除全部」也不再需要先关弹窗再确认的绕行。
+- **语音合成迁移到 sherpa-onnx** — 自写的 VITS 推理与 G2P 链路整体换为 sherpa-onnx，中日英混排由同一个模型完成，不再按语言切引擎；数字 / 日期 / 电话号码按规则归一化朗读。
+- **语音模型包换新** — 新模型 6 个文件、约 84MB，与旧版 4 文件模型不兼容：升级后启动时会自动清理旧包并引导重新下载（网络受限可在设置页「从本地导入」）。
+- **移除 onnxruntime-android 依赖** — 原生库改由 sherpa AAR 提供，不再有重复 so，仅保留 arm64-v8a / armeabi-v7a 两个 ABI。
+- **播放采样率跟随引擎输出** — 不再硬编码 22050Hz，换模型或换采样率不会变速、变调。
+- **删除自写 G2P 与拼音资产** — 相关引擎与约 8.9 万行词表全部移除，APK 减小约 1.65MB。
+- **破坏性操作统一为「立即执行 + 可撤销」** — 「清除对话」「清除全部记忆」「恢复默认 System Prompt」「恢复默认壁纸」四处原先分别是弹窗确认、两段式点击、无提示直接删除，现统一为 Gmail 式撤销：点击即执行，底部弹出「提示语 + 撤销键 + 倒计时进度条」，窗口内点撤销用快照回滚，走完即提交。窗口默认 5 秒（开启无障碍时按系统建议延长）；快照与到期定时器都在 ViewModel，转屏、切页不会误提交或丢掉撤销机会；同一状态被新的写入覆盖时（发新消息、导入新壁纸、保存新提示词、删除单条记忆）窗口立即作废。壁纸移除改为窗口到期才真正删文件，否则撤销时无图可恢复。
+- **软键盘改用应用自己的 inset 避让** — 窗口不再随键盘 resize / pan（此前主页会整体上跳、设置页底部提示条被键盘盖住），改为按 IME inset 让页面自行收窄：输入栏、消息列表与底部提示条（含撤销条）始终在键盘上方；提示条另补了左右留边与远离屏幕底边、手势区的余量。
 
 ### Notes
 
