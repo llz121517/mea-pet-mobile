@@ -23,6 +23,7 @@ import com.meapet.mobile.tts.audio.TtsAudioPlayer
 import com.meapet.mobile.tts.engine.SherpaTtsEngine
 import com.meapet.mobile.tts.engine.TtsEngine
 import com.meapet.mobile.tts.model.TtsModelManager
+import com.meapet.mobile.tts.text.EnglishBloomIndex
 import com.meapet.mobile.tts.text.JaReadingMapLoader
 import com.meapet.mobile.tts.text.TtsTextNormalizer
 import com.meapet.mobile.update.UpdateChecker
@@ -170,9 +171,16 @@ class AppContainer(
         SherpaTtsEngine(ttsModelManager)
     }
 
-    /** 文本归一化：拉丁小写 + 日语上下文改写（首次合成时加载 ja_reading_map.json）。 */
+    /**
+     * 文本归一化：拉丁小写 + 英文 OOV 逐字母兜底 + 日语上下文改写。
+     * 两个资产（ja_reading_map.json / en_words.bloom）都在首次合成（IO 线程）时懒加载。
+     */
     private val ttsTextNormalizer: TtsTextNormalizer by lazy {
-        TtsTextNormalizer { JaReadingMapLoader.load(context) }
+        val bloom = lazy { EnglishBloomIndex.load(context) }
+        TtsTextNormalizer(
+            mapProvider = { JaReadingMapLoader.load(context) },
+            knownEnglishWord = { word -> bloom.value.mightContain(word) },
+        )
     }
 
     /** TTS 门面：开关判断、归一化、整段合成播放。 */

@@ -5,13 +5,13 @@
 | 文件 | 大小（B） | sha256 |
 |---|---|---|
 | model.onnx | `74864089` | `2d4f52c6b6fdabf62a8b027bdfd53183342c0ddf8b8867bc45edbc6171b026f5` |
-| lexicon.txt | `8915316` | `3f46c6ed7218ebdde5e188484053c448a0803f315b5f3d6f7891efe48ba582fa` |
+| lexicon.txt | `8916530` | `97e2b4fb7da877f399df0fac0aafec82d2b3992a2c988172e95999859f37dfae` |
 | tokens.txt | `439` | `a1511ff2233d31364008ac483ee02d7d60f89c19b507224ef10604938bd68120` |
 | fsts/phone.fst | `88630` | `1ac2b6fa56b1442320c4de7db08353bab8963a2b57f365eebcdd3a2d3562f8d7` |
 | fsts/date.fst | `59154` | `eb8aa079ae3cb81d8f4404992f39d61a0cb990947512b5b8d1e54d1f6980e718` |
 | fsts/number.fst | `64482` | `743f402181fcfebf76cc2f0546b71fa26476e626fbe4e460fb7b4c3a7a8bd5bd` |
 
-合计 83,992,110 B（约 84MB）；`tts-model-v1.zip` 实测 71,137,348 B（约 71MB）。`ja_reading_map.json`（515KB）不进模型包，随 APK assets 分发。
+合计 83,993,324 B（约 84MB）；`tts-model-v1.zip` 实测 71,137,797 B（约 71MB）。`ja_reading_map.json`（515KB）与 `en_words.bloom`（512KB，英文 OOV 判定）不进模型包，随 APK assets 分发。
 
 ## 分发方式
 
@@ -28,4 +28,4 @@ App 支持两种：
 .\.tools\tts-venv\Scripts\python.exe .tools\tts-spike\scripts\build_app_model_package.py
 ```
 
-源数据（lexicon/model）由 `.tools/tts-spike/scripts/{build_lexicon_v3,build_lexicon_en,build_lexicon_ja,rebuild_zh_lexicon,test_final_design}.py` 生成，链路见 `docs/tts/architecture.md`。
+源数据（lexicon/model）由 `.tools/tts-spike/scripts/{build_lexicon_v3,build_lexicon_en,build_lexicon_ja,rebuild_zh_lexicon,test_final_design}.py` 生成；英文 OOV 补条与 Bloom 资产由 `build_lexicon_extras.py` 生成（`lexicon_final3.txt` → `lexicon_final4.txt`，打包脚本从 final4 复制为 `dist/lexicon.txt`）。链路见 `docs/tts/architecture.md`。

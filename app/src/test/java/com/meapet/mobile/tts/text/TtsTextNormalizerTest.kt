@@ -12,7 +12,8 @@ class TtsTextNormalizerTest {
         charStem = mapOf("知" to "し"),
     )
 
-    private fun normalizer() = TtsTextNormalizer { map }
+    private fun normalizer(knownEnglishWord: (String) -> Boolean = { true }) =
+        TtsTextNormalizer(mapProvider = { map }, knownEnglishWord = knownEnglishWord)
 
     @Test
     fun `中文不被动`() {
@@ -53,5 +54,33 @@ class TtsTextNormalizerTest {
     @Test
     fun `空白输入返回空串`() {
         assertEquals("", normalizer().normalize("   "))
+    }
+
+    @Test
+    fun `未知英文词逐字母拼读`() {
+        val n = normalizer(knownEnglishWord = { it == "app" })
+        assertEquals("今天用 k o t l i n 写了个 app", n.normalize("今天用 kotlin 写了个 app"))
+    }
+
+    @Test
+    fun `已知英文词保持原样`() {
+        assertEquals("今天用 kotlin 写了个 app", normalizer().normalize("今天用 KOTLIN 写了个 app"))
+    }
+
+    @Test
+    fun `含撇号的 OOV 丢弃非字母字符`() {
+        assertEquals("d o n t", normalizer(knownEnglishWord = { false }).normalize("don't"))
+    }
+
+    @Test
+    fun `单字母不拆分`() {
+        assertEquals("i a", normalizer(knownEnglishWord = { false }).normalize("I a"))
+    }
+
+    @Test
+    fun `句点不参与 OOV 判定且保留`() {
+        // 词边界不含句点：you. 按 you 查表命中，句号保留
+        assertEquals("you.", normalizer().normalize("YOU."))
+        assertEquals("k o t l i n.", normalizer(knownEnglishWord = { it == "app" }).normalize("kotlin."))
     }
 }

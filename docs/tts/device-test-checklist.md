@@ -28,7 +28,7 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 |---|---|
 | `model.onnx` | 74,864,089 |
 | `tokens.txt` | 439 |
-| `lexicon.txt` | 8,915,316 |
+| `lexicon.txt` | 8,916,530 |
 | `fsts/phone.fst` | 88,630 |
 | `fsts/date.fst` | 59,154 |
 | `fsts/number.fst` | 64,482 |

@@ -53,7 +53,7 @@ class TtsModelManager(private val context: Context) {
         val EXPECTED_SIZES = mapOf(
             "model.onnx" to 74_864_089L,
             "tokens.txt" to 439L,
-            "lexicon.txt" to 8_915_316L,
+            "lexicon.txt" to 8_916_530L,
             "fsts/phone.fst" to 88_630L,
             "fsts/date.fst" to 59_154L,
             "fsts/number.fst" to 64_482L,

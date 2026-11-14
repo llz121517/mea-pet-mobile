@@ -47,7 +47,7 @@ class TtsManagerTest {
     private val settings = mock<SettingsManager>()
     private val modelManager = mock<TtsModelManager>()
     private val player = mock<TtsAudioPlayer>()
-    private val normalizer = TtsTextNormalizer { JaReadingMap.EMPTY }
+    private val normalizer = TtsTextNormalizer(mapProvider = { JaReadingMap.EMPTY })
 
     private fun manager(engine: TtsEngine) = TtsManager(
         settingsManager = settings,
