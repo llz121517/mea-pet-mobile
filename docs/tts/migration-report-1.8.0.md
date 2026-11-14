@@ -64,7 +64,7 @@
 |---|---|---|---|
 | 1 | 不建 git worktree，直接在 `dev` 分支原工作区实施 | 本计划依赖 gitignored 的 `.tools/`（84MB 模型产物）与 `local.properties`（SDK 路径/模型地址），worktree 里都没有 | 改动直接落 `dev`，靠逐任务 commit 回退 |
 | 2 | ORT 在 T1~T8 期间降为 `compileOnly` 过渡 | 旧 `VitsOnnxEngine` 到 T9 才删，直接删依赖会编译断；保留 `implementation` 又会因两份同名 `.so` 让 `mergeDebugNativeLibs` 失败 | 中间态旧 TTS 运行时会 `NoClassDefFoundError`（本已不可用，不发布） |
-| 3 | 旧版兼容逻辑独立成 `TtsLegacyMigration.kt` | 用户要求便于维护、后续整文件删除 | 多一个文件与两行 `init` 调用 |
+| 3 | 旧版兼容逻辑抽成顶层模块 `com.meapet.mobile.legacy`，每步一个文件 | 用户要求便于维护、后续整包删除；总入口 `AppContainer.warmUp()` 启动时异步执行 | 多 6 个文件与 `warmUp` 一个 `launch` |
 | 4 | 不做 ORT 降级方案 | ORT 1.23.2 的 KleidiAI SME SIGILL（历史 commit `db097864`）已在 1.24.3 修复，AAR 用 1.28.2 | 真出现 SIGILL 只能换 AAR/改编译，需另行决策 |
 | 5 | T6（播放器签名）与 T7（TtsManager）合并提交 | T6 改签名后旧调用点使中间态无法编译 | 单次提交 diff 稍大 |
 | 6 | `releaseEngine()` 改为 `suspend` 并在同一 `synthMutex` 内 release | `generateWithConfig` 阻塞且不可取消，release 与在途 synthesize 并发访问已释放 native 对象 = use-after-free | 调用点已都在协程内，无额外改动 |
@@ -132,12 +132,14 @@ tts/text/JaReadingMap.kt          映射数据结构 + DTO + assets 加载器
 tts/text/TtsTextNormalizer.kt     拉丁小写 + 日语上下文改写
 tts/engine/TtsEngine.kt           合成引擎接口（可单测替换）
 tts/engine/SherpaTtsEngine.kt     sherpa 配置/懒加载/合成/释放
-tts/model/TtsLegacyMigration.kt   一次性旧版兼容清理（整文件可删）
+legacy/LegacyMigration.kt         旧版迁移总入口（启动时异步执行，整包可删）
+legacy/LegacyMigration{Context,Step}.kt  迁移上下文 + 单步接口
+legacy/steps/*.kt                 每步一个文件：旧模型 / native 库 / 开关重置
 assets/tts/ja_reading_map.json    日语改写映射（515KB）
 docs/tts/{architecture,model-package,device-test-checklist}.md
 ```
 
-**测试新增 8 个类**：`TtsTextNormalizerTest`、`SherpaDependencyTest`、`TtsModelPackageTest`、`TtsLegacyMigrationTest`、`TtsModelManagerTest`、`TtsManagerTest`、`TtsAudioPlayerTest`、`SherpaTtsEngineConfigTest`。
+**测试新增 10 个类**：`TtsTextNormalizerTest`、`SherpaDependencyTest`、`TtsModelPackageTest`、`LegacyTtsModelCleanupTest`、`LegacyTtsNativeLibCleanupTest`、`LegacyTtsSwitchResetTest`、`TtsModelManagerTest`、`TtsManagerTest`、`TtsAudioPlayerTest`、`SherpaTtsEngineConfigTest`。
 
 **修改**：`TtsModelManager`（新包清单/严格字节校验/平铺下载/嵌套 zip 导入）、`TtsManager`（归一化→互斥合成→动态采样率播放，新增 `speakPreview`、`releaseEngine` 改 suspend）、`TtsAudioPlayer`（采样率参数化）、`AppContainer`（装配新引擎/归一化器）、`VoiceSettings`（文案 + Debug 试听）、`SettingsViewModel`（`previewTts`）、构建三件套（JitPack 依赖 / proguard keep / catalog）、`AboutSettings`（副标题，用户单独请求）。
 
@@ -170,10 +172,10 @@ docs/tts/{architecture,model-package,device-test-checklist}.md
 
 **老用户升级（1.7.x → 1.8.0）**
 
-1. 覆盖安装后，首次进入设置页/悬浮窗触发 `TtsModelManager.init` → `TtsLegacyMigration.migrate()` 检测到旧 4 文件模型 → **整目录删除**；
-2. 模型状态回到「未下载」，设置页提示 **约 84MB**；
-3. 用户重新下载或本地 zip 导入（下载地址不变，`local.properties` 无需改）；
-4. 旧版已开语音开关者：开关仍在但 `state != Ready` 时 `speak()` 静默跳过（不崩、不串音）。
+1. 覆盖安装后 **App 启动时**由 `AppContainer.warmUp()` 异步运行 `com.meapet.mobile.legacy.LegacyMigration`（不再等首次进入设置页/悬浮窗触发 `TtsModelManager.init`）→ 检测到旧 4 文件模型或 `lib/` 残留 → **整目录删除**；
+2. **迁移命中时会同时关闭两个语音开关**（主界面朗读 `tts_main_enabled` 与悬浮窗朗读 `tts_overlay_enabled` 均置 false），避免出现「开关开着但模型未就绪」的误导状态；
+3. 模型状态回到「未下载」，设置页提示 **约 84MB**；
+4. 用户重新下载或本地 zip 导入（下载地址不变，`local.properties` 无需改），再手动打开所需语音开关。
 
 **发布前需人工完成**
 
@@ -198,6 +200,10 @@ docs/tts/{architecture,model-package,device-test-checklist}.md
 - ARM64 低端骁龙设备 SIGILL（历史坑，1.28.2 应已修复，需实测确认）；
 - 首载耗时/内存峰值、AudioTrack 播放质量、打断与悬浮窗互斥；
 - `run-as cp` 推送模型包在部分 ROM 上不可用 → 用 zip 导入兜底。
+
+**一次性兼容代码**
+
+- `com.meapet.mobile.legacy` 是给 1.7.x 老用户的一次性升级迁移模块（每个迁移操作独立文件，KDoc 标注了移除版本与被引用点），**预计 1.9.0** 确认升级覆盖率后整包删除，同时移除 `AppContainer.warmUp()` 里的那一行 `launch`。
 
 **代码 polish（已记录，不阻塞合并）**
 

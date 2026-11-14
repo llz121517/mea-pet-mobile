@@ -153,7 +153,7 @@ model.onnx  tokens.txt  lexicon.txt  fsts/phone.fst  fsts/date.fst  fsts/number.
 
 导入规则：**6 个文件全量导入**；兼容条目平铺，或整体套一层顶层目录（如 `tts-model-v1/`）两种打包方式。原生库（`libonnxruntime.so` 等）随 APK 分发，资源包无需携带。
 
-> 升级提示：1.7.x 的旧版 4-ONNX 模型包升级到 1.8.0 后会被自动清理，必须重新下载 / 导入（约 84MB）。
+> 升级提示：1.7.x 的旧版 4-ONNX 模型包升级到 1.8.0 后会在 App 启动时被自动清理（同时关闭主界面与悬浮窗两个语音开关），必须重新下载 / 导入（约 84MB）。
 
 #### 关于
 

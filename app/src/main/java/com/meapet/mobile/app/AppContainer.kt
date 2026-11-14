@@ -13,6 +13,7 @@ import com.meapet.mobile.config.AppConfig
 import com.meapet.mobile.core.AppInfo
 import com.meapet.mobile.core.LifecycleManager
 import com.meapet.mobile.core.WallpaperStore
+import com.meapet.mobile.legacy.LegacyMigration
 import com.meapet.mobile.memory.MemoryManager
 import com.meapet.mobile.memory.MemoryRepository
 import com.meapet.mobile.memory.MemoryService
@@ -218,6 +219,8 @@ class AppContainer(
             listOf(
                 launch { memoryRepository.loadFromDisk() },
                 launch { conversationManager.restore(conversationStore.load()) },
+                // 旧版兼容迁移：启动时异步执行（预计 1.9.0 随 legacy 模块整体删除）
+                launch { LegacyMigration.run(context, settingsManager, ttsModelManager) },
                 // Live2D 模型文件预读到内存缓存：模型加载在 GL 线程同步执行，
                 // asset 读取是最大耗时（阻塞主线程 onPause 数秒）。预热后 GL 线程
                 // 只做解析 + GL 上传，启动/切前后台不再长时间卡顿。

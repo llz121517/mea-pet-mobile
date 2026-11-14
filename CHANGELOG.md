@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **语音合成迁移到 sherpa-onnx** — 自写的 VITS 推理与 G2P 链路整体换为 sherpa-onnx（JitPack `v2.0.1`）：自有 Mea VITS2 单图 + 统一 lexicon，中 / 日 / 英混排由**一个模型**完成，不按语言切引擎。App 侧只做轻量上下文改写（拉丁转小写、连续汉字段紧挨假名时按读音映射改写为假名），数字 / 日期 / 电话号码交由 ruleFsts 归一化朗读（`fsts/phone.fst` → `fsts/date.fst` → `fsts/number.fst`，顺序固定；电话逐位、年龄与时间按数词）。
-- **模型包改为 6 个文件（约 84MB）** — `model.onnx`（74.9MB）、`tokens.txt`、`lexicon.txt`（8.5MB）、`fsts/{phone,date,number}.fst`。旧版 4 文件模型（enc_p / dp / flow / dec，约 73MB）与新引擎不兼容：升级后由独立的一次性兼容代码 `TtsLegacyMigration` 自动清理并引导重新下载，网络受限可在设置页「从本地导入」使用本地 zip（`dist/tts-model-v1.zip`，约 71MB）。
+- **模型包改为 6 个文件（约 84MB）** — `model.onnx`（74.9MB）、`tokens.txt`、`lexicon.txt`（8.5MB）、`fsts/{phone,date,number}.fst`。旧版 4 文件模型（enc_p / dp / flow / dec，约 73MB）与新引擎不兼容：升级后由一次性兼容模块 `com.meapet.mobile.legacy` 在 App 启动时异步清理（命中残留时同时关闭主界面与悬浮窗两个语音开关），并引导重新下载；网络受限可在设置页「从本地导入」使用本地 zip（`dist/tts-model-v1.zip`，约 71MB）。
 - **移除 onnxruntime-android 依赖** — 原生库改由 sherpa AAR 提供（内嵌 ONNX Runtime 1.28.2），每个 ABI 只带一份 `libonnxruntime.so` + `libsherpa-onnx-{c-api,cxx-api,jni}.so`，不再有重复 so；仅保留 arm64-v8a / armeabi-v7a 两个 ABI。
 - **播放器采样率改为跟随引擎输出** — `TtsAudioPlayer` 按引擎实际输出的采样率建 `AudioTrack`（不再硬编码 22050Hz），换模型/换采样率不会变速或变调。
 - **删除自写 G2P 与拼音资产** — `VitsOnnxEngine`、`TtsSynthesizer`、`DurationExpander`、`g2p/*` 与 `assets/pinyin/*`（约 8.9 万行词表）全部移除，APK 减小约 1.65MB；模型包状态判定改为按文件清单 + 精确大小校验。

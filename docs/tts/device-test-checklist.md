@@ -137,7 +137,7 @@ adb shell run-as $PKG ls -lR files/tts_model
 
 ```powershell
 adb logcat -c
-adb logcat -v time | Select-String "SherpaTtsEngine|TtsManager|TtsAudioPlayer|TtsModelManager|TtsLegacyMigration|Fatal signal|SIGILL|OutOfMemory|OOM"
+adb logcat -v time | Select-String "SherpaTtsEngine|TtsManager|TtsAudioPlayer|TtsModelManager|LegacyMigration|LegacyTts|Fatal signal|SIGILL|OutOfMemory|OOM"
 ```
 
 - [ ] 首次合成日志出现 `OfflineTts 就绪：sampleRate=22050 speakers=1 load=NNNms`
@@ -198,9 +198,10 @@ adb logcat -b crash -d | Select-String "Fatal|signal|DEBUG"
 3. 启动后检查
 
 - [ ] `adb shell run-as com.meapet.mobile ls -l files/tts_model` 无 `enc_p.onnx` / `dp.onnx` / `flow.onnx` / `dec.onnx`，也无 `lib/` 目录
-- [ ] `logcat` 出现 `TtsLegacyMigration: 检测到旧版 4 模块模型，清理后需重新下载 sherpa 模型包`
+- [ ] `logcat` 出现 `LegacyTtsModelCleanup: 检测到旧版 4 模块模型，清理后需重新下载 sherpa 模型包`，以及总入口 `LegacyMigration: 旧版 TTS 残留已清理，两个语音开关已关闭，需重新下载模型`
+- [ ] **升级后两个语音开关（主界面朗读 / 悬浮窗朗读）均为关闭**（迁移命中时由 `LegacyTtsSwitchReset` 一并置 false，不再沿用旧开关值）
 - [ ] 设置页语音卡片为「语音模型未下载」，不显示已就绪、不因缺模型崩溃
-- [ ] 重新按 0.2/0.3 准备 6 文件模型后，功能恢复
+- [ ] 重新按 0.2/0.3 准备 6 文件模型后，功能恢复；手动重开两个语音开关后朗读正常
 - [ ] 覆盖安装后原有设置（发声开关、语速、主题）保留，`versionName=1.8.0`、`versionCode=14`
 
 ---

@@ -81,9 +81,7 @@ class TtsModelManager(private val context: Context) {
     }
 
     init {
-        TtsLegacyMigration.migrate(modelDir)
         refreshState()
-        TtsLegacyMigration.cleanLegacyNativeLibDir(modelDir)
     }
 
     /** 模型 6 件是否齐全且大小精确匹配（下载/导入中断的半文件不会被误判就绪）。 */
