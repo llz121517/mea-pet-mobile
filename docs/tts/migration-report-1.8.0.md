@@ -243,3 +243,19 @@ docs/tts/{architecture,model-package,device-test-checklist}.md
 - Deferred triage：`must-fix-before-merge = none`；历史工具的 minor 全部 acceptable。
 
 *本报告由实施过程逐任务记录汇总。*
+
+---
+
+## 12. 后续补充（2026-11-15）
+
+**英文 OOV 兜底（`17e0441`）**
+- 词表扩充 41 个 tech/品牌词（kotlin/openai/chatgpt/json/http/kubernetes/pytorch…），`lexicon.txt` 变为 8,916,530 B / sha256 `97e2b4fb…dfae`；`Kotlin`/`github` 不再被整词丢弃（桌面验收 +0.27s，OOV=0）。
+- App 侧新增 `EnglishBloomIndex`（`assets/tts/en_words.bloom`，512KB，126,077 词，k=3，误判 0.064%）：不在词表的英文词由 `TtsTextNormalizer` 逐字母拼读兜底（`kotlin` → `k o t l i n`），不再静默丢词。
+- **模型包需要重传 `lexicon.txt`**（其余 5 个文件不变）。
+
+**G2P 生成管线入库（`9e308c6` + `734c314`）**
+- `tools/tts/`：`download_data` → `build_tokens/lexicon_zh/en/ja/bloom` → `verify_assets` → `build_package` → `build_samples`，新 clone 可复现全部 G2P 资产。
+- `verify_assets.py` 8/8 通过：tokens / ja_reading_map / bloom / fsts 逐字节一致，lexicon 内容一致（仅 41,923 条单字行序不同，已注明）。
+- `model.onnx` 不在管线内（需外部 `G_latest.pth` + 模块拼接），来源与自备方式见 `tools/tts/build_model.md`。
+
+**仍待完成**：真机执行 `docs/tts/device-test-checklist.md`。
