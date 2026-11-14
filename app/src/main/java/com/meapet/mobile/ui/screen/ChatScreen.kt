@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.widthIn
@@ -202,7 +203,9 @@ private fun ChatPage(
         chatViewModel.onEvent(ChatEvent.DismissUpdateNotice)
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // 整页躲开软键盘：输入栏、撤销条、消息列表都随键盘收窄（窗口不再替我们
+    // resize/pan，见 MainActivity 的 edge-to-edge 说明）
+    Box(modifier = Modifier.fillMaxSize().imePadding()) {
         // ── Layer 1: 消息列表 ──
         MessageList(
             state = state,

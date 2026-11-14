@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -141,6 +142,9 @@ fun SettingsScreen(
     }
 
     Scaffold(
+        // 让整页躲开软键盘：内容区与 snackbar 槽位都会随之收窄，
+        // 撤销条因此落在键盘上方（见 AppSnackbarHost 的说明）
+        modifier = Modifier.imePadding(),
         snackbarHost = { AppSnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(

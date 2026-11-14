@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -105,10 +104,9 @@ private class UndoSnackbarVisuals(
  * 宿主自己负责左右留边、底部余量与软键盘避让，调用方不必各自调：
  * - 本应用是沉浸式（隐藏系统栏），Scaffold 的 snackbar 槽位会紧贴物理底边，
  *   手势区会盖住撤销键；
- * - 同样的槽位也不会随内容被 IME 顶起（只有内容区会缩），
- *   在「键盘弹着时触发撤销条」的场景（如设置页改完 Prompt 直接点恢复默认）
- *   会被键盘整个盖住，所以必须 `imePadding()`——窗口本身若已被系统 resize，
- *   IME inset 会被系统消费为 0，这里自然退化为无位移。
+ * - 软键盘避让由各页面根节点统一做（`Modifier.imePadding()`，见 ChatPage /
+ *   SettingsScreen）——Scaffold 的 snackbar 槽位不会随内容被 IME 顶起，
+ *   只有整个页面收窄才会把条子推到键盘上方；宿主自己不再加，避免位移叠加。
  */
 @Composable
 fun AppSnackbarHost(
@@ -118,9 +116,7 @@ fun AppSnackbarHost(
     val actionColor = MaterialTheme.colorScheme.primary
     SnackbarHost(
         hostState = hostState,
-        modifier = modifier
-            .imePadding()
-            .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+        modifier = modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
     ) { data ->
         val visuals = data.visuals
         if (visuals is UndoSnackbarVisuals) {

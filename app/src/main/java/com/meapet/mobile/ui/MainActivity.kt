@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import android.view.MotionEvent
+import android.view.WindowManager
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
@@ -82,6 +83,23 @@ class MainActivity : ComponentActivity() {
             return
         }
         super.onCreate(savedInstanceState)
+
+        // 交给 Compose 自己处理系统栏/软键盘 inset：
+        // 非 edge-to-edge 时框架会在 DecorView 层把系统窗口 inset（含 IME）消费掉，
+        // Compose 侧 `WindowInsets.ime` 恒为 0，`Modifier.imePadding()` 因此完全失效
+        // ——表现就是「键盘弹起时底部撤销条 / 输入栏不会被顶上来」。
+        // 本应用本来就是沉浸式全屏（系统栏由 hideSystemBars() 隐藏），改成
+        // edge-to-edge 不改变视觉；IME 避让由各页面根节点的 imePadding() 负责
+        // （见 ChatPage / SettingsScreen）。
+        // API 30 以下 Compose 拿不到可靠的 IME inset，保持系统默认（窗口 resize/pan），
+        // 不能切：切了反而会让输入栏被键盘盖住。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            // 视口完全交给 Compose：默认的 adjustPan 会在键盘弹起时把整个窗口往上推
+            // （输入框在最底部的主页必中），再叠上页面自己的 imePadding 就是"顶两次"，
+            // 输入栏与撤销条会错位。关掉系统位移后，IME 避让只剩 imePadding 一次。
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+        }
 
         container = MeaPetApplication.from(applicationContext as android.app.Application)
 
