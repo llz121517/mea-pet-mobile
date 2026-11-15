@@ -39,7 +39,7 @@
 
 ## 📌 待办 0 · 1.8.0 发布收尾(阻塞 v1.8.0 发布,tag 仍未打)
 
-- [ ] **真机验收** 按 [`tts/device-test-checklist.md`](tts/device-test-checklist.md) 逐条执行(21 条试听 + SIGILL/内存/打断/悬浮窗/删除重导入/1.7.x 升级迁移),结论回填清单 §3。**自动化部分已执行(2026-11-15,见清单 §A:构建/安装/APK 与模型 sha/冷启动/内存基线/§2.1 加载耗时/§2.2 崩溃复验/§2.8 流式播放);当天还修了 ≤2s 短片段无声与英文数字读法。余下:§2.4 后三条、§2.5 悬浮窗、§2.6 删除重导、§2.7 1.7.x 升级、§2.8「中止不白算」。**
+- [x] **真机验收** 按 [`tts/device-test-checklist.md`](tts/device-test-checklist.md) 逐条执行(21 条试听 + SIGILL/内存/打断/悬浮窗/删除重导入/1.7.x 升级迁移),结论回填清单 §3。**已完成(2026-11-15)**:清单全部勾选、§3 结论回填(设备 Xiaomi 22041216UC / MT6895Z / Android 14);自动化记录见清单 §A。当天修复并复验:英文数字读法、流式回调 JNI 签名崩溃、≤2s 短片段无声。
 - [ ] **模型包 `lexicon.txt` 重传确认** — **已实测确认(2026-11-15)**:App 只校验字节数;`artifacts.json` 把 `lexicon.txt` 标为 `content-identical`,发布包 `97e2b4fb…`(打包型行序)与本地 `tools/tts/dist` 的 `261ee0a7…`(生成型行序)`content_sha256` 相同、字节不同。设备当前为本地 zip 导入版本(`261ee0a7…`),功能与发布包一致。**结论:Release 上的包即最终版,无需重传**;保持 `tts/model-package.md` 的双 sha 口径即可。
 - [ ] **打 tag `v1.8.0`** 走 `.github/workflows/release.yml`(须在 `main` 上且与 `versionName` 一致;当前最新 tag 仍为 `v1.7.2`)。
 - [ ] **1.9.0:删除 legacy TTS 迁移步骤** — 按 [`legacy-compat.md`](legacy-compat.md) §3/§4 删 3 个 step + 注册项 + 测试,保留迁移框架本身。
