@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **任务根外启动崩溃** — `MainActivity.onCreate` 的 `isTaskRoot` 防护在退出路径上未调用 `super.onCreate()`，系统抛 `SuperNotCalledException` 直接崩溃；改为先走 `super.onCreate()` 再判断退出。
 - **悬浮窗冷启动可能用默认主题配色** — 悬浮窗配色读设置内存快照，进程为悬浮窗冷启动时快照可能尚未预热，而这些窗口长期存活、不会自愈；建窗前先等预热完成。
 - **Live2D 纹理预热失效** — `Live2dPal` 用「目录名是否以 `/` 结尾」判断目录，MIUI 等 ROM 的 `assets.list()` 不给尾斜杠，于是把纹理目录当文件 `open()` 抛 `FileNotFoundException`：子目录里的贴图/动作全部没预热，GL 线程只能现场读 assets（真机实测模型加载多花约 2s）。改为「能否列出子项」判定目录，并抽出 `collectAssetFiles` 加单测覆盖两种 ROM 行为。
+- **悬浮窗透明度改为整幅合成** — 原先在 Cubism 每个 drawable 上逐层乘 alpha，同一像素有多层半透明叠加的部位（嘴部内腔、腮红、阴影等）alpha 会累积（两层各 a 叠出 `1-(1-a)²`），调低透明度时这些地方比其它部位更实；改为模型先按不透明画进离屏 FBO、再对整张结果乘一次 alpha 合成（离屏不可用时回退逐层乘 alpha），整只模型透明度均匀。全不透明时不分配离屏目标，零额外开销。
 
 ### Notes
 

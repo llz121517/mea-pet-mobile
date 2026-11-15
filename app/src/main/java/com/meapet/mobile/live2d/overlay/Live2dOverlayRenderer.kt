@@ -39,12 +39,15 @@ class Live2dOverlayRenderer(
     /**
      * 悬浮窗整体不透明度（0.0~1.0）。
      *
-     * 主线程写入（透明度滑杆回调），GL 线程在 onDrawFrame 每帧读取并应用到渲染器，
-     * 经 volatile 保证可见性。走 GL 绘制管线内乘 alpha，绕开 SurfaceView 的
-     * View.setAlpha 在部分机型合成路径上无效的问题。
+     * 主线程写入（透明度滑杆回调），GL 线程在 onDrawFrame 每帧读取。
+     * 不透时直接按原样绘制；需要透明度时先由 [alphaCompositor] 把模型画进离屏目标、
+     * 再整幅乘 alpha 合成（逐层乘 alpha 会让半透明图层叠加处——嘴部内腔、腮红、
+     * 阴影等——比其它部位更实），离屏不可用时才回退到逐层乘 alpha。
      */
     @Volatile
     private var opacity = 1f
+
+    private val alphaCompositor = OverlayAlphaCompositor(TAG)
 
     /** 设置悬浮窗整体不透明度（0.0~1.0，主线程调用）。 */
     fun setOpacity(alpha: Float) {
@@ -80,6 +83,7 @@ class Live2dOverlayRenderer(
         }
 
         textureManager = Live2dTextureManager()
+        alphaCompositor.onContextCreated()
         // surface 重建时旧 GL 上下文已销毁（GL 资源随之释放），
         // 但 moc/model 的 native 内存仍需显式释放后再重新加载
         releaseModel()
@@ -103,23 +107,35 @@ class Live2dOverlayRenderer(
                 if (isShuttingDown()) return
             }
 
-            GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-
             val m = model ?: return
             if (winWidth <= 0 || winHeight <= 0) return
+            // 先做空值判断再进离屏，避免中途 return 把离屏目标留在绑定状态
+            val core = m.model ?: return
+            val mm = m.modelMatrix ?: return
+
+            val currentOpacity = opacity
+            // 需要透明度时才按需分配离屏目标（全不透明不占显存）；离屏不可用时保持原路径
+            var composite = false
+            if (currentOpacity < 1f) {
+                alphaCompositor.ensureTarget(winWidth, winHeight)
+                composite = alphaCompositor.isReady
+            }
+            if (!composite) {
+                GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+            }
 
             Live2dPal.updateTime()
 
             val aspect = winWidth.toFloat() / winHeight.toFloat()
             val displayRatio = winHeight.toFloat() / winWidth.toFloat()
 
+            if (composite) alphaCompositor.begin()
+
             CubismOffscreenManagerAndroid.getInstance().beginFrameProcess()
             projection.loadIdentity()
 
             val zoom = 1.4f
-            val core = m.model ?: return
-            val mm = m.modelMatrix ?: return
             val canvasRatio = core.canvasHeight / core.canvasWidth
             if (canvasRatio < displayRatio) {
                 mm.setWidth(2.0f * zoom)
@@ -132,12 +148,14 @@ class Live2dOverlayRenderer(
             }
 
             m.update()
-            // 悬浮窗整体不透明度：每帧同步到渲染器（GL 内乘 alpha，所有机型统一生效）
-            m.setRenderingOpacity(opacity)
+            // 整幅合成时模型按不透明画进离屏目标，alpha 只在合成那一步乘一次
+            m.setRenderingOpacity(if (composite) 1f else currentOpacity)
             m.draw(projection)
 
             CubismOffscreenManagerAndroid.getInstance().endFrameProcess()
             CubismOffscreenManagerAndroid.getInstance().releaseStaleRenderTextures()
+
+            if (composite) alphaCompositor.end(currentOpacity)
         } catch (e: Exception) {
             Log.e(TAG, "Render error: ${e.message}")
         }
