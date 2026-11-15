@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **会话落盘 writer 只写「最近记录的快照」** — 合并写队列原先带着入队那一刻的快照去写：从取到旧快照到真正拿到锁之间若有更新的同步写入，旧快照会把磁盘倒退回去。现在写入时在锁内取最新记录的快照，队列与补写之间不再互相覆盖。
 - **进后台补写移出主线程** — `onStop` 的 `flush()` 原先用 `runBlocking` 在主线程等写盘；改为在应用级 IO 作用域执行，主线程不再阻塞，确定性补写保留。
 - **窗口背景跟随主题** — Compose 侧主题解析后同步窗口背景色（此前只在 `onCreate` 设一次），切换主题或 Activity 重建、GL 画面短暂不可见时不再露出旧主题底色。
+- **LaTeX 字体表解析移出首帧** — `MarkdownText` 原先在首次组合时同步触发 jlatexmath 的 `TeXFormula` 类初始化（解析十来份字体/符号 XML，真机 debug 包实测 1s+），直接把首帧卡住；改为组合期只做毫秒级的 assets 加载器挂载，重量级预热由 `MainActivity` 投递到后台线程（`warmUpLatex`）。真机冷启动首帧 4.1s → 2.2s。
+- **更新检查的 JSON 解析移出主线程** — `UpdateChecker.check()` 里的 `parseRelease` 改到 `Dispatchers.Default`，启动时静默检测不再占用主线程。
 
 ### Fixed
 
@@ -29,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **老用户被误判为首次启动** — 快照预热完成前同步 getter 落到默认值，而 `isFirstLaunch()` 默认 `true`：老用户会被当首启，写入 `first_launch=false` 并重弹隐私 / 更新窗，且状态已写坏无法自愈。新增 `SettingsManager.awaitLoaded()`，启动期的判定型读取先等预热完成（不回退到主线程阻塞读盘）。
 - **任务根外启动崩溃** — `MainActivity.onCreate` 的 `isTaskRoot` 防护在退出路径上未调用 `super.onCreate()`，系统抛 `SuperNotCalledException` 直接崩溃；改为先走 `super.onCreate()` 再判断退出。
 - **悬浮窗冷启动可能用默认主题配色** — 悬浮窗配色读设置内存快照，进程为悬浮窗冷启动时快照可能尚未预热，而这些窗口长期存活、不会自愈；建窗前先等预热完成。
+- **Live2D 纹理预热失效** — `Live2dPal` 用「目录名是否以 `/` 结尾」判断目录，MIUI 等 ROM 的 `assets.list()` 不给尾斜杠，于是把纹理目录当文件 `open()` 抛 `FileNotFoundException`：子目录里的贴图/动作全部没预热，GL 线程只能现场读 assets（真机实测模型加载多花约 2s）。改为「能否列出子项」判定目录，并抽出 `collectAssetFiles` 加单测覆盖两种 ROM 行为。
 
 ---
 

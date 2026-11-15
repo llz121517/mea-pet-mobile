@@ -4,6 +4,8 @@ import android.util.Log
 import com.meapet.mobile.client.HttpClientEngine
 import com.meapet.mobile.core.runCatchingLog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.meapet.mobile.client.HttpMethod
 import com.meapet.mobile.client.HttpRequest
 import com.meapet.mobile.client.KtorHttpClientEngine
@@ -48,8 +50,11 @@ class UpdateChecker(
             if (response.statusCode !in 200..299) {
                 return UpdateCheckResult.Failed("检测失败（HTTP ${response.statusCode}）")
             }
-            val release = parseRelease(response.bodyAsText())
-                ?: return UpdateCheckResult.Failed("解析版本信息失败")
+            // JSON 解析（首次还含 JsonElement 等类初始化）挪到后台：check() 的调用方
+            // 常在 Dispatchers.Main 上（启动时静默检测），别让解析占用主线程。
+            val release = withContext(Dispatchers.Default) {
+                parseRelease(response.bodyAsText())
+            } ?: return UpdateCheckResult.Failed("解析版本信息失败")
             if (isNewer(release.versionName, current)) {
                 UpdateCheckResult.UpdateAvailable(release = release, currentVersion = current)
             } else {

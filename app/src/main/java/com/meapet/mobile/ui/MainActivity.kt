@@ -108,6 +108,12 @@ class MainActivity : ComponentActivity() {
 
         container = MeaPetApplication.from(applicationContext as android.app.Application)
 
+        // LaTeX 符号表/字体表解析（实测 1s+）投递到后台：MarkdownText 首次渲染时若在主线程
+        // 触发，会把首帧直接卡住（2026-11-15 真机排查结论）。这里在后台提前做完。
+        container.applicationScope.launch {
+            com.meapet.mobile.ui.component.warmUpLatex(applicationContext)
+        }
+
         // 启动即按持久化主题设定 Live2D 背景与窗口背景，让首帧直接是主题色，
         // 避免"先浅后深"的闪烁（Compose 内 themeModeFlow 异步收集稍后才会接管）。
         // 快照未就绪时 getThemeMode 落到默认值且不读盘：首帧可能浅色一闪，随后由

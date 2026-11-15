@@ -1,6 +1,7 @@
 package com.meapet.mobile.live2d
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import com.live2d.sdk.cubism.core.ICubismLogger
 import com.live2d.sdk.cubism.framework.ICubismLoadFileFunction
@@ -52,8 +53,16 @@ object Live2dPal {
         CoroutineScope(Dispatchers.IO).launch {
             val ctx = context.applicationContext
             val assets = ctx.assets
+            val startedAt = SystemClock.uptimeMillis()
             try {
-                val files = collectFiles(assets, dir)
+                // 目录判定交给「能否列出子项」，不依赖 ROM 是否给目录名加尾斜杠
+                val files = collectAssetFiles(dir) { path ->
+                    try {
+                        assets.list(path)?.toList() ?: emptyList()
+                    } catch (_: IOException) {
+                        emptyList()
+                    }
+                }
                 for (path in files) {
                     try {
                         val bytes = assets.open(path).use { input ->
@@ -64,29 +73,16 @@ object Live2dPal {
                         Log.w(TAG, "预热读取失败: $path", e)
                     }
                 }
-                Log.i(TAG, "Live2D 模型目录预热完成：${files.size} 个文件（IO 线程）")
+                Log.i(
+                    TAG,
+                    "Live2D 模型目录预热完成：${files.size} 个文件，" +
+                        "${SystemClock.uptimeMillis() - startedAt}ms（IO 线程）"
+                )
             } catch (e: Exception) {
                 Log.w(TAG, "预热模型目录失败", e)
                 cachedRoot = null
             }
         }
-    }
-
-    /** 递归收集目录下所有文件路径（相对 assets 根）。 */
-    private fun collectFiles(assets: android.content.res.AssetManager, path: String): List<String> {
-        val names = assets.list(path) ?: return emptyList()
-        val result = ArrayList<String>()
-        for (name in names) {
-            val child = if (path.isEmpty()) name else "$path/$name"
-            // 目录名以 '/' 结尾；文件正常。list 返回的子项带不带分隔符取决于实现，
-            // 用 try-open 判定是目录还是文件，避免误判。
-            if (name.endsWith("/")) {
-                result.addAll(collectFiles(assets, child))
-            } else {
-                result.add(child)
-            }
-        }
-        return result
     }
 
     /** 清除字节缓存（模型更新/重建时）。 */
