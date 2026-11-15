@@ -41,10 +41,11 @@ import com.meapet.mobile.ui.component.AutoUpdateOptInDialog
 import com.meapet.mobile.ui.component.PRIVACY_POLICY_VERSION
 import com.meapet.mobile.ui.screen.ChatScreenContent
 import com.meapet.mobile.ui.theme.MeaPetTheme
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -164,6 +165,15 @@ class MainActivity : ComponentActivity() {
                     Live2dDelegate.getInstance().let { d ->
                         d.bgR = bgColor[0]; d.bgG = bgColor[1]; d.bgB = bgColor[2]; d.bgA = 1.0f
                     }
+                    // 窗口背景同步跟随主题：onCreate 那一刻设的是当时的（若快照未就绪则可能是
+                    // 默认）底色；之后切换主题或 Activity 重建，GL Surface 短暂不可见时露出来的
+                    // 窗口底色不会再停留在旧主题上。
+                    val r = (bgColor[0] * 255).toInt()
+                    val g = (bgColor[1] * 255).toInt()
+                    val b = (bgColor[2] * 255).toInt()
+                    window.setBackgroundDrawable(
+                        ColorDrawable(0xFF000000.toInt() or (r shl 16) or (g shl 8) or b)
+                    )
                 }
 
                 // 背景壁纸：设置变化实时同步到 GL（GL 线程每帧读，下帧即生效）
@@ -354,12 +364,17 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "onStop error: ${e.message}")
         }
-        // 会话历史确定性落盘：persistAsync 是合并写队列，进程被系统回收时可能来不及
-        // 落盘最新快照。进后台时同步补写一次（快照仅数十条消息，写入极快）。
-        try {
-            runBlocking { container.conversationManager.flush() }
-        } catch (e: Exception) {
-            Log.w(TAG, "conversation flush on stop failed: ${e.message}")
+        // 会话历史补写一次：persistAsync 是合并写队列，进程被系统回收时可能来不及落盘。
+        // 放到应用级 IO 作用域执行，主线程不阻塞；store 的 writer 永远写「最近记录的快照」，
+        // 因此这次补写与排队的合并写之间不会互相覆盖（见 ConversationStore 类注释）。
+        container.applicationScope.launch(Dispatchers.IO) {
+            try {
+                container.conversationManager.flush()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "conversation flush on stop failed: ${e.message}")
+            }
         }
     }
 

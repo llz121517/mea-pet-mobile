@@ -201,12 +201,15 @@ class ConversationManager(
      * 同步落盘当前会话快照，直到写完才返回。
      *
      * [persistAsync] 是 conflate 合并写队列，进程被系统回收时排队中的最新快照
-     * 可能来不及落盘。在 `onStop` / `onTrimMemory` 等「即将进后台或被杀」的时机
-     * 调用本方法补一次确定性落盘。纯内存无 store 时为 no-op。
+     * 可能来不及落盘。在 `onStop` 等「即将进后台或被杀」的时机调用本方法补一次
+     * 确定性落盘。纯内存无 store 时为 no-op。
+     *
+     * 先把内存当前状态记录进 store 再写：store 的 writer 永远写「最近记录的快照」，
+     * 因此与排队的合并写之间不会出现旧快照后写（见 [ConversationStore] 类注释）。
      */
     suspend fun flush() {
-        val snapshot = synchronized(lock) { messages.toList() }
-        store?.persist(snapshot)
+        synchronized(lock) { store?.record(messages.toList()) }
+        store?.flush()
     }
 
     /**
