@@ -176,6 +176,8 @@ adb logcat -v time | Select-String "SherpaTtsEngine|TtsManager|TtsAudioPlayer|Tt
 
 1.7.1 曾因 ORT 1.23.2 KleidiAI SME MatMul 在部分骁龙 SoC 上触发 `Fatal signal 4 (SIGILL)`；sherpa AAR 内嵌 ORT 1.28.2 已含修复，仍需真机确认。
 
+2026-11-15 还实测到一次 **CheckJNI SIGABRT**（首次带流式回调的构建）：`JNI DETECTED ERROR ... JNI NewFloatArray called with pending exception java.lang.NoSuchMethodError: no non-static method "...invoke([F)Ljava/lang/Integer;"`——Kotlin lambda 脱糖后没有 sherpa JNI 查找的那个签名。已改为 Java 适配器 `TtsStreamCallback`，`TtsStreamCallbackTest` 用反射守护签名；复验时 crash buffer 里不得再出现该 Abort message。
+
 ```powershell
 adb shell getprop ro.board.platform
 adb shell getprop ro.soc.model

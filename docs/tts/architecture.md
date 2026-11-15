@@ -25,6 +25,8 @@ VITS 单图推理 → 22050Hz 音频
 
 > **逐句流式已启用**（2026-11-15）：sherpa 对每句合成完即回调，App 在首块到达时新建 AudioTrack 开播，后续分块入队由播放器专用线程写入；打断时回调返回 0 让原生推理中止剩余句子（不再白算完）。桌面实测 4 句中文：首块 1.10s（整段 3.78s）；8 句：首块 ~1.1s（整段 8.41s）。
 >
+> **回调对象必须用 Java 适配器 `TtsStreamCallback`**：sherpa JNI 用 `GetMethodID(cls, "invoke", "([F)Ljava/lang/Integer;")` 取回调方法（`.so` 字符串可复核）；Kotlin 2.x 的 indy lambda 脱糖后只有擦除版 `invoke(Object)`，直接传 lambda 会在真机上 CheckJNI SIGABRT（`JNI NewFloatArray called with pending exception NoSuchMethodError`，2026-11-15 实测）。Java 类按泛型实参实现 `Function1<float[], Integer>` 时 javac 会生成该专用签名 + 擦除桥接；`TtsStreamCallbackTest` 用反射守护该签名，`proguard-rules.pro` 的 `-keep class com.meapet.mobile.tts.**` 保证 R8 不删改。
+>
 > **多句并行（`maxNumSentences > 1`）仍未启用**：批量并行实测只快约 8%（8 句 8.41s→7.79s），且 batch 越大句间停顿越短、听感有变化，收益不抵复杂度。已知取舍：真机合成约 1.1× 实时（RTF≈1.1），所以句间可能有轻微停顿，这是流式播放在"合成慢于实时"设备上的预期代价。
 
 ## 2. 数据文件（模型包内）

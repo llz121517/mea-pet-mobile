@@ -53,6 +53,7 @@ internal fun buildSherpaTtsConfig(modelDir: File): OfflineTtsConfig {
  * - [OfflineTts.generateWithConfigAndCallback] 是阻塞原生调用，**非线程安全**：并发合成由上层
  *   [com.meapet.mobile.tts.TtsManager] 的 Mutex 串行化；回调对每句完成即触发（`maxNumSentences=1`
  *   时逐句串行），回调返回 0 会让 sherpa 中止后续句子——打断时能省掉剩余推理；
+ *   回调对象**必须用 Java 适配器 [TtsStreamCallback]**（JNI 的 methodID 签名 Kotlin lambda 生成不出来）；
  * - [release] 幂等，删除模型前由设置页调用。
  */
 class SherpaTtsEngine(private val modelManager: TtsModelManager) : TtsEngine {
@@ -89,22 +90,25 @@ class SherpaTtsEngine(private val modelManager: TtsModelManager) : TtsEngine {
         val startedAt = SystemClock.elapsedRealtime()
         var chunkCount = 0
         var aborted = false
-        // sherpa 回调约定：返回 1 继续、返回 0 中止后续合成
+        // sherpa 回调约定：返回 1 继续、返回 0 中止后续合成（打断/抢占时用）。
+        // **必须传 Java 适配器**：JNI 按 `invoke([F)Ljava/lang/Integer;` 取回调方法，
+        // Kotlin 2.x indy lambda 脱糖后只有擦除版 invoke(Object)，直接传 lambda 会 CheckJNI SIGABRT
+        // （真机 2026-11-15 崩溃，详见 TtsStreamCallback 注释）。
+        val callback = TtsStreamCallback { samples ->
+            chunkCount++
+            onChunk(GeneratedAudio(samples, tts.sampleRate())).also { keepGoing ->
+                if (!keepGoing) aborted = true
+            }
+        }
         val whole = tts.generateWithConfigAndCallback(
             text,
             GenerationConfig(speed = speed, sid = 0),
-        ) { samples: FloatArray ->
-            chunkCount++
-            if (onChunk(GeneratedAudio(samples, tts.sampleRate()))) 1 else {
-                aborted = true
-                0
-            }
-        }
+            callback,
+        )
         Log.d(
             TAG,
             "流式合成${if (aborted) "中止" else "完成"}：文字=${text.length} speed=$speed " +
-                "分块=$chunkCount 样本=${whole.samples.size} " +
-                "elapsed=${SystemClock.elapsedRealtime() - startedAt}ms",
+                "分块=$chunkCount 样本=${whole.samples.size} elapsed=${SystemClock.elapsedRealtime() - startedAt}ms",
         )
         return !aborted
     }

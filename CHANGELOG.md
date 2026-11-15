@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **英文句子中的数字按英文数词朗读** — 此前英文句里的阿拉伯数字会被 sherpa 的中文数字前端 `ruleFsts` 转成中文数词（`3`→sān、`12`→shí èr）。现 App 归一化层按上下文预转换：紧邻拉丁词的整数转英文基数词（three / twelve / one thousand …），中文与日文上下文保持原规则；`3.5`、`10:30`、电话号码等复合或超长数字不转换。日文句中的数字读法（`15 時`→じゅうごじ）仍是已知边界，排入 1.9.0。
+- **流式播放首个回调即崩溃（JNI 方法签名）** — sherpa JNI 按 `invoke([F)Ljava/lang/Integer;` 查找回调方法；Kotlin 2.x 的 lambda 脱糖后只有擦除版 `invoke(Object)`，JNI 拿到空 methodID 后触发 CheckJNI SIGABRT。回调改由 Java 适配器 `TtsStreamCallback` 提供（同时具备该专用签名与擦除桥接），并加单测 `TtsStreamCallbackTest` 守护签名；真机崩溃日志见 issue 现场（`NoSuchMethodError ... invoke([F)Ljava/lang/Integer;`）。
 
 ### Notes
 

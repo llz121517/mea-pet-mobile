@@ -33,7 +33,7 @@
 - **复核定案剔除**:#6(合法 Compose 用法)、#43、#44(理由见「不做」)。
 - **1.8.0 TTS 迁移批**(2026-11-01, `fc70902`..`aed66e6`):推理链整体换成 sherpa-onnx,连带作废本清单两条旧项——**#41 失效**(`DurationExpander` 连同旧 G2P/四模块引擎整体删除,无优化对象)、**「无 CI」失效**(`.github/workflows/ci.yml` 已上线:`:app:testDebugUnitTest` + PR 构建 debug APK)。新-6 的 attention 内存护栏代码与测试也随旧引擎删除。详见 [`tts/migration-report-1.8.0.md`](tts/migration-report-1.8.0.md)。
 - **英文数字读法**(未发布, 真机验收期修复):英文句中的阿拉伯数字在 App 归一化层预转换为英文数词(`3`→three、`12`→twelve),不再被 sherpa 中文 `ruleFsts` 读成 sān/shí èr;中文/日文上下文数字保持原路径;`3.5`/`10:30`/电话等复合或长数字不转换。补 3 组单测。日文数字读法见「待办 D」。
-- **逐句流式播放**(未发布, 2026-11-15):`TtsEngine.synthesizeStreaming` 走 `OfflineTts.generateWithConfigAndCallback`,每句合成完即回调;`TtsManager` 首块到达才点亮/停触摸语音并开播,后续分块进 `TtsAudioPlayer` 队列、由专用写线程写 AudioTrack;打断时回调返回 0 让原生推理中止剩余句子(不再白算完)。桌面 4 句首块 ~1.1s(整段 3.8s);补 `TtsManagerTest` 流式契约 8 条(含迟到分块中止、releaseEngine 串行)。并行(`maxNumSentences>1`)实测只快 ~8%,不启用。
+- **逐句流式播放**(未发布, 2026-11-15):`TtsEngine.synthesizeStreaming` 走 `OfflineTts.generateWithConfigAndCallback`,每句合成完即回调;`TtsManager` 首块到达才点亮/停触摸语音并开播,后续分块进 `TtsAudioPlayer` 队列、由专用写线程写 AudioTrack;打断时回调返回 0 让原生推理中止剩余句子(不再白算完)。桌面 4 句首块 ~1.1s(整段 3.8s);补 `TtsManagerTest` 流式契约 8 条(含迟到分块中止、releaseEngine 串行)。并行(`maxNumSentences>1`)实测只快 ~8%,不启用;JNI 回调必须用 Java 适配器 `TtsStreamCallback`(sherpa 按 `invoke([F)Ljava/lang/Integer;` 查方法,Kotlin indy lambda 没这个签名,直接传会 CheckJNI SIGABRT,已加 `TtsStreamCallbackTest` 反射守护)。
 
 ---
 
