@@ -78,12 +78,15 @@ class MainActivity : ComponentActivity() {
 
     @SuppressLint("ClickableViewAccessibility", "SourceLockedOrientationActivity")
     override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
         // isTaskRoot 防护（Android 15+ 兼容）
+        // 注意：必须先把 super.onCreate 走完再判断退出，否则系统会因
+        // "did not call through to super.onCreate()" 抛 SuperNotCalledException 直接崩溃。
         if (!isTaskRoot) {
             finish()
             return
         }
-        super.onCreate(savedInstanceState)
 
         // 交给 Compose 自己处理系统栏/软键盘 inset：
         // 非 edge-to-edge 时框架会在 DecorView 层把系统窗口 inset（含 IME）消费掉，
