@@ -19,11 +19,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.kotlin.any
+import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
@@ -36,11 +38,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * [TtsManager] 的纯 JVM 单测：引擎用 [TtsEngine] 匿名实现（sherpa 的 `GeneratedAudio`
+ * [TtsManager] 的纯 JVM 单测：引擎用 [TtsEngine] 假实现（sherpa 的 `GeneratedAudio`
  * 只是数据类，可在 JVM 上直接构造），播放器用 mockito 打桩。
  *
- * 覆盖改造后的关键契约：采样率透传、语速 = 1/lengthScale、各道闸门（开关 / 静音 / 模型就绪 /
- * 空白文本）不进入合成、试听入口跳过来源开关、[TtsManager.releaseEngine] 与在途合成串行。
+ * 覆盖流式播放的关键契约：逐句回调即写入播放器（首块才点亮/停触摸语音）、代际令牌透传、
+ * 中止传播（回调返回 false 后不再写入）、采样率与语速透传、各道闸门不进入合成、
+ * [TtsManager.releaseEngine] 与在途合成串行。
  */
 class TtsManagerTest {
 
@@ -62,105 +65,186 @@ class TtsManagerTest {
         whenever(modelManager.state).thenReturn(MutableStateFlow<TtsModelState>(TtsModelState.Ready))
     }
 
+    private fun message(text: String) = ChatMessage(ChatRole.assistant, text)
+
+    /**
+     * 流式引擎假实现：按 [chunks] 逐块回调。
+     *
+     * @param beforeEachChunk 每块回调前的钩子（模拟"合成中途被打断"时先阻塞再出块）
+     * @param afterAllChunks 全部分块回调后的钩子（可用来等 manager 收尾）
+     */
+    private class FakeStreamingEngine(
+        private val sampleRate: Int = 22050,
+        private val chunks: List<FloatArray> = listOf(FloatArray(10) { 0.1f }),
+        private val beforeEachChunk: ((Int) -> Unit)? = null,
+        private val afterAllChunks: (() -> Unit)? = null,
+    ) : TtsEngine {
+        val speeds = mutableListOf<Float>()
+        val releaseCalls = AtomicBoolean(false)
+        var finished = false
+        var aborted = false
+        var called = false
+
+        override fun synthesizeStreaming(
+            text: String,
+            speed: Float,
+            onChunk: (GeneratedAudio) -> Boolean,
+        ): Boolean {
+            called = true
+            speeds += speed
+            chunks.forEachIndexed { index, chunk ->
+                beforeEachChunk?.invoke(index)
+                if (!onChunk(GeneratedAudio(chunk, sampleRate))) {
+                    aborted = true
+                    return false
+                }
+            }
+            finished = true
+            afterAllChunks?.invoke()
+            return true
+        }
+
+        override fun release() {
+            releaseCalls.set(true)
+        }
+    }
+
     @Test
-    fun `播放取合成结果采样率并按语速换算`() = runBlocking {
+    fun `流式合成按句写入播放器并收尾`() = runBlocking<Unit> {
+        whenever(settings.isTtsMainEnabled()).thenReturn(true)
+        whenever(settings.getTtsLengthScale()).thenReturn(1.0)
+        readyModel()
+        whenever(player.startStreaming(22050)).thenReturn(42)
+        whenever(player.writeStreaming(any(), any())).thenReturn(true)
+
+        val engine = FakeStreamingEngine(
+            chunks = listOf(FloatArray(10) { 0.5f }, FloatArray(20) { 0.25f }, FloatArray(30) { -0.5f }),
+        )
+        manager(engine).speak(message("今天天气很好。我们出去散步吧。记得带伞。"), TtsManager.Source.MAIN)
+
+        verify(player, timeout(3000)).startStreaming(22050)
+        val pcm = argumentCaptor<ShortArray>()
+        verify(player, timeout(3000).times(3)).writeStreaming(eq(42), pcm.capture())
+        assertEquals(listOf(10, 20, 30), pcm.allValues.map { it.size })
+        assertArrayEquals(ShortArray(10) { 16383 }, pcm.allValues[0])
+        verify(player, timeout(3000)).finishStreaming(42)
+        assertTrue("引擎应跑到自然结束", engine.finished)
+    }
+
+    @Test
+    fun `语速按 lengthScale 换算传给引擎`() = runBlocking<Unit> {
         whenever(settings.isTtsMainEnabled()).thenReturn(true)
         whenever(settings.getTtsLengthScale()).thenReturn(2.0)
         readyModel()
+        whenever(player.startStreaming(any())).thenReturn(1)
 
-        val speedRef = AtomicReference<Float>(0f)
-        val engine = object : TtsEngine {
-            override fun synthesize(text: String, speed: Float): GeneratedAudio {
-                speedRef.set(speed)
-                return GeneratedAudio(FloatArray(100) { 0.1f }, 24000)
-            }
+        val engine = FakeStreamingEngine()
+        manager(engine).speak(message("今天天气真好。"), TtsManager.Source.MAIN)
 
-            override fun release() {}
-        }
-
-        manager(engine).speak(ChatMessage(ChatRole.assistant, "今天天气真好。"), TtsManager.Source.MAIN)
-
-        verify(player, timeout(3000)).play(any(), eq(24000))
-        // lengthScale=2.0 → speed = 0.5（语速更慢）
-        assertEquals(0.5f, speedRef.get(), 1e-6f)
+        verify(player, timeout(3000)).startStreaming(22050)
+        assertEquals(0.5f, engine.speeds.single(), 1e-6f)
     }
 
     @Test
-    fun `采样率原样透传给播放器`() = runBlocking {
+    fun `采样率取自首个分块并原样透传`() = runBlocking<Unit> {
+        whenever(settings.isTtsMainEnabled()).thenReturn(true)
+        whenever(settings.getTtsLengthScale()).thenReturn(1.0)
+        readyModel()
+        whenever(player.startStreaming(24000)).thenReturn(7)
+        whenever(player.writeStreaming(any(), any())).thenReturn(true)
+
+        val engine = FakeStreamingEngine(sampleRate = 24000, chunks = listOf(FloatArray(10), FloatArray(10)))
+        manager(engine).speak(message("こんにちは"), TtsManager.Source.MAIN)
+
+        verify(player, timeout(3000)).startStreaming(24000)
+        verify(player, timeout(3000)).finishStreaming(eq(7))
+    }
+
+    @Test
+    fun `有音频时才点亮播放并触发 onPlaybackStart`() = runBlocking<Unit> {
+        whenever(settings.isTtsMainEnabled()).thenReturn(true)
+        whenever(settings.getTtsLengthScale()).thenReturn(1.0)
+        readyModel()
+        whenever(player.startStreaming(any())).thenReturn(1)
+        whenever(player.writeStreaming(any(), any())).thenReturn(true)
+
+        val playbackStarted = AtomicBoolean(false)
+        TtsManager.onPlaybackStart = { playbackStarted.set(true) }
+        try {
+            val mgr = manager(FakeStreamingEngine())
+            mgr.speak(message("你好"), TtsManager.Source.MAIN)
+
+            verify(player, timeout(3000)).startStreaming(22050)
+            assertTrue("首块到达应触发 onPlaybackStart", playbackStarted.get())
+            assertTrue("首块到达应点亮播放中标记", mgr.isPlaying.value)
+        } finally {
+            TtsManager.onPlaybackStart = null
+        }
+    }
+
+    @Test
+    fun `合成无分块时不开始播放`() = runBlocking<Unit> {
         whenever(settings.isTtsMainEnabled()).thenReturn(true)
         whenever(settings.getTtsLengthScale()).thenReturn(1.0)
         readyModel()
 
-        val engine = object : TtsEngine {
-            override fun synthesize(text: String, speed: Float) = GeneratedAudio(FloatArray(10), 22050)
-            override fun release() {}
-        }
+        val done = CountDownLatch(1)
+        val mgr = manager(FakeStreamingEngine(chunks = emptyList(), afterAllChunks = { done.countDown() }))
+        mgr.speak(message("你好"), TtsManager.Source.MAIN)
 
-        manager(engine).speak(ChatMessage(ChatRole.assistant, "こんにちは"), TtsManager.Source.MAIN)
-
-        verify(player, timeout(3000)).play(any(), eq(22050))
+        assertTrue(done.await(3, TimeUnit.SECONDS))
+        delay(100)
+        assertFalse("没有音频不应点亮播放中标记", mgr.isPlaying.value)
+        verify(player, never()).startStreaming(any())
+        verify(player, never()).finishStreaming(any())
     }
 
     @Test
-    fun `语速随 lengthScale 收敛到设置范围`() = runBlocking {
-        whenever(settings.isTtsMainEnabled()).thenReturn(true)
-        whenever(settings.getTtsLengthScale()).thenReturn(9.0)   // 越界，应裁剪为 2.0
-        readyModel()
-
-        val speedRef = AtomicReference<Float>(0f)
-        val engine = object : TtsEngine {
-            override fun synthesize(text: String, speed: Float): GeneratedAudio {
-                speedRef.set(speed)
-                return GeneratedAudio(FloatArray(10), 22050)
-            }
-
-            override fun release() {}
-        }
-
-        manager(engine).speak(ChatMessage(ChatRole.assistant, "你好"), TtsManager.Source.MAIN)
-
-        verify(player, timeout(3000)).play(any(), eq(22050))
-        assertEquals(0.5f, speedRef.get(), 1e-6f)
-    }
-
-    @Test
-    fun `空白内容不进入合成`() = runBlocking {
+    fun `stop 后迟到的分块不再开始播放`() = runBlocking<Unit> {
         whenever(settings.isTtsMainEnabled()).thenReturn(true)
         whenever(settings.getTtsLengthScale()).thenReturn(1.0)
         readyModel()
-        var called = false
-        val engine = object : TtsEngine {
-            override fun synthesize(text: String, speed: Float): GeneratedAudio {
-                called = true
-                return GeneratedAudio(FloatArray(1), 22050)
-            }
 
-            override fun release() {}
-        }
+        val entered = CountDownLatch(1)
+        val allowChunk = CountDownLatch(1)
+        val engine = FakeStreamingEngine(
+            beforeEachChunk = {
+                entered.countDown()
+                allowChunk.await(5, TimeUnit.SECONDS)
+            },
+        )
+        val mgr = manager(engine)
+        mgr.speak(message("你好"), TtsManager.Source.MAIN)
+        assertTrue("合成应已开始", entered.await(3, TimeUnit.SECONDS))
 
-        manager(engine).speak(ChatMessage(ChatRole.assistant, "   "), TtsManager.Source.MAIN)
-        Thread.sleep(300)
-        assertFalse(called)
-        // 注意：TtsManager.init 会给 player.onPlaybackComplete 赋值（算一次交互），
-        // 所以只能断言 play() 从未被调用，不能用 verifyNoInteractions。
-        verify(player, never()).play(any(), any())
+        mgr.stop()
+        allowChunk.countDown()
+
+        verify(player, timeout(3000).atLeastOnce()).stop()
+        delay(300)
+        verify(player, never()).startStreaming(any())
+        assertTrue("过期分块应中止合成", engine.aborted)
     }
 
     @Test
-    fun `归一化后为空不合成也不播放`() = runBlocking {
+    fun `空白内容不进入合成`() = runBlocking<Unit> {
         whenever(settings.isTtsMainEnabled()).thenReturn(true)
         whenever(settings.getTtsLengthScale()).thenReturn(1.0)
         readyModel()
-        var called = false
-        val engine = object : TtsEngine {
-            override fun synthesize(text: String, speed: Float): GeneratedAudio {
-                called = true
-                return GeneratedAudio(FloatArray(1), 22050)
-            }
+        val engine = FakeStreamingEngine()
 
-            override fun release() {}
-        }
-        // 模拟「改写后没有可读文本」：归一化结果为空，必须在合成前静默放弃
+        manager(engine).speak(message("   "), TtsManager.Source.MAIN)
+        delay(300)
+        assertFalse(engine.called)
+        verify(player, never()).startStreaming(any())
+    }
+
+    @Test
+    fun `归一化后为空不合成也不播放`() = runBlocking<Unit> {
+        whenever(settings.isTtsMainEnabled()).thenReturn(true)
+        whenever(settings.getTtsLengthScale()).thenReturn(1.0)
+        readyModel()
+        val engine = FakeStreamingEngine()
         val emptyNormalizer = mock<TtsTextNormalizer>()
         whenever(emptyNormalizer.normalize(any())).thenReturn("")
         val mgr = TtsManager(
@@ -172,111 +256,76 @@ class TtsManagerTest {
             scope = CoroutineScope(SupervisorJob()),
         )
 
-        mgr.speak(ChatMessage(ChatRole.assistant, "raw text"), TtsManager.Source.MAIN)
-        Thread.sleep(300)
-        assertFalse(called)
-        verify(player, never()).play(any(), any())
+        mgr.speak(message("raw text"), TtsManager.Source.MAIN)
+        delay(300)
+        assertFalse(engine.called)
+        verify(player, never()).startStreaming(any())
     }
 
     @Test
-    fun `模型未就绪不合成`() = runBlocking {
+    fun `模型未就绪不合成`() = runBlocking<Unit> {
         whenever(settings.isTtsMainEnabled()).thenReturn(true)
         whenever(modelManager.state).thenReturn(MutableStateFlow<TtsModelState>(TtsModelState.NotDownloaded))
-        var called = false
-        val engine = object : TtsEngine {
-            override fun synthesize(text: String, speed: Float): GeneratedAudio {
-                called = true
-                return GeneratedAudio(FloatArray(1), 22050)
-            }
+        val engine = FakeStreamingEngine()
 
-            override fun release() {}
-        }
-
-        manager(engine).speak(ChatMessage(ChatRole.assistant, "你好"), TtsManager.Source.MAIN)
-        Thread.sleep(300)
-        assertFalse(called)
-        verify(player, never()).play(any(), any())
+        manager(engine).speak(message("你好"), TtsManager.Source.MAIN)
+        delay(300)
+        assertFalse(engine.called)
+        verify(player, never()).startStreaming(any())
     }
 
     @Test
-    fun `会话静音不合成`() = runBlocking {
+    fun `会话静音不合成`() = runBlocking<Unit> {
         whenever(settings.isTtsMainEnabled()).thenReturn(true)
         readyModel()
-        var called = false
-        val engine = object : TtsEngine {
-            override fun synthesize(text: String, speed: Float): GeneratedAudio {
-                called = true
-                return GeneratedAudio(FloatArray(1), 22050)
-            }
-
-            override fun release() {}
-        }
+        val engine = FakeStreamingEngine()
         val mgr = manager(engine)
-        mgr.toggleSessionMute()   // 开启本次会话静音
+        mgr.toggleSessionMute()
 
-        mgr.speak(ChatMessage(ChatRole.assistant, "你好"), TtsManager.Source.MAIN)
-        Thread.sleep(300)
-        assertFalse(called)
-        verify(player, never()).play(any(), any())
+        mgr.speak(message("你好"), TtsManager.Source.MAIN)
+        delay(300)
+        assertFalse(engine.called)
+        verify(player, never()).startStreaming(any())
     }
 
     @Test
-    fun `主开关关闭不合成`() = runBlocking {
+    fun `主开关关闭不合成`() = runBlocking<Unit> {
         whenever(settings.isTtsMainEnabled()).thenReturn(false)
         readyModel()
-        var called = false
-        val engine = object : TtsEngine {
-            override fun synthesize(text: String, speed: Float): GeneratedAudio {
-                called = true
-                return GeneratedAudio(FloatArray(1), 22050)
-            }
+        val engine = FakeStreamingEngine()
 
-            override fun release() {}
-        }
-
-        manager(engine).speak(ChatMessage(ChatRole.assistant, "你好"), TtsManager.Source.MAIN)
-        Thread.sleep(300)
-        assertFalse(called)
-        verify(player, never()).play(any(), any())
+        manager(engine).speak(message("你好"), TtsManager.Source.MAIN)
+        delay(300)
+        assertFalse(engine.called)
+        verify(player, never()).startStreaming(any())
     }
 
     @Test
-    fun `试听跳过来源开关但仍要求模型就绪与会话未静音`() = runBlocking {
-        whenever(settings.isTtsMainEnabled()).thenReturn(false)   // 主开关关着，试听照样出声
+    fun `试听跳过来源开关但仍要求模型就绪与会话未静音`() = runBlocking<Unit> {
+        whenever(settings.isTtsMainEnabled()).thenReturn(false)
         whenever(settings.getTtsLengthScale()).thenReturn(1.0)
         readyModel()
-
-        val engine = object : TtsEngine {
-            override fun synthesize(text: String, speed: Float) = GeneratedAudio(FloatArray(10), 22050)
-            override fun release() {}
-        }
+        whenever(player.startStreaming(any())).thenReturn(1)
+        val engine = FakeStreamingEngine()
 
         manager(engine).speakPreview("你好")
-        verify(player, timeout(3000)).play(any(), eq(22050))
+        verify(player, timeout(3000)).startStreaming(22050)
     }
 
     @Test
-    fun `releaseEngine 等完在途合成才释放引擎`() = runBlocking {
+    fun `releaseEngine 等完在途合成才释放引擎`() = runBlocking<Unit> {
         whenever(settings.isTtsMainEnabled()).thenReturn(true)
         whenever(settings.getTtsLengthScale()).thenReturn(1.0)
         readyModel()
 
         val synthEntered = CountDownLatch(1)
         val allowSynthFinish = CountDownLatch(1)
-        val releaseCalled = AtomicBoolean(false)
-        val engine = object : TtsEngine {
-            override fun synthesize(text: String, speed: Float): GeneratedAudio {
-                synthEntered.countDown()
-                allowSynthFinish.await(5, TimeUnit.SECONDS)
-                return GeneratedAudio(FloatArray(10), 22050)
-            }
-
-            override fun release() {
-                releaseCalled.set(true)
-            }
-        }
+        val engine = FakeStreamingEngine(beforeEachChunk = {
+            synthEntered.countDown()
+            allowSynthFinish.await(5, TimeUnit.SECONDS)
+        })
         val mgr = manager(engine)
-        mgr.speak(ChatMessage(ChatRole.assistant, "你好"), TtsManager.Source.MAIN)
+        mgr.speak(message("你好"), TtsManager.Source.MAIN)
         assertTrue("合成应已开始", synthEntered.await(3, TimeUnit.SECONDS))
 
         val released = CompletableDeferred<Unit>()
@@ -285,11 +334,10 @@ class TtsManagerTest {
             released.complete(Unit)
         }
         delay(200)
-        // 合成仍在 native 里跑，release 必须被同一把 Mutex 挡住（否则是 use-after-free）
-        assertFalse("在途合成未结束不应释放引擎", releaseCalled.get())
+        assertFalse("在途合成未结束不应释放引擎", engine.releaseCalls.get())
 
         allowSynthFinish.countDown()
         withTimeout(3000) { released.await() }
-        assertTrue("合成结束后应释放引擎", releaseCalled.get())
+        assertTrue("合成结束后应释放引擎", engine.releaseCalls.get())
     }
 }

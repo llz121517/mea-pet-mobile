@@ -47,11 +47,12 @@ internal fun buildSherpaTtsConfig(modelDir: File): OfflineTtsConfig {
 }
 
 /**
- * sherpa-onnx 离线 TTS 引擎。
+ * sherpa-onnx 离线 TTS 引擎（逐句流式）。
  *
- * - 首次 [synthesize] 才创建 [OfflineTts]（加载 75MB 模型 + 8.9MB lexicon，耗时数百 ms~数秒，务必在 IO 线程）；
- * - [OfflineTts.generateWithConfig] 是阻塞原生调用，**非线程安全**：并发合成由上层
- *   [com.meapet.mobile.tts.TtsManager] 的 Mutex 串行化；
+ * - 首次合成才创建 [OfflineTts]（加载 75MB 模型 + 8.9MB lexicon，耗时数百 ms~数秒，务必在 IO 线程）；
+ * - [OfflineTts.generateWithConfigAndCallback] 是阻塞原生调用，**非线程安全**：并发合成由上层
+ *   [com.meapet.mobile.tts.TtsManager] 的 Mutex 串行化；回调对每句完成即触发（`maxNumSentences=1`
+ *   时逐句串行），回调返回 0 会让 sherpa 中止后续句子——打断时能省掉剩余推理；
  * - [release] 幂等，删除模型前由设置页调用。
  */
 class SherpaTtsEngine(private val modelManager: TtsModelManager) : TtsEngine {
@@ -79,11 +80,33 @@ class SherpaTtsEngine(private val modelManager: TtsModelManager) : TtsEngine {
         }
     }
 
-    override fun synthesize(text: String, speed: Float): GeneratedAudio {
+    override fun synthesizeStreaming(
+        text: String,
+        speed: Float,
+        onChunk: (GeneratedAudio) -> Boolean,
+    ): Boolean {
         val tts = requireEngine()
-        val audio = tts.generateWithConfig(text, GenerationConfig(speed = speed, sid = 0))
-        Log.d(TAG, "合成完成：文字=${text.length} speed=$speed 样本=${audio.samples.size} sr=${audio.sampleRate}")
-        return audio
+        val startedAt = SystemClock.elapsedRealtime()
+        var chunkCount = 0
+        var aborted = false
+        // sherpa 回调约定：返回 1 继续、返回 0 中止后续合成
+        val whole = tts.generateWithConfigAndCallback(
+            text,
+            GenerationConfig(speed = speed, sid = 0),
+        ) { samples: FloatArray ->
+            chunkCount++
+            if (onChunk(GeneratedAudio(samples, tts.sampleRate()))) 1 else {
+                aborted = true
+                0
+            }
+        }
+        Log.d(
+            TAG,
+            "流式合成${if (aborted) "中止" else "完成"}：文字=${text.length} speed=$speed " +
+                "分块=$chunkCount 样本=${whole.samples.size} " +
+                "elapsed=${SystemClock.elapsedRealtime() - startedAt}ms",
+        )
+        return !aborted
     }
 
     @Synchronized

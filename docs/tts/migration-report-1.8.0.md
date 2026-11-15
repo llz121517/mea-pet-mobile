@@ -35,13 +35,13 @@
   ├─ ① 拉丁字母串转小写
   └─ ② 日语上下文改写：连续汉字段若紧挨假名 → 用 ja_reading_map 改写为假名
   │  sherpa C++ 内部
-  ├─ ③ 按句切分（maxNumSentences=1）
+  ├─ ③ 按句切分（maxNumSentences=1）→ 逐句回调 App（流式播放）
   ├─ ④ ruleFsts：phone.fst → date.fst → number.fst（顺序固定）
   ├─ ⑤ CharacterLexicon 最长匹配（统一 lexicon.txt，jieba=1 触发）
   ├─ ⑥ 符号 → ID（tokens.txt，add_blank=1）
   └─ ⑦ VITS2 单图推理（prior encoder / duration predictor 为 fp32，flow / decoder 为 fp16，混合精度拼接）
   │
-  └→ GeneratedAudio（22050Hz，采样率由引擎给出）→ TtsAudioPlayer.play(samples, sampleRate)
+  └→ 每句 GeneratedAudio（22050Hz，采样率由引擎给出）→ TtsAudioPlayer 流式写 AudioTrack（首块即播，打断即停）
 ```
 
 **关键点**
@@ -67,7 +67,7 @@
 | 3 | 旧版兼容逻辑抽成顶层模块 `com.meapet.mobile.legacy`，每步一个文件 | 用户要求便于维护、后续整包删除；总入口 `AppContainer.warmUp()` 启动时异步执行 | 多 6 个文件与 `warmUp` 一个 `launch` |
 | 4 | 不做 ORT 降级方案 | ORT 1.23.2 的 KleidiAI SME SIGILL（历史 commit `db097864`）已在 1.24.3 修复，AAR 用 1.28.2 | 真出现 SIGILL 只能换 AAR/改编译，需另行决策 |
 | 5 | T6（播放器签名）与 T7（TtsManager）合并提交 | T6 改签名后旧调用点使中间态无法编译 | 单次提交 diff 稍大 |
-| 6 | `releaseEngine()` 改为 `suspend` 并在同一 `synthMutex` 内 release | `generateWithConfig` 阻塞且不可取消，release 与在途 synthesize 并发访问已释放 native 对象 = use-after-free | 调用点已都在协程内，无额外改动 |
+| 6 | `releaseEngine()` 改为 `suspend` 并在同一 `synthMutex` 内 release | `generateWithConfigAndCallback` 阻塞且无法中断在途推理，release 与在途合成并发访问已释放 native 对象 = use-after-free | 调用点已都在协程内，无额外改动 |
 | 7 | 子代理无 model 参数，统一继承会话模型 | 本 harness 的 `subagent` 工具不支持 model/provider 覆盖 | 成本/时延略高，质量不受影响 |
 
 ---

@@ -4,6 +4,7 @@ import android.util.Log
 import com.meapet.mobile.chat.ChatMessage
 import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.tts.audio.TtsAudioPlayer
+import com.meapet.mobile.tts.audio.floatToPcm16
 import com.meapet.mobile.tts.engine.TtsEngine
 import com.meapet.mobile.tts.model.TtsModelManager
 import com.meapet.mobile.tts.model.TtsModelState
@@ -20,18 +21,21 @@ import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * TTS 门面：开关判断 + 归一化 + 整段合成播放。
+ * TTS 门面：开关判断 + 归一化 + 逐句流式合成播放。
  *
  * 主界面与悬浮窗两路 LLM 回复都汇聚到这里：[speak] 先查对应开关与模型就绪，
- * 满足则「归一化 → sherpa 合成 → 播放」。新回复到达时取消上一段（旧话不念完）。
+ * 满足则「归一化 → sherpa 逐句合成 → 首块即开播 → 边合成边写 AudioTrack」。
+ * 新回复到达时取消上一段（旧话不念完；回调返回 false 让引擎中止剩余句子）。
  *
  * ## 并发
- * - [speakSeq]：native 合成无法被 `Job.cancel()` 打断，合成完成后要校验自己仍是最新，
- *   否则旧消息的协程会在合成完成后盖掉新消息的播放（表现为"最新回复无声"）。
- * - [synthMutex]：sherpa 的 `generateWithConfig` 非线程安全，且取消挡不住在途 native 调用，
- *   用互斥锁把在途合成串行化；拿到锁后先复查序号与模型状态（非 Ready 视为模型目录正被替换/删除），
- *   过期或模型未就绪直接放弃，不浪费一次推理、也不会在删除/替换期间重建 OfflineTts。
- *   [releaseEngine] 用**同一把锁**，保证释放不会与在途合成并发（否则是 native use-after-free）。
+ * - [speakSeq]：native 合成无法被 `Job.cancel()` 打断，每个分块回调前都要校验自己仍是最新，
+ *   否则旧消息的分块会盖掉新消息的播放（表现为"最新回复无声"）；过期时回调返回 false
+ *   让引擎尽早中止剩余句子。
+ * - [synthMutex]：sherpa 的 `generateWithConfigAndCallback` 非线程安全，且取消挡不住在途
+ *   native 调用，用互斥锁把在途合成串行化；拿到锁后先复查序号与模型状态（非 Ready 视为模型
+ *   目录正被替换/删除），过期或模型未就绪直接放弃，不浪费一次推理、也不会在删除/替换期间
+ *   重建 OfflineTts。[releaseEngine] 用**同一把锁**，保证释放不会与在途合成并发
+ *   （否则是 native use-after-free）。
  */
 class TtsManager(
     private val settingsManager: SettingsManager,
@@ -157,42 +161,74 @@ class TtsManager(
                     if (mySeq == speakSeq.get()) _isPlaying.value = false
                     return@launch
                 }
-                Log.d(TAG, "$tag: 开始合成 '${normalized.take(20)}' (${normalized.length} 字, speed=$speed)")
+                Log.d(TAG, "$tag: 开始流式合成 '${normalized.take(20)}' (${normalized.length} 字, speed=$speed)")
 
                 // 串行化在途合成；拿到锁后复查序号与模型状态：
                 // 序号过期 → 不再浪费一次推理；模型已非 Ready → 目录可能正被替换/删除
                 // （SettingsViewModel 会先 markMutating 再 releaseEngine），此时重建 OfflineTts
                 // 会加载到半套/已删文件，直接放弃。
-                val audio = synthMutex.withLock {
-                    if (mySeq != speakSeq.get()) return@withLock null
-                    if (modelManager.state.value != TtsModelState.Ready) return@withLock null
-                    engine.synthesize(normalized, speed)
-                } ?: run {
-                    Log.d(TAG, "$tag: 合成前已被更新的 speak/stop 取代或模型已非就绪（seq=$mySeq），放弃")
-                    if (mySeq == speakSeq.get()) _isPlaying.value = false
-                    return@launch
+                val speakStartedAt = System.nanoTime()
+                var streamGen = -1
+                var chunkCount = 0
+                var firstChunkMs = -1L
+                synthMutex.withLock {
+                    if (mySeq != speakSeq.get()) {
+                        Log.d(TAG, "$tag: 合成前已被更新的 speak/stop 取代（seq=$mySeq），放弃")
+                        if (mySeq == speakSeq.get()) _isPlaying.value = false
+                        return@withLock
+                    }
+                    if (modelManager.state.value != TtsModelState.Ready) {
+                        Log.d(TAG, "$tag: 模型已非就绪（state=${modelManager.state.value}），放弃")
+                        return@withLock
+                    }
+                    val completed = engine.synthesizeStreaming(normalized, speed) { audio ->
+                        when {
+                            // 合成期间可能有更新的 speak/stop（cancel 对 native 推理无效）：
+                            // 返回 false 让引擎中止剩余句子
+                            mySeq != speakSeq.get() -> false
+                            audio.samples.isEmpty() -> true
+                            else -> {
+                                if (streamGen < 0) {
+                                    // 首块到达才算"开始播放"（合成 / 排队阶段喇叭保持熄灭）
+                                    streamGen = player.startStreaming(audio.sampleRate)
+                                    firstChunkMs = (System.nanoTime() - speakStartedAt) / 1_000_000
+                                    _isPlaying.value = true
+                                    onPlaybackStart?.invoke()   // 互斥：停掉未完的触摸语音
+                                    Log.d(
+                                        TAG,
+                                        "$tag: 首块到达（${audio.samples.size} 样本 ${audio.sampleRate}Hz，" +
+                                            "${firstChunkMs}ms），开始播放",
+                                    )
+                                }
+                                chunkCount++
+                                player.writeStreaming(streamGen, floatToPcm16(audio.samples))
+                            }
+                        }
+                    }
+                    if (completed && mySeq == speakSeq.get()) {
+                        if (streamGen >= 0) {
+                            player.finishStreaming(streamGen)
+                            Log.d(
+                                TAG,
+                                "$tag: 流式合成完成（首块 ${firstChunkMs}ms，分块=$chunkCount），等待播完",
+                            )
+                        } else {
+                            Log.w(TAG, "$tag: 合成为空（0 分块），静默跳过（无声！）")
+                            _isPlaying.value = false
+                        }
+                    } else {
+                        Log.d(TAG, "$tag: 流式中止（completed=$completed 分块=$chunkCount）")
+                    }
                 }
-
-                // 合成期间可能有更新的 speak/stop（cancel 对 native 推理无效）：过期则丢弃
-                if (mySeq != speakSeq.get()) {
-                    Log.w(TAG, "$tag: 合成完成但已有更新的 speak/stop（seq=$mySeq → ${speakSeq.get()}），丢弃本段")
-                    return@launch
-                }
-                if (audio.samples.isEmpty()) {
-                    Log.w(TAG, "$tag: 合成为空数组，静默跳过（无声！）")
-                    _isPlaying.value = false
-                    return@launch
-                }
-                // 真正开始播放前才亮（合成 / 排队阶段喇叭保持熄灭）
-                _isPlaying.value = true
-                onPlaybackStart?.invoke()   // 互斥：停掉未完的触摸语音
-                player.play(audio.samples, audio.sampleRate)   // 播完经 onPlaybackComplete 解除 isPlaying
             } catch (e: kotlinx.coroutines.CancellationException) {
                 Log.d(TAG, "$tag: 合成被取消（上一段被打断）")
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "合成失败: $clipped", e)
-                if (mySeq == speakSeq.get()) _isPlaying.value = false
+                if (mySeq == speakSeq.get()) {
+                    player.stop()
+                    _isPlaying.value = false
+                }
             }
         }
     }
@@ -217,8 +253,9 @@ class TtsManager(
      * 删除/导入模型前调用：停止播放/合成并释放底层 OfflineTts（75MB 模型 + 8.9MB lexicon 的 native 内存）。
      * 之后若重新下载模型，引擎会在下次合成时按新模型懒加载重建。
      *
-     * **必须是 suspend**：sherpa 的 generateWithConfig 是阻塞 native 调用，stop() 取消不掉；
-     * 这里用同一把 [synthMutex] 等完在途合成再释放，避免 release 与 synthesize 并发访问已释放的 native 对象。
+     * **必须是 suspend**：sherpa 的 generateWithConfigAndCallback 是阻塞 native 调用，stop() 取消不掉；
+     * 这里用同一把 [synthMutex] 等完在途合成再释放，避免 release 与 synthesizeStreaming 并发访问
+     * 已释放的 native 对象。
      * 调用点（SettingsViewModel 的 importTtsModelZip / deleteTtsModel）已在 viewModelScope.launch 内，无需改。
      */
     suspend fun releaseEngine() {

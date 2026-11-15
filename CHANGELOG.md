@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **删除自写 G2P 与拼音资产** — 相关引擎与约 8.9 万行词表全部移除，APK 减小约 1.65MB。
 - **破坏性操作统一为「立即执行 + 可撤销」** — 清除对话 / 清除全部记忆 / 恢复默认 System Prompt / 恢复默认壁纸四处原为弹窗确认、两段式点击或无提示直接删除，现统一改为点击即执行 + 底部倒计时撤销条（默认 5 秒，窗口内按快照回滚）；转屏切页不丢撤销机会，被新写入覆盖时窗口立即作废，壁纸到窗口到期才真正删文件。
 - **软键盘改用应用自己的 inset 避让** — 窗口不再随键盘 resize / pan（此前主页会整体上跳、设置页底部提示条被键盘盖住），改为按 IME inset 让页面自行收窄：输入栏、消息列表与底部提示条（含撤销条）始终在键盘上方；提示条另补了左右留边与远离屏幕底边、手势区的余量。
+- **语音合成改为逐句流式播放** — 首句合成完即出声，后续句子边合成边写 AudioTrack，不再等整段合成完才播（桌面 4 句样本首块约 1.1s，整段合成需 3.8s）；打断 / 新消息到来时回调直接中止原生推理的剩余句子，不再白算完。
 
 ### Fixed
 
@@ -34,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **历史 SIGILL 坑已包含修复** — 1.7.1 记录的 ORT 1.23.2 KleidiAI SME 崩溃（[onnxruntime#26921](https://github.com/microsoft/onnxruntime/issues/26921)）在 sherpa 内嵌的 1.28.2 中已含修复。
 - **设置页 Debug 构建新增「试听文本」入口** — 任意文本直接合成，便于真机验证数字 / 日期 / 日语 / 中英混排；release 构建不显示该入口。
 - 版本号升至 1.8.0（versionCode 14）；applicationId 与签名不变，可覆盖安装，但**升级后必须重新准备语音模型**（见上）。
+- **流式播放的句间停顿** — 真机合成速度约为实时的 1.1 倍（RTF≈1.1），句子之间可能有轻微停顿，属流式播放的预期代价；多句并行（`maxNumSentences > 1`）实测只快约 8%，本版未启用。
 - 真机验收清单见 [`docs/tts/device-test-checklist.md`](docs/tts/device-test-checklist.md)。
 
 ### Documentation

@@ -14,8 +14,8 @@
 ③ 上下文改写：日语片段（连续汉字且紧挨假名）→ 用映射表改写为假名
    │
    ▼  sherpa C++ 内部
-④ 句切分（。！？,.!?…）→ 逐句合成：每批 1 句（maxNumSentences=1）串行合成，结果拼接后整段返回；
-   App 未注册逐句回调（generateWithConfigAndCallback）
+④ 句切分（。！？,.!?…）→ 逐句合成（maxNumSentences=1，每句一个分块）→ 每句完成即回调 App；
+   App 首块到达就开播，后续分块边合成边写 AudioTrack（generateWithConfigAndCallback）
 ⑤ ruleFsts：phone.fst → date.fst → number.fst（顺序重要！）
 ⑥ CharacterLexicon 最长匹配（统一 lexicon.txt）
 ⑦ 符号 → ID（tokens.txt）+ add_blank
@@ -23,7 +23,9 @@
 VITS 单图推理 → 22050Hz 音频
 ```
 
-> **多句并行 / 逐句流式播放均未启用**（有意简化，1.6 前的变更记录已定稿为「整段一次合成」）：`maxNumSentences = 1` 时 sherpa 仍按句切分、逐句串行合成，但 App 用的是无回调的 `generateWithConfig`，拿到的是拼接后的整段音频——既无并行加速，也无逐句流式。桌面实测（同版本 sherpa-onnx、同一模型、numThreads=2、4 句中文）：mns=1 → 3.78s、4 次逐句回调（首句 1.10s）；mns=4 → 3.50s、1 次回调（首音 3.50s）。即**并行只快约 8%**（8 句文本 8.41s→7.79s），且 batch 越大句间停顿越短、听感有差异；真正收益在「回调到达即开播」（首音 1.10s vs 3.50s，约 -70%），需把 `TtsManager`/播放器改成增量写 PCM，排 1.9.0 评估（见 `TODO.md` 待办 D）。
+> **逐句流式已启用**（2026-11-15）：sherpa 对每句合成完即回调，App 在首块到达时新建 AudioTrack 开播，后续分块入队由播放器专用线程写入；打断时回调返回 0 让原生推理中止剩余句子（不再白算完）。桌面实测 4 句中文：首块 1.10s（整段 3.78s）；8 句：首块 ~1.1s（整段 8.41s）。
+>
+> **多句并行（`maxNumSentences > 1`）仍未启用**：批量并行实测只快约 8%（8 句 8.41s→7.79s），且 batch 越大句间停顿越短、听感有变化，收益不抵复杂度。已知取舍：真机合成约 1.1× 实时（RTF≈1.1），所以句间可能有轻微停顿，这是流式播放在"合成慢于实时"设备上的预期代价。
 
 ## 2. 数据文件（模型包内）
 
