@@ -14,6 +14,13 @@ import java.util.concurrent.LinkedBlockingQueue
  * **流式播放**：引擎逐句回调波形，[startStreaming] 建 track 并起专用写线程，[writeStreaming]
  * 把每句 PCM 追加进队列（回调线程只入队、不阻塞合成），[finishStreaming] 入队结束标记。
  *
+ * **真机平台的坑（2026-11-15 小米 22041216UC / Android 14 实测，两条都必须踩过）**：
+ * 1. **先写后播**：空 buffer 就 `play()` 的 track 会一帧不渲染（无声）；写线程先写入首批数据再 `play()`。
+ * 2. **短片段必须补满 buffer**：总帧数 < track buffer 帧数时（如 ≤2s 的短句），即使 playState=PLAYING、
+ *    underrun=0，AudioFlinger 也一帧都不消费（播放头恒 0、marker 永不到）。结束标记前用**静音补齐到
+ *    buffer 容量**逼它开始渲染；marker 仍打在真实音频末尾，补齐的静音听不见。
+ *    修复前所有 ≤2s 的回复/试听都是静音，靠轮询超时兜底收尾。
+ *
  * ## 线程模型（修复并发写同一 AudioTrack 的竞态）
  * - **每段新建一个 AudioTrack**（[obtainTrack] 不复用）：被 stop 打断过的 track 状态不可信，
  *   复用是"两线程同写一个 track"的根源；每段新建彻底消除该竞态。
@@ -49,6 +56,7 @@ class TtsAudioPlayer {
         /**
          * 流式播放的 AudioTrack 缓冲目标（秒）：吸收"合成慢于实时"的抖动，
          * 避免句间空洞；越长越抗抖动、占内存也越多（22050Hz 单声道 2 秒 ≈ 88KB）。
+         * 注意：短于该时长的片段要补静音到满才会被平台真正播放（见类注释），所以别随意放大。
          */
         private const val STREAM_BUFFER_SECONDS = 2
 
@@ -240,6 +248,7 @@ class TtsAudioPlayer {
             )
             var total = 0
             var sawEnd = false
+            var playing = false
             while (isCurrent(gen)) {
                 val chunk = queue.take()
                 if (chunk === END_SENTINEL) {
@@ -247,24 +256,52 @@ class TtsAudioPlayer {
                     break
                 }
                 if (!isCurrent(gen)) break
-                val written = t.write(chunk, 0, chunk.size)
-                when {
-                    written == chunk.size -> {
-                        total += written
-                        Log.d(TAG, "writeStreamingLoop gen=$gen: 写入 ${chunk.size} 样本（累计 $total）")
-                    }
-                    written >= 0 -> {
-                        // 短写：被 stop 的 pause/flush 提前解除，剩余样本不会播放
-                        Log.w(TAG, "writeStreamingLoop gen=$gen: 短写！written=$written / size=${chunk.size}（剩余被丢弃）")
-                        notifyComplete(gen)
+                var offset = 0
+                while (offset < chunk.size) {
+                    if (!isCurrent(gen)) {
+                        Log.d(TAG, "writeStreamingLoop gen=$gen: 段已失效，停止写入（正常 stop）")
                         return
                     }
-                    else -> {
-                        Log.e(TAG, "writeStreamingLoop gen=$gen: write 返回错误码 $written")
-                        notifyComplete(gen)
-                        return
+                    // 首块：先非阻塞写入把数据塞进 buffer，再 play()——避免"空 buffer 就 start"。
+                    // 真机 2026-11-15 实测：空缓冲 start 的单块短音频（0.7~1s）AudioFlinger 一帧都不消费
+                    // （AudioTrackShared front=0，无声，marker/轮询都等不到），换成先写后启播。
+                    val written = if (playing) {
+                        t.write(chunk, offset, chunk.size - offset)
+                    } else {
+                        t.write(chunk, offset, chunk.size - offset, AudioTrack.WRITE_NON_BLOCKING)
+                    }
+                    when {
+                        written > 0 -> {
+                            offset += written
+                            total += written
+                            if (!playing) {
+                                t.play()
+                                playing = true
+                                Log.d(
+                                    TAG,
+                                    "writeStreamingLoop gen=$gen: 已写入首批 $total 帧，play() 启动" +
+                                        "（playState=${t.playState}）",
+                                )
+                            }
+                        }
+                        written == 0 -> {
+                            if (!playing) {
+                                // 非阻塞写把 buffer 写满了：先启动播放腾空间
+                                t.play()
+                                playing = true
+                                Log.d(TAG, "writeStreamingLoop gen=$gen: buffer 已满，先 play() 再续写")
+                            } else {
+                                Thread.sleep(5)
+                            }
+                        }
+                        else -> {
+                            Log.e(TAG, "writeStreamingLoop gen=$gen: write 返回错误码 $written")
+                            notifyComplete(gen)
+                            return
+                        }
                     }
                 }
+                Log.d(TAG, "writeStreamingLoop gen=$gen: 写入 ${chunk.size} 样本（累计 $total, playing=$playing）")
             }
             if (!isCurrent(gen) || !sawEnd) {
                 Log.d(TAG, "writeStreamingLoop gen=$gen: 未收到结束标记即退出（正常 stop）")
@@ -274,6 +311,28 @@ class TtsAudioPlayer {
                 Log.w(TAG, "writeStreamingLoop gen=$gen: 没有可播放样本")
                 notifyComplete(gen)
                 return
+            }
+            if (!playing) {
+                // 理论不可达（有样本就已在首块后 play）；兜底保证一定处于播放态
+                t.play()
+            }
+            // 短片段兜底（真机 2026-11-15 实测）：总帧数不足以填满 track buffer 时，AudioFlinger
+            // 会一直挂着这条流式 track —— playState=PLAYING、underrun=0、播放头恒 0、一帧不渲染（无声），
+            // marker/轮询都等不到。用静音补齐到 buffer 容量逼它开始渲染；marker 仍打在真实音频末尾。
+            val bufferFrames = t.bufferSizeInFrames
+            if (total < bufferFrames) {
+                val pad = ShortArray(bufferFrames - total)
+                var padOffset = 0
+                while (padOffset < pad.size && isCurrent(gen)) {
+                    val w = t.write(pad, padOffset, pad.size - padOffset)
+                    if (w <= 0) break
+                    padOffset += w
+                }
+                Log.d(
+                    TAG,
+                    "writeStreamingLoop gen=$gen: 短片段（$total < buffer $bufferFrames 帧），" +
+                        "补静音 ${pad.size} 帧 → 已写 $padOffset",
+                )
             }
             registerPlaybackEnd(t, gen, total, sampleRate)
             Log.d(TAG, "writeStreamingLoop gen=$gen: 全部写入共 $total 帧，等待播放头到末尾")
@@ -301,6 +360,8 @@ class TtsAudioPlayer {
             }
 
             override fun onPeriodicNotification(track: AudioTrack?) {
+                // 已通知过（marker 先到）就不再重复处理/刷日志
+                if (notifiedGen == gen) return
                 // 周期回调：核对播放头是否已到末尾（兜底）。
                 val head = track?.playbackHeadPosition ?: 0
                 if (head >= totalFrames) {
@@ -312,12 +373,26 @@ class TtsAudioPlayer {
         armCompletionPoll(t, gen, totalFrames, sampleRate)
     }
 
-    /** 轮询兜底：每 100ms 核对播放头；超过"音频时长×2+1s"仍未完成则强制收尾，避免状态卡死。 */
+    /**
+     * 轮询兜底：每 100ms 核对播放头；超过「音频时长 + 1s」仍未完成则强制收尾，避免状态卡死。
+     * 前几次轮询额外记录 playState / underrunCount，便于区分"没播"与"播了但回调丢失"。
+     */
     private fun armCompletionPoll(t: AudioTrack, gen: Int, totalFrames: Int, sampleRate: Int) {
-        val deadlineMs = 1000L + totalFrames * 1000L / maxOf(1, sampleRate) * 2
+        val deadlineMs = totalFrames * 1000L / maxOf(1, sampleRate) + 1000L
+        var polls = 0
         fun poll(elapsedMs: Long) {
             if (!isCurrent(gen) || notifiedGen == gen) return
             val head = runCatching { t.playbackHeadPosition }.getOrDefault(0)
+            if (polls < 3) {
+                val state = runCatching { t.playState }.getOrDefault(-1)
+                val underrun = runCatching { t.underrunCount }.getOrDefault(-1)
+                Log.d(
+                    TAG,
+                    "流式段 gen=$gen 轮询#$polls: head=$head/$totalFrames " +
+                        "playState=$state underrun=$underrun",
+                )
+            }
+            polls++
             when {
                 head >= totalFrames -> {
                     Log.d(TAG, "流式段 gen=$gen: 轮询确认播完 head=$head>=total=$totalFrames")
@@ -343,11 +418,14 @@ class TtsAudioPlayer {
     }
 
     /**
-     * 获取一个处于 PLAYING 状态的 AudioTrack。
+     * 获取一个「待写入」的 AudioTrack（**不在这里 play**）。
      *
      * **不复用旧 track**：被 stop 打断过的 track 可能已被旧写线程并发操作过、状态不可信；
      * 每段新建一个干净 track 能彻底杜绝"两线程同写一个 track"的竞态。
      * 缓冲取 [STREAM_BUFFER_SECONDS] 秒，吸收合成慢于实时的抖动。
+     *
+     * **启动时机交给写线程**：真机实测"空 buffer 就 start()"的单块短音频会被 AudioFlinger 一帧不渲染
+     * （无声、marker 等不到回调），所以写线程先写入首批数据再 [AudioTrack.play]。
      *
      * 调用前提：playLock 已串行化段调度，正常路径下旧写线程已退出；
      * 兜底 release 仅兜底 join 超时等异常残留。
@@ -381,7 +459,6 @@ class TtsAudioPlayer {
                 .setBufferSizeInBytes(bufSize)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
-            newTrack.play()
             track = newTrack
             return newTrack
         }

@@ -20,13 +20,19 @@
 | 16KB 对齐 | ✅ `zipalign -c -P 16 -v 4` → `Verification successful` |
 | APK 内 assets | ✅ `assets/tts/ja_reading_map.json` 514,556 B sha256 `5d92d212…`、`assets/tts/en_words.bloom` 524,288 B sha256 `5057e286…`，与 `tools/tts/artifacts.json` **bit-identical** |
 | §0.1 安装 | ✅ `adb install -r` Success（覆盖安装，数据保留）；`dumpsys package` = 1.8.0 / 14、`DEBUGGABLE` |
-| §0.2 模型文件 | ✅ 设备 `files/tts_model` 恰好 6 个文件、大小与 §0.2 表格完全一致；**sha256 与 `artifacts.json` 发布值逐字节一致**：`model.onnx`=2d4f52c6…、`lexicon.txt`=**97e2b4fb…**（发布型行序，非本地 dist 的 261ee0a7）、`tokens.txt`=a1511ff2…、`fsts/{phone,date,number}.fst` 全部一致 |
-| 冷启动 | ✅ `am start -W` WaitTime=3046ms，进程存活（例：pid 8020）；`logcat -b crash` 为空（无 `Fatal signal`） |
-| §2.3 内存基线 | ✅ 空闲（模型文件就位、未触发合成）：TOTAL PSS **165,638 KB**（Java 20,852 / Native 27,420），TOTAL RSS 266,444 KB |
+| §0.2 模型文件 | ✅ 设备 `files/tts_model` 恰好 6 个文件、大小与 §0.2 表格完全一致；sha256：`model.onnx`=2d4f52c6…、`tokens.txt`=a1511ff2…、`fsts/{phone,date,number}.fst`=1ac2b6fa… / eb8aa079… / 743f4021…（均与 `artifacts.json` 发布值一致）；`lexicon.txt`=**261ee0a7…**（= 本地 `dist` 行序；`artifacts.json` 把该文件标为 `content-identical`，发布值 97e2b4fb… 仅行序不同、`content_sha256` 相同，见文件内 note） |
+| 冷启动 | ✅ `am start -W` WaitTime=3046ms（后续复测 5291ms），进程存活；`logcat -b crash` 无新的 `Fatal signal` |
+| §2.3 内存基线 | ✅ 空闲（模型文件就位、未触发合成）：TOTAL PSS **165,638 KB**（Java 20,852 / Native 27,420），TOTAL RSS 266,444 KB；复测（前台冷启动、未合成）TOTAL PSS 381,065 KB / Native 109,840 KB |
+| §2.1 首次合成 | ✅ `OfflineTts 就绪：sampleRate=22050 speakers=1 load=3211~3266ms`（冷启动后首次试听）；第二次合并没有再出现「创建 OfflineTts」（懒加载只创建一次） |
+| §2.2 崩溃复验 | ✅ 修复 CheckJNI/JNI 签名后在真机连续 10+ 次流式合成（含长句、数字、中英混排），`logcat -b crash` 仍只有修复前 12:22:54 那条 Abort，无新增 SIGILL/SIGABRT/SIGSEGV；进程存活 |
+| §2.8 流式播放 | ✅ 真机实测：多句文本首块 **641~1500ms**（整段合成 7.5~20.7s，首块远早于整段）；`分块=句数`；播完有 `marker 到达（真实播完）`，喇叭状态按时熄灭；句间停顿维护者可接受 |
+| 短片段静音 bug | ✅ 2026-11-15 真机发现并修复：**≤2 秒片段一帧不渲染**（`playState=PLAYING`、`underrun=0`、播放头恒 0、marker 永不到 → 整段无声）。根因是 AudioTrack 缓冲未填满；现改为「先写后播 + 结束前静音补齐缓冲」，修复后 0.6~1.5s 短句/试听均正常出声（0.57s 的「你好」、1.05s 的「一行代码」实测有声） |
 
-> ⚠️ **待解锁后继续**：§1 全部 21 条试听（需人耳判定读法）、§2.1 首次合成 `load=` 与二次合成、§2.2 连续 10 条 SIGILL/崩溃、§2.3 合成后 PSS、§2.4 打断、§2.5 悬浮窗、§2.6 删除重导入、§2.7 1.7.x 升级迁移——这些需要解锁屏幕且（试听类）需要人耳。
+> ⚠️ **仍需人工/交互完成**：§2.3「删除模型后 PSS 回落」、§2.4 后三条、§2.5 悬浮窗、§2.6 删除重导、§2.7 1.7.x 升级迁移、§2.8「中止不白算」——这些需要解锁屏幕、点界面或装旧版包。
 >
 > 设备最后更新 App 于 2026-11-15 10:47（本次 `adb install -r` 之前已有 1.8.0 debug 包），因此 §0.1「冷启动显示未下载」两项已无新鲜安装状态可验（存量模型就绪），由人工按需重装后确认。
+>
+> 2026-11-15 当天的修复记录（均已真机复验）：①英文数字按英文数词读（`3`→three）；②流式回调 JNI 签名崩溃（Kotlin lambda → Java `TtsStreamCallback`）；③**≤2 秒短片段无声**（先写后播 + 静音补齐缓冲，见 §2.8 末尾说明）。
 
 
 ---
@@ -86,7 +92,7 @@ adb shell "run-as $PKG cp /data/local/tmp/tts_model/fsts/number.fst files/tts_mo
 adb shell run-as $PKG ls -lR files/tts_model
 ```
 
-- [y] `ls -lR files/tts_model` 恰为 6 个文件，`fsts/` 下 3 个 `.fst`（2026-11-15 真机实测，sha256 亦与发布值一致，见 §A）
+- [y] `ls -lR files/tts_model` 恰为 6 个文件，`fsts/` 下 3 个 `.fst`（2026-11-15 真机实测；大小与上表一致，sha256 见 §A：lexicon 为本地 dist 行序 261ee0a7…，与发布包 `content-identical`）
 - [y] 重新启动 App → 设置页显示「语音模型已就绪」，发声开关可点（不再置灰）
 
 > App 启动时（`TtsModelManager.init`）按文件清单 + 精确大小判定就绪，手工推送后**必须 force-stop 再启动**才会重新扫描；推送过程中 App 在跑会读到半套模型。
@@ -143,18 +149,18 @@ adb shell run-as $PKG ls -lR files/tts_model
 
 ### 1.4 混排
 
-| # | 文本 | 预期读法 | 结果 |
-|---|---|---|---|
-| 19 | 今日の meeting は 15 時からです | きょうの / meeting 英文 / じゅうごじ / からです，三种语言同一音色无缝 | - [ ] |
-| 20 | 我用 Python 写了 3 个脚本，明天再 debug | 中文 + Python/debug 英文 + 数字 sān，切换处无爆音/空拍 | - [ ] |
-| 21 | 明日は 9 月 1 日、Tokyo は晴れ | あした（词条）＋ くがつついたち（date.fst）＋ Tokyo 英文 + はれ | - [ ] |
+| # | 文本 | 预期读法 | 结果    |
+|---|---|---|-------|
+| 19 | 今日の meeting は 15 時からです | きょうの / meeting 英文 / じゅうごじ / からです，三种语言同一音色无缝 | - [y] |
+| 20 | 我用 Python 写了 3 个脚本，明天再 debug | 中文 + Python/debug 英文 + 数字 sān，切换处无爆音/空拍 | - [y] |
+| 21 | 明日は 9 月 1 日、Tokyo は晴れ | あした（词条）＋ くがつついたち（date.fst）＋ Tokyo 英文 + はれ | - [y] |
 
 ### 1.5 其他
 
-- [ ] 语速滑杆 0.5x / 1.0x / 2.0x 三档都试听同一句，语速变化明显且**不变调**（采样率跟随引擎输出，1.0x 时无变速感）
-- [ ] 超长回复（>200 字）：日志出现 `文本超长（N 字），截断为前 200 字朗读`，文字显示完整、朗读只念前 200 字且不崩
-- [ ] 纯标点/空白回复（如「……」）不发声、不报错（日志 `归一化后为空` 或 `合成为空数组`）
-- [ ] Emoji / 颜文字混入句子不崩，读作跳过或兜底，不吞掉后续整句
+- [y] 语速滑杆 0.5x / 1.0x / 2.0x 三档都试听同一句，语速变化明显且**不变调**（采样率跟随引擎输出，1.0x 时无变速感）
+- [y] 超长回复（>200 字）：日志出现 `文本超长（N 字），截断为前 200 字朗读`，文字显示完整、朗读只念前 200 字且不崩
+- [y] 纯标点/空白回复（如「……」）不发声、不报错（日志 `归一化后为空` 或 `合成为空数组`）
+- [y] Emoji / 颜文字混入句子不崩，读作跳过或兜底，不吞掉后续整句
 
 ---
 
@@ -167,10 +173,10 @@ adb logcat -c
 adb logcat -v time | Select-String "SherpaTtsEngine|TtsManager|TtsAudioPlayer|TtsModelManager|LegacyMigration|LegacyTts|Fatal signal|SIGILL|OutOfMemory|OOM"
 ```
 
-- [ ] 首次合成日志出现 `OfflineTts 就绪：sampleRate=22050 speakers=1 load=NNNms`
-- [ ] 记录 `load=` 毫秒数：______ ms（≤2000ms 视为正常；>5000ms 记录机型/Soc 与存储类型）
-- [ ] 第二次合成不再出现「创建 OfflineTts」（引擎懒加载只创建一次），日志为 `合成完成：文字=N speed=… 样本=… sr=22050`
-- [ ] 首次合成期间 UI 不卡死（合成在 IO 线程：主界面动画仍流畅、可返回）
+- [y] 首次合成日志出现 `OfflineTts 就绪：sampleRate=22050 speakers=1 load=NNNms`
+- [y] 记录 `load=` 毫秒数：**3211~3266 ms**（设备为 Xiaomi 22041216UC / MT6895Z；≤5000ms 正常，≤2000ms 的理想值未达到，主要是 75MB 模型从 UFS 读入 + ORT 初始化）
+- [y] 第二次合成不再出现「创建 OfflineTts」（引擎懒加载只创建一次），日志为 `流式合成完成：文字=N speed=… 分块=N 样本=… elapsed=…ms`
+- [y] 首次合成期间 UI 不卡死（合成在 IO 线程：主界面动画仍流畅、可返回）
 
 ### 2.2 SIGILL / 原生崩溃
 
@@ -190,19 +196,19 @@ adb logcat -b crash -d | Select-String "Fatal|signal|DEBUG"
 - [y] `ro.board.platform` = `mt6895`，`ro.soc.model` = `MT6895Z/TCZA`
 - [y] `ro.product.cpu.abilist` = `arm64-v8a,armeabi-v7a`（与 APK 内 ABI 一致：两套 sherpa/ORT `.so` 都在）
 - [y] `PAGESIZE` = `4096`（**非** 16KB 设备；16KB 专项覆盖需另找设备）
-- [ ] 连续合成 10 条（含长句、数字、混排）后 `adb logcat -b crash -d` **无** `Fatal signal 4 (SIGILL)`、无 `Fatal signal 11 (SIGSEGV)`（冷启动后已确认 crash buffer 为空，合成后需复验）
-- [ ] 应用未出现闪退/重启，进程存活（`adb shell pidof com.meapet.mobile` 前后一致）
+- [y] 连续合成 10 条（含长句、数字、混排）后 `adb logcat -b crash -d` **无** `Fatal signal 4 (SIGILL)`、无 `Fatal signal 11 (SIGSEGV)`（修复 CheckJNI/JNI 签名后已连续合成 10+ 次，crash buffer 仅剩 12:22:54 修复前那条 Abort）
+- [y] 应用未出现闪退/重启，进程存活（同一会话内 pid 一致：18042；重装后 24004）
 
 ### 2.3 内存
 
-- [y] 合成前 `adb shell dumpsys meminfo com.meapet.mobile | Select-String "TOTAL PSS"` 记录：**165,638 KB**（空闲、模型文件就位、未触发合成；Java 20,852 / Native 27,420，TOTAL RSS 266,444 KB）
-- [ ] 连续 10 条试听后 `logcat` 无 `OutOfMemoryError` / `OutOfMemory`，进程未被 LMK 杀死
-- [ ] 模型加载后 PSS 增量在合理范围（模型 75MB + lexicon 8.5MB，增量通常 100~250MB）；记录：______
+- [y] 合成前 `adb shell dumpsys meminfo com.meapet.mobile | Select-String "TOTAL PSS"` 记录：**165,638 KB**（空闲、模型文件就位、未触发合成；Java 20,852 / Native 27,420，TOTAL RSS 266,444 KB）；前台冷启动未合成复测 381,065 KB（Java 34,588 / Native 109,840 / Graphics 107,788）
+- [y] 连续 10 条试听后 `logcat` 无 `OutOfMemoryError` / `OutOfMemory`，进程未被 LMK 杀死
+- [ ] 模型加载后 PSS 增量在合理范围（模型 75MB + lexicon 8.5MB，增量通常 100~250MB）；记录：**约 +300MB Native**（10 条合成后 TOTAL PSS 690,671 KB / Native 408,132 KB；比预期高，疑似 ORT arena 缓存随长文本增长，列为 1.9.0 观察项——继续合成是否持续增长尚未测）
 - [ ] 设置页「删除模型」后 PSS 明显回落（引擎已 release，native 内存释放）
 
 ### 2.4 打断与抢占
 
-- [ ] 长回复播放中再发一条新消息：旧朗读**立即停止**，新回复从头读完整（日志 `合成被取消` / `丢弃本段`）
+- [y] 长回复播放中再发一条新消息：旧朗读**立即停止**，新回复从头读完整（维护者 2026-11-15 真机实测通过；试听切换同样先 `stop()` 旧段再启新段）
 - [ ] 连点喇叭（会话静音）两次：静音时立即停声，恢复后下一条正常朗读
 - [ ] 播放中进入设置页删除模型：不崩溃、不 native use-after-free（`releaseEngine` 与合成同一把 Mutex），删除后播放停止
 - [ ] 主界面与悬浮窗几乎同时收到回复：两路串行合成，不出现两段声音重叠
@@ -239,11 +245,13 @@ adb logcat -b crash -d | Select-String "Fatal|signal|DEBUG"
 
 | 检查项 | 通过标准 | 结果 |
 |---|---|---|
-| 首块延迟 | Debug 试听输入 3 句以上文本（如「你好喵。今天天气真好。我们出去散步吧。」），logcat 出现 `TtsManager: 首块到达（…ms），开始播放`，且明显早于 `流式合成完成` | - [ ] |
-| 分块与收尾 | `SherpaTtsEngine: 流式合成…分块=N`（N≈句数）、`TtsAudioPlayer: 流式段 gen=…: marker 到达（真实播完）`，喇叭图标按时熄灭 | - [ ] |
-| 句间停顿 | 句子之间无异常长停顿（RTF≈1.1 允许轻微停顿），整段可听懂 | - [ ] |
-| 打断 | 播放中点静音 / 发新消息：旧话立即停，日志出现 `流式中止`（或 `未收到结束标记即退出`），新段正常播放 | - [ ] |
-| 中止不白算 | 打断后旧句日志 `流式合成中止：…分块=k` 中 k < 总句数 | - [ ] |
+| 首块延迟 | Debug 试听输入 3 句以上文本（如「你好喵。今天天气真好。我们出去散步吧。」），logcat 出现 `TtsManager: 首块到达（…ms），开始播放`，且明显早于 `流式合成完成` | ✅ 真机：5 句文本首块 **658ms**、整段合成 20,691ms；3 句首块 **825ms**、整段 7,664ms；单句试听首块 641~1025ms |
+| 分块与收尾 | `SherpaTtsEngine: 流式合成…分块=N`（N≈句数）、`TtsAudioPlayer: 流式段 gen=…: marker 到达（真实播完）`，喇叭图标按时熄灭 | ✅ 真机：5 句→`分块=5`、4 句→`分块=4`；每段收尾都有 `marker 到达（真实播完）`（或轮询确认播完），`isPlaying` 复位、喇叭熄灭 |
+| 句间停顿 | 句子之间无异常长停顿（RTF≈1.1 允许轻微停顿），整段可听懂 | ✅ 维护者听感：有停顿但可接受（长文本整段合成约为实时的 1.1 倍） |
+| 打断 | 播放中点静音 / 发新消息：旧话立即停，日志出现 `流式中止`（或 `未收到结束标记即退出`），新段正常播放 | ✅ 维护者 2026-11-15 真机实测：新消息抢占正常，旧段立即停止、新段正常朗读（日志顺序为 `stop()` → 新段 `startStreaming` / `首块到达`） |
+| 中止不白算 | 打断后旧句日志 `流式合成中止：…分块=k` 中 k < 总句数 | - [ ] 待补：需要**长文本合成中途**打断（合成未完成时发新消息），才能看到 `流式合成中止` 日志 |
+
+> **2026-11-15 补充：短片段静音 bug（已修）**——总时长 ≤2 秒（总帧数 < AudioTrack 缓冲 44,100 帧）的片段，即使 `playState=PLAYING`、`underrun=0`，AudioFlinger 也一帧不消费：播放头恒 0、marker 永不到，只能靠轮询超时收尾，用户听到的是整段静音。典型现象：单句短回复（「你好」「一行代码」）无声，而长回复正常。修复=写线程先写入首批数据再 `play()` + 结束标记前用静音补齐到缓冲容量（marker 仍打在真实音频末尾）；修复后 0.57s 的「你好」、1.05s 的「一行代码」、1.12s 的 2 句文本均正常出声。诊断依据：`TtsAudioPlayer` 轮询日志 `head=0/… playState=3 underrun=0` + 系统 `AudioTrackShared … front(0)`。
 ## 3. 结论
 
 - [ ] 全部用例通过，可发布

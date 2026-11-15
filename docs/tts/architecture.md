@@ -28,6 +28,8 @@ VITS 单图推理 → 22050Hz 音频
 > **回调对象必须用 Java 适配器 `TtsStreamCallback`**：sherpa JNI 用 `GetMethodID(cls, "invoke", "([F)Ljava/lang/Integer;")` 取回调方法（`.so` 字符串可复核）；Kotlin 2.x 的 indy lambda 脱糖后只有擦除版 `invoke(Object)`，直接传 lambda 会在真机上 CheckJNI SIGABRT（`JNI NewFloatArray called with pending exception NoSuchMethodError`，2026-11-15 实测）。Java 类按泛型实参实现 `Function1<float[], Integer>` 时 javac 会生成该专用签名 + 擦除桥接；`TtsStreamCallbackTest` 用反射守护该签名，`proguard-rules.pro` 的 `-keep class com.meapet.mobile.tts.**` 保证 R8 不删改。
 >
 > **多句并行（`maxNumSentences > 1`）仍未启用**：批量并行实测只快约 8%（8 句 8.41s→7.79s），且 batch 越大句间停顿越短、听感有变化，收益不抵复杂度。已知取舍：真机合成约 1.1× 实时（RTF≈1.1），所以句间可能有轻微停顿，这是流式播放在"合成慢于实时"设备上的预期代价。
+>
+> **AudioTrack 的两个平台坑（Xiaomi 22041216UC / MIUI 14 实测，2026-11-15）**：①空 buffer 就 `play()` 的 track 会一帧不渲染（无声）——写线程改为先写入首批数据再 `play()`；②总帧数 < track buffer（2 秒）的片段，AudioFlinger 一直挂着不消费：`playState=PLAYING`、`underrun=0`、播放头恒 0、marker 永不到，表现为 **≤2 秒的短回复/试听整段无声**（此前只能靠轮询超时收尾，用户听到的是静音）。现在写线程在结束标记前用**静音补齐到 buffer 容量**逼其开始渲染，marker 仍打在真实音频末尾（补齐静音不可闻）。修复前后对照见 [`device-test-checklist.md`](device-test-checklist.md) §2.8。
 
 ## 2. 数据文件（模型包内）
 
