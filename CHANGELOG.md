@@ -17,19 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **语音合成迁移到 sherpa-onnx** — 自写的 VITS 推理与 G2P 链路整体换为 sherpa-onnx，中日英混排由同一个模型完成，不再按语言切引擎；数字 / 日期 / 电话号码按规则归一化朗读。
+- **英文句中的数字按英文数词朗读** — App 归一化层按上下文预转换：紧邻拉丁词的整数转英文基数词（`3`→three、`12`→twelve、`1000`→one thousand …），不再落入 sherpa 中文数字前端 `ruleFsts`（会读成 sān、shí èr）；中文与日文上下文保持原规则，`3.5`、`10:30`、电话号码等复合或超长数字不转换。日文句中的数字读法（`15 時`→じゅうごじ）仍是已知边界，排入 1.9.0。
 - **语音模型包换新** — 新模型 6 个文件、约 84MB，与旧版 4 文件模型不兼容：升级后启动时会自动清理旧包并引导重新下载（网络受限可在设置页「从本地导入」）。
 - **移除 onnxruntime-android 依赖** — 原生库改由 sherpa AAR 提供，不再有重复 so，仅保留 arm64-v8a / armeabi-v7a 两个 ABI。
 - **播放采样率跟随引擎输出** — 不再硬编码 22050Hz，换模型或换采样率不会变速、变调。
 - **删除自写 G2P 与拼音资产** — 相关引擎与约 8.9 万行词表全部移除，APK 减小约 1.65MB。
 - **破坏性操作统一为「立即执行 + 可撤销」** — 清除对话 / 清除全部记忆 / 恢复默认 System Prompt / 恢复默认壁纸四处原为弹窗确认、两段式点击或无提示直接删除，现统一改为点击即执行 + 底部倒计时撤销条（默认 5 秒，窗口内按快照回滚）；转屏切页不丢撤销机会，被新写入覆盖时窗口立即作废，壁纸到窗口到期才真正删文件。
-- **软键盘改用应用自己的 inset 避让** — 窗口不再随键盘 resize / pan（此前主页会整体上跳、设置页底部提示条被键盘盖住），改为按 IME inset 让页面自行收窄：输入栏、消息列表与底部提示条（含撤销条）始终在键盘上方；提示条另补了左右留边与远离屏幕底边、手势区的余量。
+- **软键盘改用应用自己的 inset 避让** — 窗口不再随键盘 resize / pan（此前主页视口会整体上移），改为按 IME inset 让页面自行收窄：输入栏、消息列表与底部提示条（含撤销条）始终在键盘上方；提示条另补了左右留边与远离屏幕底边、手势区的余量。
 - **语音合成改为逐句流式播放** — 首句合成完即出声，后续句子边合成边写 AudioTrack，不再等整段合成完才播（桌面 4 句样本首块约 1.1s，整段合成需 3.8s）；打断 / 新消息到来时回调直接中止原生推理的剩余句子，不再白算完。
-
-### Fixed
-
-- **英文句子中的数字按英文数词朗读** — 此前英文句里的阿拉伯数字会被 sherpa 的中文数字前端 `ruleFsts` 转成中文数词（`3`→sān、`12`→shí èr）。现 App 归一化层按上下文预转换：紧邻拉丁词的整数转英文基数词（three / twelve / one thousand …），中文与日文上下文保持原规则；`3.5`、`10:30`、电话号码等复合或超长数字不转换。日文句中的数字读法（`15 時`→じゅうごじ）仍是已知边界，排入 1.9.0。
-- **流式播放首个回调即崩溃（JNI 方法签名）** — sherpa JNI 按 `invoke([F)Ljava/lang/Integer;` 查找回调方法；Kotlin 2.x 的 lambda 脱糖后只有擦除版 `invoke(Object)`，JNI 拿到空 methodID 后触发 CheckJNI SIGABRT。回调改由 Java 适配器 `TtsStreamCallback` 提供（同时具备该专用签名与擦除桥接），并加单测 `TtsStreamCallbackTest` 守护签名；真机崩溃日志见 issue 现场（`NoSuchMethodError ... invoke([F)Ljava/lang/Integer;`）。
-- **≤2 秒的短回复 / 短试听整段无声** — 真机实测：总帧数不足以填满 AudioTrack 缓冲的片段，即使 `playState=PLAYING`、`underrun=0`，AudioFlinger 也一帧不消费（播放头恒 0、marker 永不到），只能靠轮询超时收尾。现写线程先写入首批数据再 `play()`，并在结束标记前用静音补齐到缓冲容量（marker 仍打在真实音频末尾，补齐的静音不可闻）；修复后 0.6~1.5 秒的短句与试听均正常出声。
+- **流式回调改用 Java 适配器 `TtsStreamCallback`** — sherpa JNI 按 `invoke([F)Ljava/lang/Integer;` 查找回调方法，Kotlin 2.x 的 indy lambda 脱糖后只有擦除版 `invoke(Object)`，直接传 lambda 会在真机 CheckJNI SIGABRT（`NoSuchMethodError`）。Java 适配器同时具备专用签名与擦除桥接，`TtsStreamCallbackTest` 反射守护该签名。
+- **短片段（≤2 秒）播放前补齐 AudioTrack 缓冲** — 总帧数不足以填满缓冲的片段，AudioFlinger 不消费数据（`playState=PLAYING`、`underrun=0`，但播放头恒 0、marker 永不到）。写线程改为先写入首批数据再 `play()`，并在结束标记前用静音补齐到缓冲容量（marker 仍打在真实音频末尾，补齐静音不可闻），0.6~1.5 秒的短句与试听正常出声。
 
 ### Notes
 
