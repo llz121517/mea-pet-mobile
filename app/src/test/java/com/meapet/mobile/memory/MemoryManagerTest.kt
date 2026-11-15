@@ -188,4 +188,36 @@ class MemoryManagerTest {
         verifyBlocking(service, never()) { summarizeShortTermMemories() }
         assertEquals(0, settings.storedCount, "开关关闭时不应计数")
     }
+
+    // ── 撤销：用快照恢复记忆 ──────────────────────────
+
+    private fun managerWithRepository(repository: MemoryRepository) = MemoryManager(
+        service = mock(),
+        repository = repository,
+        settingsManager = FakeSettings(interval = 10).build(),
+        config = AppConfig.DEFAULT
+    )
+
+    @Test
+    fun restoreAllWritesSnapshotBackToRepository() = runTest {
+        val repository = mock<MemoryRepository>()
+        val items = listOf(
+            MemoryItem(id = "m1", content = "喜欢下雨天"),
+            MemoryItem(id = "m2", content = "猫叫 Mea"),
+        )
+
+        managerWithRepository(repository).restoreAll(items)
+
+        verifyBlocking(repository) { saveAll(items) }
+    }
+
+    @Test
+    fun restoreAllNoOpOnEmptySnapshot() = runTest {
+        val repository = mock<MemoryRepository>()
+
+        managerWithRepository(repository).restoreAll(emptyList())
+
+        // 空快照没有可还原的内容，不该多写一次盘
+        verifyBlocking(repository, never()) { saveAll(any()) }
+    }
 }

@@ -71,29 +71,58 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
 /**
- * LaTeX 初始化（一次性）。
+ * jlatexmath 初始化，分两级。
  *
- * jlatexmath-android 的符号表 TeXSymbols.xml（\infty \sum \alpha 等 621 个符号）
- * 在 JLatexMathAndroid.init(context) 之后才会在类初始化时从 assets 自动加载。
+ * jlatexmath-android 的符号表/字体表（TeXSymbols.xml 等十来份 XML 描述）是在
+ * [TeXFormula] 类初始化时解析的，需要先由 [JLatexMathAndroid.init] 挂上 assets 加载器。
  * Markwon 插件自身不调 init（库虽有自动初始化 Provider，为防 manifest 合并失效，
- * 这里显式调用并预热）。
+ * 这里显式调用）。
+ *
+ * **两级拆开的原因**：类初始化实测 1s+（debug 包），如果放在 `MarkdownText` 的组合期
+ * 会直接卡住首帧——2026-11-15 真机排查中它占了冷启动主线程时间的最大一块。
+ * 所以组合期只做毫秒级的 [ensureLatexAssetsReady]，重量级 [warmUpLatex] 由启动时
+ * 投递到后台线程完成。
  */
 @Volatile
-private var latexInitialized = false
+private var latexAssetsReady = false
+
+/** 已触发过 [TeXFormula] 类初始化（符号表 + 字体表已解析）。 */
+@Volatile
+private var latexWarmedUp = false
+
 private val latexInitLock = Any()
 
-private fun ensureLatexInit(context: Context) {
-    if (latexInitialized) return
+/**
+ * 轻量初始化：只把 assets 加载器挂给 jlatexmath（毫秒级，可在组合期调用）。
+ *
+ * 幂等；不触发 [TeXFormula] 的类初始化，因此不会解析字体表。
+ */
+internal fun ensureLatexAssetsReady(context: Context) {
+    if (latexAssetsReady) return
     synchronized(latexInitLock) {
-        if (latexInitialized) return
+        if (latexAssetsReady) return
         JLatexMathAndroid.init(context.applicationContext)
+        latexAssetsReady = true
+    }
+}
+
+/**
+ * 重量级预热：触发 [TeXFormula] 类初始化（符号表 + 字体表解析，实测 1s+）。
+ *
+ * **必须后台线程调用**（启动时由 MainActivity 投递到 applicationScope）。若落在主线程，
+ * 第一次渲染任何 Markdown 气泡都会同步解析这十来份 XML，把首帧卡住 1s 以上。
+ */
+fun warmUpLatex(context: Context) {
+    if (latexWarmedUp) return
+    ensureLatexAssetsReady(context)
+    synchronized(latexInitLock) {
+        if (latexWarmedUp) return
         try {
-            // 预热：触发 TeXFormula/SymbolAtom 静态初始化（加载符号表 + 字体配置）
             TeXFormula("x")
         } catch (t: Throwable) {
             Log.w("MarkdownText", "LaTeX 预热失败，公式可能无法渲染", t)
         }
-        latexInitialized = true
+        latexWarmedUp = true
     }
 }
 
@@ -348,8 +377,9 @@ fun MarkdownText(
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val textSizePx = with(density) { 14.sp.toPx() }
     val tableBorder = if (dark) 0xFF49454F.toInt() else 0xFFCAC4D0.toInt()
-    // 首次渲染前初始化 LaTeX 符号表（幂等）
-    remember { ensureLatexInit(context); true }
+    // 组合期只做毫秒级的 assets 加载器挂载；重量级字体表解析在启动时后台预热
+    // （见 warmUpLatex 注释，2026-11-15 真机排查：放在这里会卡首帧 1s+）
+    remember { ensureLatexAssetsReady(context); true }
     val markwon = remember(dark, textSizePx, tableBorder) { obtainMarkwon(context, dark, textSizePx, tableBorder) }
 
     // 渲染前处理：定界符归一化 + 流式中未闭合代码围栏补全

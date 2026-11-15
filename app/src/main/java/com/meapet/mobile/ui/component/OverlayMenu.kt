@@ -44,6 +44,9 @@ import com.meapet.mobile.tts.TtsManager
  * 主界面语音开关开启时，菜单按钮左侧显示喇叭快捷钮：
  * - TTS 播放中图标变为蓝色；
  * - 点击切换「本次会话」的语音（内存标志，重启恢复），静音时立即停止当前朗读。
+ *
+ * 「清除对话」的二次确认由上层的 Snackbar 负责（见 [com.meapet.mobile.ui.component.ConfirmSnackbarEffect]），
+ * 本组件只把点击意图透传出去，不自己弹窗。
  */
 @Composable
 fun OverlayMenu(
@@ -56,7 +59,6 @@ fun OverlayMenu(
     var menuExpanded by remember { mutableStateOf(false) }
     var showPopup by remember { mutableStateOf(false) }
     var anchorHeight by remember { mutableStateOf(0) }
-    var showClearConfirm by remember { mutableStateOf(false) }
     val animProgress = remember { Animatable(0f) }
 
     LaunchedEffect(menuExpanded) {
@@ -128,7 +130,7 @@ fun OverlayMenu(
                         Column {
                             MenuEntry("设置", R.drawable.ic_menu_settings) { menuExpanded = false; onSettings() }
                             HorizontalDivider()
-                            MenuEntry("清除对话", R.drawable.ic_menu_clear) { menuExpanded = false; showClearConfirm = true }
+                            MenuEntry("清除对话", R.drawable.ic_menu_clear) { menuExpanded = false; onClearConversation() }
                             HorizontalDivider()
                             MenuEntry("查看记忆", R.drawable.ic_menu_memory) { menuExpanded = false; onShowMemories() }
                             HorizontalDivider()
@@ -138,24 +140,6 @@ fun OverlayMenu(
                 }
             }
         }
-    }
-
-    // 清除对话二次确认（防误触清空会话历史）
-    if (showClearConfirm) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showClearConfirm = false },
-            title = { Text("清除对话") },
-            text = { Text("将清空当前全部对话记录，此操作不可恢复。确定继续吗？") },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
-                    showClearConfirm = false
-                    onClearConversation()
-                }) { Text("清除", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showClearConfirm = false }) { Text("取消") }
-            }
-        )
     }
 }
 

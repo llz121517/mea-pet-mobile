@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 构建并签名 v7a / v8a / both 三个 release APK → dist/MeaPet-v<版本>-<ABI>.apk
+# 构建并签名 v7a / v8a / both 三个 release APK → dist/MeaPet-v<版本>-<ABI>.APK
 #
 # 用法:
 #   tools/build-release.sh                 # 三档全打
@@ -53,7 +53,7 @@ for ABI in $ABIS; do
     die "release($ABI) 未签名——请检查 keystore.properties 是否被 gradle 读到（产物为 app-release-unsigned.apk）"
   fi
 
-  DST="$DIST/MeaPet-v$VER-$ABI.apk"
+  DST="$DIST/MeaPet-v$VER-$ABI.APK"
   cp -f "$SRC" "$DST"
   SIZE_MB=$(awk "BEGIN{printf \"%.1f\", $(stat -c%s "$DST")/1048576}")
   echo "✔ $DST (${SIZE_MB} MB)"
@@ -61,4 +61,4 @@ done
 
 echo
 echo "产物已放入 $DIST ："
-for f in "$DIST"/MeaPet-*.apk; do echo "  $(basename "$f")"; done
+for f in "$DIST"/MeaPet-*.APK; do echo "  $(basename "$f")"; done

@@ -66,7 +66,7 @@ internal fun AppInfoSection() {
     Text("MeaPet —— 梅尔桌宠", style = MaterialTheme.typography.titleMedium)
     Spacer(Modifier.height(2.dp))
     Text(
-        "一只基于 Live2D 的 AI 梅尔 非常不完善 但是初版花了我 0.14B Tokens",
+        "一只 Live2D AI 梅尔 似乎非常不完善",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -82,7 +82,7 @@ internal fun AppInfoSection() {
     Spacer(Modifier.height(10.dp))
 
     Text(
-        "Say my name when a tree susurrates\nOnce and again telling a story lost in time",
+        "又是逢初度，霜轻叶落时。\n11·1 | 十月初六",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -95,7 +95,7 @@ internal fun AppInfoSection() {
 
     Spacer(Modifier.height(6.dp))
     Text(
-        "技术栈：Live2D Cubism · Jetpack Compose · Ktor · Markwon · Coroutines · GLSurfaceView",
+        "技术栈：Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Markwon  ·  Coroutines  ·  GLSurfaceView  ·  sherpa-onnx  ·  Kotlin 2.2 / AGP 9.3 / minSdk 26",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = ALPHA_MUTED_TEXT),
         modifier = Modifier.padding(bottom = 8.dp)
@@ -115,7 +115,7 @@ internal fun UpdateSection(
 
     SettingsSwitchRow(
         label = "启动时自动检查更新",
-        description = "打开 App 时静默检测新版本，发现更新才会提示；关闭后仅可在此手动检查",
+        description = "打开 App 时静默检测新版本，发现更新时提示；关闭后仅可在此手动检查",
         checked = state.enableAutoUpdateCheck,
         darkTheme = darkTheme,
         onCheckedChange = { viewModel.updateEnableAutoUpdateCheck(it) }
@@ -133,7 +133,7 @@ internal fun UpdateSection(
                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
             }
-            Text(if (state.isCheckingUpdate) "检测中…" else "立即检查更新")
+            Text(if (state.isCheckingUpdate) "检查中…" else "立即检查更新")
         }
     }
 

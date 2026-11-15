@@ -12,9 +12,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.8.0] - 2026-11-15
 
-<!-- 暂无可记录变更 -->
+### Changed
+
+- **语音合成迁移到 sherpa-onnx** — 自写的 VITS 推理与 G2P 链路整体换为 sherpa-onnx，中日英混排由同一个模型完成，不再按语言切引擎；数字 / 日期 / 电话号码按规则归一化朗读。
+- **英文句中的数字按英文数词朗读** — App 归一化层按上下文预转换：紧邻拉丁词的整数转英文基数词（`3`→three、`12`→twelve、`1000`→one thousand …），不再落入 sherpa 中文数字前端 `ruleFsts`（会读成 sān、shí èr）；中文与日文上下文保持原规则，`3.5`、`10:30`、电话号码等复合或超长数字不转换。日文句中的数字读法（`15 時`→じゅうごじ）仍是已知边界，排入 1.9.0。
+- **语音模型包换新** — 新模型 6 个文件、约 84MB，与旧版 4 文件模型不兼容：升级后启动时会自动清理旧包并引导重新下载（网络受限可在设置页「从本地导入」）。
+- **移除 onnxruntime-android 依赖** — 原生库改由 sherpa AAR 提供，不再有重复 so，仅保留 arm64-v8a / armeabi-v7a 两个 ABI。
+- **Release 包剔除未使用的 sherpa C/C++ API 原生库** — sherpa AAR 带 `libsherpa-onnx-c-api.so` / `libsherpa-onnx-cxx-api.so`，但 App 使用的 Kotlin API 只加载 `libsherpa-onnx-jni.so`（jni 已静态链接 C/C++ API，且只有 cxx-api 依赖 c-api），两者在 App 内无任何加载路径；release 打包剔除后 v8a 单 ABI APK **33.7MB**、双 ABI **51.8MB**（1.7.2 为 61.6MB：其中剔除未使用 so 减约 7.3MB、触摸语音转 Opus 再减约 2.5MB）。
+- **触摸语音改为 Opus** — 21 个触摸语音从 32kHz 单声道 WAV（2.7MB）转成 48kHz Opus 48kbps（共 225KB，减小 92%），听感无明显损失；assets 仍不压缩存储（`androidResources.noCompress` 显式声明），播放路径不变（`openFd` → MediaPlayer），重新编码用 `tools/encode-voice-assets.ps1`。
+- **播放采样率跟随引擎输出** — 不再硬编码 22050Hz，换模型或换采样率不会变速、变调。
+- **删除自写 G2P 与拼音资产** — 相关引擎与约 8.9 万行词表全部移除，APK 减小约 1.65MB。
+- **破坏性操作统一为「立即执行 + 可撤销」** — 清除对话 / 清除全部记忆 / 恢复默认 System Prompt / 恢复默认壁纸四处原为弹窗确认、两段式点击或无提示直接删除，现统一改为点击即执行 + 底部倒计时撤销条（默认 5 秒，窗口内按快照回滚）；转屏切页不丢撤销机会，被新写入覆盖时窗口立即作废，壁纸到窗口到期才真正删文件。
+- **软键盘改用应用自己的 inset 避让** — 窗口不再随键盘 resize / pan（此前主页视口会整体上移），改为按 IME inset 让页面自行收窄：输入栏、消息列表与底部提示条（含撤销条）始终在键盘上方；提示条另补了左右留边与远离屏幕底边、手势区的余量。
+- **语音合成改为逐句流式播放** — 首句合成完即出声，后续句子边合成边写 AudioTrack，不再等整段合成完才播（桌面 4 句样本首块约 1.1s，整段合成需 3.8s）；打断 / 新消息到来时回调直接中止原生推理的剩余句子，不再白算完。
+- **流式回调改用 Java 适配器 `TtsStreamCallback`** — sherpa JNI 按 `invoke([F)Ljava/lang/Integer;` 查找回调方法，Kotlin 2.x 的 indy lambda 脱糖后只有擦除版 `invoke(Object)`，直接传 lambda 会在真机 CheckJNI SIGABRT（`NoSuchMethodError`）。Java 适配器同时具备专用签名与擦除桥接，`TtsStreamCallbackTest` 反射守护该签名。
+- **短片段（≤2 秒）播放前补齐 AudioTrack 缓冲** — 总帧数不足以填满缓冲的片段，AudioFlinger 不消费数据（`playState=PLAYING`、`underrun=0`，但播放头恒 0、marker 永不到）。写线程改为先写入首批数据再 `play()`，并在结束标记前用静音补齐到缓冲容量（marker 仍打在真实音频末尾，补齐静音不可闻），0.6~1.5 秒的短句与试听正常出声。
+- **设置同步读取不再阻塞主线程** — `SettingsManager` 的同步 getter 在内存快照尚未预热时，原先会 `runBlocking` 读盘兜底；改为返回空快照、各项落到默认值，首帧真实值由对应 Flow 就绪后自动修正，全程零主线程磁盘阻塞。判定型读取（是否首次启动）不靠默认值猜，改由 `awaitLoaded()` 等预热完成再读。
+- **记忆库写放大收敛** — 模型一轮声明的多条记忆操作原先逐条落盘（每条全量重写整库）；现收集后经 `applyChanges` 一次落盘。
+- **记忆检索读写分离** — `getRelevant` 改为纯查询（不再每次命中就整库落盘），访问计数由调用方在注入后经 `markAccessed` 单独记账，一次落盘。
+- **会话落盘 writer 只写「最近记录的快照」** — 合并写队列原先带着入队那一刻的快照去写：从取到旧快照到真正拿到锁之间若有更新的同步写入，旧快照会把磁盘倒退回去。现在写入时在锁内取最新记录的快照，队列与补写之间不再互相覆盖。
+- **进后台补写移出主线程** — `onStop` 的 `flush()` 原先用 `runBlocking` 在主线程等写盘；改为在应用级 IO 作用域执行，主线程不再阻塞，确定性补写保留。
+- **窗口背景跟随主题** — Compose 侧主题解析后同步窗口背景色（此前只在 `onCreate` 设一次），切换主题或 Activity 重建、GL 画面短暂不可见时不再露出旧主题底色。
+- **LaTeX 字体表解析移出首帧** — `MarkdownText` 原先在首次组合时同步触发 jlatexmath 的 `TeXFormula` 类初始化（解析十来份字体/符号 XML，真机 debug 包实测 1s+），直接把首帧卡住；改为组合期只做毫秒级的 assets 加载器挂载，重量级预热由 `MainActivity` 投递到后台线程（`warmUpLatex`）。真机冷启动首帧 4.1s → 2.2s。
+- **更新检查的 JSON 解析移出主线程** — `UpdateChecker.check()` 里的 `parseRelease` 改到 `Dispatchers.Default`，启动时静默检测不再占用主线程。
+- **助手气泡去掉左侧圆形 M 头像** — 该头像只是装饰，去掉后助手消息与用户消息左右对称，气泡左缘统一对齐 12dp 边距。
+
+### Fixed
+
+- **进后台可能丢失最新会话历史** — 会话落盘是 conflate 合并写队列，进程被系统回收时排队快照可能来不及写盘；`onStop` 时补写一次（IO 线程，不阻塞主线程），确保最新对话不丢。
+- **老用户被误判为首次启动** — 快照预热完成前同步 getter 落到默认值，而 `isFirstLaunch()` 默认 `true`：老用户会被当首启，写入 `first_launch=false` 并重弹隐私 / 更新窗，且状态已写坏无法自愈。新增 `SettingsManager.awaitLoaded()`，启动期的判定型读取先等预热完成（不回退到主线程阻塞读盘）。
+- **任务根外启动崩溃** — `MainActivity.onCreate` 的 `isTaskRoot` 防护在退出路径上未调用 `super.onCreate()`，系统抛 `SuperNotCalledException` 直接崩溃；改为先走 `super.onCreate()` 再判断退出。
+- **悬浮窗冷启动可能用默认主题配色** — 悬浮窗配色读设置内存快照，进程为悬浮窗冷启动时快照可能尚未预热，而这些窗口长期存活、不会自愈；建窗前先等预热完成。
+- **Live2D 纹理预热失效** — `Live2dPal` 用「目录名是否以 `/` 结尾」判断目录，MIUI 等 ROM 的 `assets.list()` 不给尾斜杠，于是把纹理目录当文件 `open()` 抛 `FileNotFoundException`：子目录里的贴图/动作全部没预热，GL 线程只能现场读 assets（真机实测模型加载多花约 2s）。改为「能否列出子项」判定目录，并抽出 `collectAssetFiles` 加单测覆盖两种 ROM 行为。
+- **悬浮窗透明度改为整幅合成** — 原先在 Cubism 每个 drawable 上逐层乘 alpha，同一像素有多层半透明叠加的部位（嘴部内腔、腮红、阴影等）alpha 会累积（两层各 a 叠出 `1-(1-a)²`），调低透明度时这些地方比其它部位更实；改为模型先按不透明画进离屏 FBO、再对整张结果乘一次 alpha 合成（离屏不可用时回退逐层乘 alpha），整只模型透明度均匀。全不透明时不分配离屏目标，零额外开销。
+
+### Notes
+
+- **中文声调准确度为模型语料上限** — 该模型以日语语料微调，少数多音字声调仍不完美；听感与旧版一致，已确认接受，不作为本版回归项。
+- **历史 SIGILL 坑已包含修复** — 1.7.1 记录的 ORT 1.23.2 KleidiAI SME 崩溃（[onnxruntime#26921](https://github.com/microsoft/onnxruntime/issues/26921)）在 sherpa 内嵌的 1.28.2 中已含修复。
+- **设置页 Debug 构建新增「试听文本」入口** — 任意文本直接合成，便于真机验证数字 / 日期 / 日语 / 中英混排；release 构建不显示该入口。
+- 版本号升至 1.8.0（versionCode 14）；applicationId 与签名不变，可覆盖安装，但**升级后必须重新准备语音模型**（见上）。
+- **流式播放的句间停顿** — 真机合成速度约为实时的 1.1 倍（RTF≈1.1），句子之间可能有轻微停顿，属流式播放的预期代价；多句并行未启用。
+- **构建配置精简** — R8 增加 `-allowaccessmodification`（配合 optimize 规则做跨包类合并/内联）；移除 1.8.0 已无对应资产的旧 G2P 压缩豁免（`aaptOptions.noCompress` 的 `bin/dic/txt`），debug APK 同步从 80.9MB 降到 73.2MB。
+- 真机验收记录（已通过、已归档）见 [`docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md)。
+
+### Documentation
+
+- **文档整理** — `docs/` 新增总索引 [`docs/README.md`](docs/README.md)（文档地图、权威性说明、维护规则）；修正失效链接与过期说明（`TODO.md` 移除 1.8.0 已作废项并补「发布收尾」、TTS 迁移报告与真机清单状态对齐、客户端模块 README 路径纠正）；1.8.0 的实施计划归档到 [`docs/archive/plans/`](docs/archive/plans/)；**删除过时文档**：2026-08/09 的 48 项代码审查报告、逐条判定表、旧批次清单（描述 1.7.2 之前的代码，结论已并入 `TODO.md`）。
+- **`NOTICE.md` 补 TTS 第三方组件** — sherpa-onnx / ONNX Runtime，以及模型与 G2P 数据（JMdict、open_jtalk 词典、CMUdict、pypinyin、ruleFsts）和随 APK 分发的派生产物。
+
+---
 
 ## [1.7.2] - 2026-09-11
 

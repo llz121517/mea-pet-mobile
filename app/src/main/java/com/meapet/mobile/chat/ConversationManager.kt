@@ -134,6 +134,23 @@ class ConversationManager(
         Log.i(TAG, "Conversation cleared")
     }
 
+    /**
+     * 用给定列表整体替换会话历史（撤销「清除对话」用）。
+     *
+     * 与 [restore] 的区别：不插队、不去重，按传入顺序**原样**恢复并落盘——
+     * 撤销要求的是"回到清空前的精确状态"，任何合并策略都可能改变原结果。
+     *
+     * @param snapshot 清空前的 [getMessages] 快照
+     */
+    fun replaceAll(snapshot: List<ChatMessage>) {
+        synchronized(lock) {
+            messages.clear()
+            messages.addAll(snapshot)
+            persistLocked()
+        }
+        Log.i(TAG, "Conversation restored from undo snapshot (${snapshot.size} messages)")
+    }
+
     /** 按 id 移除消息。@return 是否有消息被移除 */
     fun removeMessage(id: String): Boolean = synchronized(lock) {
         val removed = messages.removeAll { it.id == id }
@@ -178,6 +195,21 @@ class ConversationManager(
     /** 必须在持有 [lock] 时调用。 */
     private fun persistLocked() {
         store?.persistAsync(messages.toList())
+    }
+
+    /**
+     * 同步落盘当前会话快照，直到写完才返回。
+     *
+     * [persistAsync] 是 conflate 合并写队列，进程被系统回收时排队中的最新快照
+     * 可能来不及落盘。在 `onStop` 等「即将进后台或被杀」的时机调用本方法补一次
+     * 确定性落盘。纯内存无 store 时为 no-op。
+     *
+     * 先把内存当前状态记录进 store 再写：store 的 writer 永远写「最近记录的快照」，
+     * 因此与排队的合并写之间不会出现旧快照后写（见 [ConversationStore] 类注释）。
+     */
+    suspend fun flush() {
+        synchronized(lock) { store?.record(messages.toList()) }
+        store?.flush()
     }
 
     /**

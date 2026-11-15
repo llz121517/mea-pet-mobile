@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "comment": "tools/tts 的外部数据源清单。download_data.py 按顺序尝试 urls，校验 sha256 后落盘到 tools/tts/data/<dest>。镜像为第三方代理（gh-proxy.com / ghfast.top / hf-mirror.com），仅作 GitHub/HuggingFace 不可达时的备选；内容由 sha256 兜底。",
+  "sources": [
+    {
+      "id": "jmdict",
+      "description": "JMdict 常用词（jmdict-simplified 3.6.2 快照 dictDate=2026-10-12，commonOnly=true）。build_lexicon_ja.py 用它生成假名词条与 ja_reading_map.json。",
+      "dest": "jmdict-eng-common-3.6.2.json",
+      "size": 16525308,
+      "sha256": "a80b7b66089aded5093d4fd2bd68fb7ca94b4252eb505f359a4762646dd8d47b",
+      "urls": [
+        "https://github.com/scriptin/jmdict-simplified/releases/download/3.6.2%2B20261012204142/jmdict-eng-common-3.6.2%2B20261012204142.json.zip",
+        "https://gh-proxy.com/https://github.com/scriptin/jmdict-simplified/releases/download/3.6.2%2B20261012204142/jmdict-eng-common-3.6.2%2B20261012204142.json.zip",
+        "https://ghfast.top/https://github.com/scriptin/jmdict-simplified/releases/download/3.6.2%2B20261012204142/jmdict-eng-common-3.6.2%2B20261012204142.json.zip"
+      ],
+      "archive": {
+        "format": "zip",
+        "member": "jmdict-eng-common-3.6.2.json",
+        "size": 1444290,
+        "sha256": "dd59f0174c6936a5b87beea56e7b68fbf4ae3a28be7fdb004a6ea5f103555788"
+      },
+      "license": "JMdict © Electronic Dictionary Research and Development Group (EDRDG)，CC BY-SA 4.0；jmdict-simplified 打包脚本 MIT",
+      "used_by": ["build_lexicon_ja.py"]
+    },
+    {
+      "id": "open_jtalk_dic",
+      "description": "open_jtalk 1.11 UTF-8 词典（pyopenjtalk 的默认词典）。解压后目录含 sys.dic 等；build_lexicon_ja.py 通过 OPEN_JTALK_DICT_DIR 指向它。",
+      "dest": "open_jtalk_dic_utf_8-1.11",
+      "size": null,
+      "sha256": null,
+      "urls": [
+        "https://github.com/r9y9/open_jtalk/releases/download/v1.11.1/open_jtalk_dic_utf_8-1.11.tar.gz",
+        "https://gh-proxy.com/https://github.com/r9y9/open_jtalk/releases/download/v1.11.1/open_jtalk_dic_utf_8-1.11.tar.gz",
+        "https://ghfast.top/https://github.com/r9y9/open_jtalk/releases/download/v1.11.1/open_jtalk_dic_utf_8-1.11.tar.gz"
+      ],
+      "archive": {
+        "format": "tar.gz",
+        "strip_components": 1,
+        "size": 23646843,
+        "sha256": "fe6ba0e43542cef98339abdffd903e062008ea170b04e7e2a35da805902f382a"
+      },
+      "verify_files": {
+        "sys.dic": {
+          "size": 103073776,
+          "sha256": "ca57d9029691a70a5dfb99afc2844180256161d7130da65b1a867510e129b9a6"
+        },
+        "char.bin": {
+          "size": 262496,
+          "sha256": "888ee94c5a8a7a26d24ab3f1b7155441351954fd51ea06b4a2f78bd742492b2f"
+        }
+      },
+      "license": "open_jtalk 词典 © 名古屋工業大学 / Nara Institute of Science and Technology，BSD 类许可（见目录内 COPYING）",
+      "used_by": ["build_lexicon_ja.py"]
+    },
+    {
+      "id": "phone_fst",
+      "description": "sherpa-onnx ruleFsts：电话号码归一化（必须最先加载）。原样来自 icefall/sherpa-onnx 的中文 VITS 模型包。",
+      "dest": "fsts/phone.fst",
+      "size": 88630,
+      "sha256": "1ac2b6fa56b1442320c4de7db08353bab8963a2b57f365eebcdd3a2d3562f8d7",
+      "urls": [
+        "https://huggingface.co/csukuangfj/vits-zh-hf-fanchen-C/resolve/main/phone.fst",
+        "https://hf-mirror.com/csukuangfj/vits-zh-hf-fanchen-C/resolve/main/phone.fst"
+      ],
+      "archive": null,
+      "license": "Apache-2.0（sherpa-onnx / icefall 模型目录）",
+      "used_by": ["build_package.py", "build_samples.py"]
+    },
+    {
+      "id": "date_fst",
+      "description": "sherpa-onnx ruleFsts：日期归一化。",
+      "dest": "fsts/date.fst",
+      "size": 59154,
+      "sha256": "eb8aa079ae3cb81d8f4404992f39d61a0cb990947512b5b8d1e54d1f6980e718",
+      "urls": [
+        "https://huggingface.co/csukuangfj/vits-zh-hf-fanchen-C/resolve/main/date.fst",
+        "https://hf-mirror.com/csukuangfj/vits-zh-hf-fanchen-C/resolve/main/date.fst"
+      ],
+      "archive": null,
+      "license": "Apache-2.0（sherpa-onnx / icefall 模型目录）",
+      "used_by": ["build_package.py", "build_samples.py"]
+    },
+    {
+      "id": "number_fst",
+      "description": "sherpa-onnx ruleFsts：数字归一化（date 之后、lexicon 匹配之前）。",
+      "dest": "fsts/number.fst",
+      "size": 64482,
+      "sha256": "743f402181fcfebf76cc2f0546b71fa26476e626fbe4e460fb7b4c3a7a8bd5bd",
+      "urls": [
+        "https://huggingface.co/csukuangfj/vits-zh-hf-fanchen-C/resolve/main/number.fst",
+        "https://hf-mirror.com/csukuangfj/vits-zh-hf-fanchen-C/resolve/main/number.fst"
+      ],
+      "archive": null,
+      "license": "Apache-2.0（sherpa-onnx / icefall 模型目录）",
+      "used_by": ["build_package.py", "build_samples.py"]
+    }
+  ]
+}

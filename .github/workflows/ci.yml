@@ -52,10 +52,14 @@ jobs:
           chmod +x ./gradlew
           ./gradlew :app:testDebugUnitTest --stacktrace
 
+      - name: 构建 Debug APK（仅 PR）
+        if: github.event_name == 'pull_request'
+        run: ./gradlew :app:assembleDebug -Pumeng.enabled=false --stacktrace
+
       - name: 上传测试报告
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-reports
-          path: app/build/reports/tests/testDebugUnitTest/**
-          if-no-files-found: ignore
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn

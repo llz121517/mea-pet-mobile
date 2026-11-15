@@ -25,7 +25,7 @@ class Live2dDelegate private constructor() {
         private const val VOICE_DIR_LOWER_L  = "voice/lower_left"
         private const val VOICE_DIR_LOWER_R  = "voice/lower_right"
 
-        /** 从文件名提取显示文本："jp_哼。.wav" → "哼。" */
+        /** 从文件名提取显示文本："jp_哼。.ogg" → "哼。" */
         fun textFromFilename(name: String): String =
             name.substringAfter("_").substringBeforeLast(".")
 

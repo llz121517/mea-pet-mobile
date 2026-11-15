@@ -13,17 +13,19 @@ import com.meapet.mobile.config.AppConfig
 import com.meapet.mobile.core.AppInfo
 import com.meapet.mobile.core.LifecycleManager
 import com.meapet.mobile.core.WallpaperStore
+import com.meapet.mobile.legacy.LegacyMigration
 import com.meapet.mobile.memory.MemoryManager
 import com.meapet.mobile.memory.MemoryRepository
 import com.meapet.mobile.memory.MemoryService
 import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.tts.TtsManager
-import com.meapet.mobile.tts.TtsSynthesizer
-import com.meapet.mobile.tts.VitsOnnxEngine
 import com.meapet.mobile.tts.audio.TtsAudioPlayer
-import com.meapet.mobile.tts.g2p.ChineseG2p
-import com.meapet.mobile.tts.g2p.G2pProcessor
+import com.meapet.mobile.tts.engine.SherpaTtsEngine
+import com.meapet.mobile.tts.engine.TtsEngine
 import com.meapet.mobile.tts.model.TtsModelManager
+import com.meapet.mobile.tts.text.EnglishBloomIndex
+import com.meapet.mobile.tts.text.JaReadingMapLoader
+import com.meapet.mobile.tts.text.TtsTextNormalizer
 import com.meapet.mobile.update.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -159,29 +161,37 @@ class AppContainer(
 
     // ── TTS 语音 ──────────────────────────────────────
 
-    /** TTS 模型/词典下载与状态管理。 */
+    /** TTS 模型包（model.onnx + lexicon + tokens + fsts）下载与状态管理。 */
     val ttsModelManager: TtsModelManager by lazy {
         TtsModelManager(context)
     }
 
-    /** VITS 四模块 ONNX 推理引擎（懒加载 73MB 权重）。 */
-    private val vitsEngine: VitsOnnxEngine by lazy {
-        VitsOnnxEngine(ttsModelManager)
+    /** sherpa-onnx 合成引擎（懒加载 75MB 模型 + 8.9MB lexicon）。 */
+    private val sherpaTtsEngine: TtsEngine by lazy {
+        SherpaTtsEngine(ttsModelManager)
     }
 
-    /** G2P 编排：中文走拼音映射。 */
-    private val g2pProcessor: G2pProcessor by lazy {
-        G2pProcessor(chinese = ChineseG2p(context))
+    /**
+     * 文本归一化：拉丁小写 + 英文 OOV 逐字母兜底 + 日语上下文改写。
+     * 两个资产（ja_reading_map.json / en_words.bloom）都在首次合成（IO 线程）时懒加载。
+     */
+    private val ttsTextNormalizer: TtsTextNormalizer by lazy {
+        val bloom = lazy { EnglishBloomIndex.load(context) }
+        TtsTextNormalizer(
+            mapProvider = { JaReadingMapLoader.load(context) },
+            knownEnglishWord = { word -> bloom.value.mightContain(word) },
+        )
     }
 
-    /** TTS 门面：开关判断、整段合成播放。 */
+    /** TTS 门面：开关判断、归一化、整段合成播放。 */
     val ttsManager: TtsManager by lazy {
         TtsManager(
             settingsManager = settingsManager,
             modelManager = ttsModelManager,
-            synthesizer = TtsSynthesizer(vitsEngine, g2pProcessor),
+            engine = sherpaTtsEngine,
+            normalizer = ttsTextNormalizer,
             player = TtsAudioPlayer(),
-            scope = applicationScope
+            scope = applicationScope,
         ).also { wireVoiceMutex() }
     }
 
@@ -217,6 +227,8 @@ class AppContainer(
             listOf(
                 launch { memoryRepository.loadFromDisk() },
                 launch { conversationManager.restore(conversationStore.load()) },
+                // 版本迁移：启动时异步执行（框架长期保留；当前 TTS step 预计 1.9.0 移除，见 docs/legacy-compat.md）
+                launch { LegacyMigration.run(context, settingsManager, ttsModelManager) },
                 // Live2D 模型文件预读到内存缓存：模型加载在 GL 线程同步执行，
                 // asset 读取是最大耗时（阻塞主线程 onPause 数秒）。预热后 GL 线程
                 // 只做解析 + GL 上传，启动/切前后台不再长时间卡顿。

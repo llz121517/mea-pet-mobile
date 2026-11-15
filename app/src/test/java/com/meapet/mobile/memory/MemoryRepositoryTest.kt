@@ -180,15 +180,39 @@ class MemoryRepositoryTest {
     }
 
     @Test
-    fun getRelevantUpdatesAccessStats() = runTest {
+    fun getRelevantIsPureReadAndDoesNotTouchAccessStats() = runTest {
         val dir = tmp.newFolder()
         val repo = MemoryRepository(dir)
         repo.save(item("hit", "用户喜欢猫", importance = 0.8f, keywords = listOf("猫")))
+        val before = repo.findById("hit")?.accessCount
 
         repo.getRelevant("你喜欢什么猫")
+        // 读写分离：纯查询不改访问计数、不落盘
+        assertEquals(before, repo.findById("hit")?.accessCount)
+        assertEquals(before, MemoryRepository(dir).findById("hit")?.accessCount)
+    }
+
+    @Test
+    fun markAccessedUpdatesStatsAndPersists() = runTest {
+        val dir = tmp.newFolder()
+        val repo = MemoryRepository(dir)
+        repo.save(item("hit", "用户喜欢猫", importance = 0.8f, keywords = listOf("猫")))
+        val before = repo.findById("hit")?.accessCount ?: 0
+
+        repo.markAccessed(listOf("hit"))
         // accessCount 更新应落盘（重启后不回退）
         val reloaded = MemoryRepository(dir).findById("hit")
-        assertEquals(2, reloaded?.accessCount)
+        assertEquals(before + 1, reloaded?.accessCount)
+    }
+
+    @Test
+    fun markAccessedIgnoresUnknownIds() = runTest {
+        val dir = tmp.newFolder()
+        val repo = MemoryRepository(dir)
+        repo.save(item("hit", "用户喜欢猫", keywords = listOf("猫")))
+        // 不存在的 id 静默跳过，不抛异常
+        repo.markAccessed(listOf("ghost", "hit"))
+        assertEquals(1, MemoryRepository(dir).getAll().size)
     }
 
     @Test
@@ -236,6 +260,43 @@ class MemoryRepositoryTest {
         repo.save(item("a", "甲"))
 
         repo.deleteAll(emptyList())
+
+        assertEquals(1, repo.getAll().size)
+    }
+
+    // ── 批量应用（新增/覆盖 + 删除，一次落盘） ─────────
+
+    @Test
+    fun applyChangesUpsertsAndDeletesInOnePass() = runTest {
+        val dir = tmp.newFolder()
+        val repo = MemoryRepository(dir)
+        repo.save(item("keep", "保留", importance = 0.5f))
+        repo.save(item("upd", "旧内容", importance = 0.5f))
+        repo.save(item("gone", "待删"))
+
+        repo.applyChanges(
+            upserts = listOf(
+                item("upd", "新内容", importance = 0.9f),   // 覆盖已存在
+                item("add", "新增条目")                       // 新增
+            ),
+            deleteIds = listOf("gone")
+        )
+
+        // 重启后确认全部变更已落盘
+        val reloaded = MemoryRepository(dir)
+        val byId = reloaded.getAll().associateBy { it.id }
+        assertEquals(setOf("keep", "upd", "add"), byId.keys)
+        assertEquals("新内容", byId["upd"]?.content)
+        assertEquals(0.9f, byId["upd"]?.importance)
+    }
+
+    @Test
+    fun applyChangesWithNothingIsNoOp() = runTest {
+        val dir = tmp.newFolder()
+        val repo = MemoryRepository(dir)
+        repo.save(item("a", "甲"))
+
+        repo.applyChanges(emptyList(), emptyList())
 
         assertEquals(1, repo.getAll().size)
     }

@@ -6,16 +6,17 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 /**
  * 应用设置管理器。
@@ -24,8 +25,10 @@ import kotlinx.coroutines.runBlocking
  * UI 层可响应式订阅变更。
  *
  * 同步 getter 读取的是构造时在 IO 协程里预热、并持续跟随 DataStore 变更的
- * 内存快照，正常路径不会产生磁盘 IO；仅在进程启动后的极短窗口内快照尚未
- * 就绪时，才退化为一次 runBlocking 读盘兜底。
+ * 内存快照，全程不产生磁盘 IO；进程启动后快照尚未就绪的极短窗口内，读取
+ * 退化为空快照（各 getter 落到 [SettingsKeys.Defaults]），绝不阻塞主线程。
+ * 首帧主题等需要真实值的场景由对应的 Flow（如 MainActivity 的主题订阅）
+ * 在快照就绪后自动修正。
  *
  * 该模块**不依赖**任何其他模块，可独立测试。
  *
@@ -41,12 +44,19 @@ class SettingsManager(context: Context) {
 
     private val cacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** 首次快照就绪信号；预热失败或流结束时同样完成，避免等待方永久挂起。 */
+    private val loadedSignal = CompletableDeferred<Unit>()
+
     init {
         // 构造即预热：首次加载后持续订阅，保证快照与磁盘一致
         cacheScope.launch {
-            dataStore.data.collect { prefs ->
-                cachedPrefs = prefs
-            }
+            dataStore.data
+                .catch { e -> Log.w(TAG, "settings warm-up failed: ${e.message}") }
+                .collect { prefs ->
+                    cachedPrefs = prefs
+                    loadedSignal.complete(Unit)
+                }
+            loadedSignal.complete(Unit)
         }
     }
 
@@ -187,10 +197,21 @@ class SettingsManager(context: Context) {
     }
 
     // ── 同步 getter（非 Flow 场景使用，如 Client 构造）──
-    // 读取内存快照，正常路径无磁盘 IO；快照未就绪时短暂 runBlocking 读一次兜底
+    // 读取内存快照，全程无磁盘 IO；快照未就绪时返回空快照，各 getter 落到 Defaults，
+    // 绝不在主线程阻塞读盘（首帧真实值由对应 Flow 就绪后修正）
 
-    private fun currentPrefs(): Preferences =
-        cachedPrefs ?: runBlocking { dataStore.data.first() }.also { cachedPrefs = it }
+    private fun currentPrefs(): Preferences = cachedPrefs ?: emptyPreferences()
+
+    /**
+     * 等待内存快照完成首次加载（预热失败时也会立即返回）。
+     *
+     * 只供启动期的**判定型**读取使用：快照未就绪时同步 getter 落到默认值，而
+     * 「是否首次启动」这类判定的默认值恰好是可执行分支（true），误判会写入持久化
+     * 状态并弹窗，无法自行恢复。展示型读取不必等待，由对应 Flow 就绪后修正即可。
+     */
+    suspend fun awaitLoaded() {
+        loadedSignal.await()
+    }
 
     fun getApiKey(): String = currentPrefs()[KEY_API_KEY] ?: ""
     fun getApiUrl(): String = currentPrefs()[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL

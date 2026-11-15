@@ -1,10 +1,10 @@
 # MeaPet —— 梅尔桌宠
 
-Android 上的 Live2D AI 桌宠：在主页与系统悬浮窗里渲染 Live2D 模型，接入 OpenAI 兼容 API 做多轮聊天，并带本地记忆与 Material You 主题。
+Android 上的 Live2D AI 桌宠
 
 本项目由 [suan-11/mea-pet-public](https://github.com/suan-11/mea-pet-public) 衍生。
 
-- 本项目由 LLM 驱动的 Agent 辅助开发
+wish coding 项目
 
 ---
 
@@ -125,12 +125,12 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 本地 VITS 语音合成，回复以梅尔音色端侧朗读（离线、不走云端）。模型不打包进 APK，首次使用需先就绪语音模型。
 
-**语音模型**（状态卡）：
+**语音模型**（状态卡）：6 个文件、约 84MB —— `model.onnx` / `tokens.txt` / `lexicon.txt` / `fsts/{phone,date,number}.fst`。
 
 | 操作 | 说明 |
 |------|------|
-| **下载模型** | 从 GitHub Releases 拉取约 73MB（4 个 ONNX 模型；ONNX Runtime 原生库随 APK 打包，无需下载），支持断点续传 |
-| **从本地导入** | 网络受限无法访问 GitHub 时，从本地 zip 资源包导入（详见下文「资源包格式」）。导入完成后自动切换为就绪状态 |
+| **下载模型** | 从 GitHub Releases 拉取上述 6 个文件（约 84MB；ONNX Runtime 原生库随 APK 打包，无需下载），支持断点续传 |
+| **从本地导入** | 网络受限无法访问 GitHub 时，从本地 zip 资源包导入（详见下文「本地导入」）。导入完成后自动切换为就绪状态 |
 | **删除模型** | 已就绪时显示，删除模型释放空间（会同时关闭语音开关） |
 
 **发声**（模型就绪后开放，未就绪置灰）：
@@ -141,15 +141,19 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | **悬浮窗语音** | 悬浮窗回复朗读 |
 | **语速** | 滑杆调节朗读速度 0.5x–2.0x（半速 / 原速 / 双倍速） |
 
-**资源包获取**：从 [Releases · tts-resource-pack](https://github.com/llz121517/mea-pet-mobile/releases/tag/tts-resource-pack) 下载 `TTS-Resource-Pack.zip` 到手机后选择导入。
+**在线下载**：远端以**平铺文件名**上传（GitHub Release 里是 `model.onnx`、`lexicon.txt`、`tokens.txt`、`phone.fst`、`date.fst`、`number.fst`），App 下载后落到 `filesDir/tts_model/`，3 个 `.fst` 仍保留在 `fsts/` 子目录。
 
-资源包 zip 约定格式（平铺、无目录）：
+**本地导入**：从 [Releases · tts-resource-pack](https://github.com/llz121517/mea-pet-mobile/releases/tag/tts-resource-pack) 下载 `tts-model-v1.zip` 到手机后选择导入。
+
+资源包 zip 约定格式（**保持 `fsts/` 目录结构**）：
 
 ```
-enc_p.onnx  dp.onnx  flow.onnx  dec.onnx
+model.onnx  tokens.txt  lexicon.txt  fsts/phone.fst  fsts/date.fst  fsts/number.fst
 ```
 
-导入规则：**4 个 ONNX 全量导入**（ONNX Runtime 原生库随 APK 分发，资源包无需携带；旧资源包里多余的 so 会被跳过）。兼容打包时误嵌套子文件夹的情况（自动在子目录中查找，最多 2 层）。
+导入规则：**6 个文件全量导入**；兼容条目平铺，或整体套一层顶层目录（如 `tts-model-v1/`）两种打包方式。原生库（`libonnxruntime.so` 等）随 APK 分发，资源包无需携带。
+
+> 升级提示：1.7.x 的旧版 4-ONNX 模型包升级到 1.8.0 后会在 App 启动时被自动清理（同时关闭主界面与悬浮窗两个语音开关），必须重新下载 / 导入（约 84MB）。
 
 #### 关于
 
@@ -159,10 +163,56 @@ enc_p.onnx  dp.onnx  flow.onnx  dec.onnx
 - **更新** — 启动时静默检测新版本，发现更新才提示（可在子页关闭）；此处也可手动「检查更新」（按钮 + 进度 + 结果文案与发布页链接）。
 - **隐私与数据** — 查看隐私政策全文（再往里一层）；导出日志（含设备 / 版本头信息、native 崩溃 tombstone、logcat），便于反馈问题；友盟统计 SDK 授权管理（可查看授权状态，取消授权后立即退出，确保停止上报）。
 
+## 发布（GitHub Actions 自动打包与签名）
+
+推 `v<版本>` tag 即自动构建签名并发布 Release，标题形如 **`v1.7.2 / 2026.9.11`**（tag / tag 日期）。
+构建复用 [`tools/build-release.sh`](tools/build-release.sh)，与本地产物同名同规则。
+
+**一次性配置**：Settings → Environments 新建 **`keystore`**，加 secrets：
+
+| Secret | 内容 |
+| --- | --- |
+| `KEYSTORE_BASE64` | 签名 keystore 文件的单行 base64（见下方命令） |
+| `KEYSTORE_PASSWORD` | keystore 主密码（`storePassword`） |
+| `KEY_ALIAS` | 签名 key 别名（`keyAlias`） |
+| `KEY_PASSWORD` | 签名 key 密码（`keyPassword`） |
+| `UMENG_APP_KEY` | 可选；不配则 CI 构建的 release 不初始化统计 |
+
+```bash
+base64 -w0 release.keystore    # Linux / macOS / Git Bash
+```
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes('release.keystore'))   # Windows PowerShell
+```
+
+`local.properties` 不入库，CI 以 `local.properties.example` 为模板生成（`umeng.appKey` 由上面的
+secret 注入），改公共配置请直接改模板。
+
+**发布**：`git tag v1.7.3 && git push origin v1.7.3`
+
+- tag 须在 `main` 上、且与 `versionName` 一致，否则不发布；`versionCode` 建议递增（未递增只告警）。
+- 带后缀的 tag（`v1.7.3-beta1`）照常发布，但标为 pre-release：不占 Latest，也不影响「检测更新」。
+- 重跑幂等（已存在的 Release 更新标题/正文并覆盖 APK）。
+- 本地预览正文 / 自检：`python tools/release_meta.py --tag v1.7.3 --notes-file -`、`python tools/test-release-meta.py`
+
+## 文档
+
+| 内容 | 位置 |
+|------|------|
+| 文档地图（**先看这里**） | [`docs/README.md`](docs/README.md) |
+| 待办与代码审查遗留项 | [`docs/TODO.md`](docs/TODO.md) |
+| 语音合成（TTS）设计、模型包与生成管线 | [`docs/tts/`](docs/tts/) · [`tools/tts/README.md`](tools/tts/README.md) |
+| 1.8.0 真机验收记录（已归档） | [`docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md) |
+| 旧版本迁移（1.7.x → 1.8.0）说明与移除计划 | [`docs/legacy-compat.md`](docs/legacy-compat.md) |
+| 变更记录 | [`CHANGELOG.md`](CHANGELOG.md) |
+| 第三方组件许可与署名 | [`NOTICE.md`](NOTICE.md) |
+
 ## 技术栈
 
 ```
 Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Markwon  ·  Coroutines  ·  GLSurfaceView
+sherpa-onnx  ·  Kotlin 2.2 / AGP 9.3 / minSdk 26
 ```
 
 ## Live2D 模型来源
@@ -172,10 +222,6 @@ Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Markwon  ·  Coroutines  ·  G
 - [Bilibili — [Live2D模型分享 - 梅娅]](https://www.bilibili.com/video/BV1AoX7BXEaN)
 
 使用该模型时请遵循原作者的发布说明与授权要求。模型版权归原作者所有，与本仓库 MIT 许可证无关。
-
-## 贡献
-
-感谢所有为 MeaPet 做出贡献的开发者，名单见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。欢迎通过 [Issues](https://github.com/llz121517/mea-pet-mobile/issues) 或 [Pull Request](https://github.com/llz121517/mea-pet-mobile/pulls) 参与贡献。
 
 ## 许可证
 

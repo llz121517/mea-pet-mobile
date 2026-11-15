@@ -3,19 +3,21 @@
 #  保留反射 / 序列化 / native 依赖，防止 Release 构建运行时崩溃
 # ─────────────────────────────────────────────────────────
 
+# 允许 R8 放宽被优化类的访问修饰符（配合 proguard-android-optimize.txt，
+# 才能做跨包类合并 / 内联等优化；被 -keep 的类不受影响）
+-allowaccessmodification
+
 # ── Live2D Cubism SDK ──────────────────────────────────
 # 模型 JSON / moc 解析、native 方法加载依赖反射与类名，禁止混淆移除
 -keep class com.live2d.sdk.cubism.** { *; }
 -dontwarn com.live2d.sdk.cubism.**
 
-# ── ONNX Runtime ───────────────────────────────────────
-# 开源应用，宽保留省心：整个 ONNX Runtime Java 层（被 JNI native 回调）不混淆不裁剪，
-# 避免 R8 干掉反射/JNI 入口导致语音合成崩溃
--keep class ai.onnxruntime.** { *; }
--dontwarn ai.onnxruntime.**
+# ── sherpa-onnx（JNI 按注册名回调 Java/Kotlin 类，AAR 自带 proguard.txt 为空） ──
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-dontwarn com.k2fsa.sherpa.onnx.**
 
 # ── TTS 语音包 ─────────────────────────────────────────
-# 自有 TTS 代码宽保留：G2P / ONNX 引擎 / 播放器 / 模型管理，与 native 层和文件路径交互多，
+# 自有 TTS 代码宽保留：sherpa 引擎 / 播放器 / 模型管理，与 native 层和文件路径交互多，
 # 保留全量避免混淆引入隐性问题
 -keep class com.meapet.mobile.tts.** { *; }
 -dontwarn com.meapet.mobile.tts.**

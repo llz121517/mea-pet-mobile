@@ -124,8 +124,23 @@ class FloatingLive2dService : Service() {
             stopSelf()
             return
         }
-        createFloatingWindow()
-        initOverlayWindows()
+        createFloatingWindowWithPalette()
+    }
+
+    /**
+     * 先等设置快照预热完成再建窗。
+     *
+     * 悬浮窗配色（[OverlayPalette.resolve]）读的是设置内存快照：进程为悬浮窗而冷启动时
+     * 快照可能还没就绪，直接建窗会拿到默认主题的配色，而这些窗口长期存活、不会自愈。
+     * 预热是毫秒级的 IO，这里只挂起协程等待，不阻塞主线程。
+     */
+    private fun createFloatingWindowWithPalette() {
+        val settings = (application as? MeaPetApplication)?.container?.settingsManager
+        serviceScope.launch {
+            settings?.awaitLoaded()
+            createFloatingWindow()
+            initOverlayWindows()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

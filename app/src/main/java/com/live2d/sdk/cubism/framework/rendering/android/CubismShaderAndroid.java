@@ -229,9 +229,10 @@ public class CubismShaderAndroid {
         CubismRenderer.CubismTextureColor multiplyColor = overrideMultiplyAndScreenColor.getDrawableMultiplyColor(index);
         CubismRenderer.CubismTextureColor screenColor = overrideMultiplyAndScreenColor.getDrawableScreenColor(index);
 
-        // 渲染器级整体不透明度（悬浮窗透明度调节）：GL 内乘 alpha，对所有机型的
-        // 合成路径统一生效（详见 CubismRendererAndroid.opacity 注释）。仅在非全透明
-        // 时做一次额外乘法，1.0 时零开销。baseColor 是局部/复用对象，安全可改。
+        // 渲染器级整体不透明度的**兜底路径**（正常走离屏整幅合成，见
+        // app 侧 OverlayAlphaCompositor）：逐 drawable 乘 alpha 会让同一像素上多层
+        // 半透明叠加处（嘴部内腔、腮红、阴影）alpha 累积而偏实。仅在 1.0 时零开销；
+        // baseColor 是局部/复用对象，安全可改。
         final float rendererOpacity = renderer.getOpacity();
         if (rendererOpacity < 1.0f) {
             baseColor.a *= rendererOpacity;

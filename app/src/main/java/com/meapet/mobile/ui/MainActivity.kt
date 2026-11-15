@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import android.view.MotionEvent
+import android.view.WindowManager
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
@@ -40,6 +41,8 @@ import com.meapet.mobile.ui.component.AutoUpdateOptInDialog
 import com.meapet.mobile.ui.component.PRIVACY_POLICY_VERSION
 import com.meapet.mobile.ui.screen.ChatScreenContent
 import com.meapet.mobile.ui.theme.MeaPetTheme
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -76,19 +79,45 @@ class MainActivity : ComponentActivity() {
 
     @SuppressLint("ClickableViewAccessibility", "SourceLockedOrientationActivity")
     override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
         // isTaskRoot 防护（Android 15+ 兼容）
+        // 注意：必须先把 super.onCreate 走完再判断退出，否则系统会因
+        // "did not call through to super.onCreate()" 抛 SuperNotCalledException 直接崩溃。
         if (!isTaskRoot) {
             finish()
             return
         }
-        super.onCreate(savedInstanceState)
+
+        // 交给 Compose 自己处理系统栏/软键盘 inset：
+        // 非 edge-to-edge 时框架会在 DecorView 层把系统窗口 inset（含 IME）消费掉，
+        // Compose 侧 `WindowInsets.ime` 恒为 0，`Modifier.imePadding()` 因此完全失效
+        // ——表现就是「键盘弹起时底部撤销条 / 输入栏不会被顶上来」。
+        // 本应用本来就是沉浸式全屏（系统栏由 hideSystemBars() 隐藏），改成
+        // edge-to-edge 不改变视觉；IME 避让由各页面根节点的 imePadding() 负责
+        // （见 ChatPage / SettingsScreen）。
+        // API 30 以下 Compose 拿不到可靠的 IME inset，保持系统默认（窗口 resize/pan），
+        // 不能切：切了反而会让输入栏被键盘盖住。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            // 视口完全交给 Compose：默认的 adjustPan 会在键盘弹起时把整个窗口往上推
+            // （输入框在最底部的主页必中），再叠上页面自己的 imePadding 就是"顶两次"，
+            // 输入栏与撤销条会错位。关掉系统位移后，IME 避让只剩 imePadding 一次。
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+        }
 
         container = MeaPetApplication.from(applicationContext as android.app.Application)
 
+        // LaTeX 符号表/字体表解析（实测 1s+）投递到后台：MarkdownText 首次渲染时若在主线程
+        // 触发，会把首帧直接卡住（2026-11-15 真机排查结论）。这里在后台提前做完。
+        container.applicationScope.launch {
+            com.meapet.mobile.ui.component.warmUpLatex(applicationContext)
+        }
+
         // 启动即按持久化主题设定 Live2D 背景与窗口背景，让首帧直接是主题色，
-        // 避免"先浅后深"的闪烁（Compose 内 themeModeFlow 异步收集稍后才会接管，
-        // 在此之前若只靠默认值，深色主题下会先白后黑）。
-        // getThemeMode 在快照未就绪时退化为一次 runBlocking 读盘兜底（值小、量级可接受）。
+        // 避免"先浅后深"的闪烁（Compose 内 themeModeFlow 异步收集稍后才会接管）。
+        // 快照未就绪时 getThemeMode 落到默认值且不读盘：首帧可能浅色一闪，随后由
+        // themeModeFlow 订阅修正——onCreate 无法挂起，这个极短窗口只能接受。
         try {
             val themeMode = container.settingsManager.getThemeMode()
             val isDark = isDarkTheme(this, themeMode)
@@ -101,8 +130,8 @@ class MainActivity : ComponentActivity() {
             window.setBackgroundDrawable(ColorDrawable(0xFFF7F7F7.toInt()))
         }
 
-        // 首帧即预置背景壁纸路径与模糊强度（从 DataStore 读），避免旋转/重建后先闪纯色再上壁纸；
-        // 后续由 Compose 内 wallpaperPathFlow / wallpaperBlurFlow 响应式接管（见 setContent）
+        // 首帧即预置背景壁纸路径与模糊强度（读内存快照，不读盘），避免旋转/重建后先闪纯色再上壁纸；
+        // 快照未就绪时退化为默认纯色，后续由 Compose 内 wallpaperPathFlow / wallpaperBlurFlow 接管
         try {
             val d = Live2dDelegate.getInstance()
             d.wallpaperPath = container.settingsManager.getWallpaperPath().ifBlank { null }
@@ -142,6 +171,15 @@ class MainActivity : ComponentActivity() {
                     Live2dDelegate.getInstance().let { d ->
                         d.bgR = bgColor[0]; d.bgG = bgColor[1]; d.bgB = bgColor[2]; d.bgA = 1.0f
                     }
+                    // 窗口背景同步跟随主题：onCreate 那一刻设的是当时的（若快照未就绪则可能是
+                    // 默认）底色；之后切换主题或 Activity 重建，GL Surface 短暂不可见时露出来的
+                    // 窗口底色不会再停留在旧主题上。
+                    val r = (bgColor[0] * 255).toInt()
+                    val g = (bgColor[1] * 255).toInt()
+                    val b = (bgColor[2] * 255).toInt()
+                    window.setBackgroundDrawable(
+                        ColorDrawable(0xFF000000.toInt() or (r shl 16) or (g shl 8) or b)
+                    )
                 }
 
                 // 背景壁纸：设置变化实时同步到 GL（GL 线程每帧读，下帧即生效）
@@ -174,6 +212,9 @@ class MainActivity : ComponentActivity() {
                 //   版本不匹配会重新弹窗（若在此记录，同版本下换回 SDK 构建不再弹、授权又默认
                 //   未同意 → 统计永远不会初始化）。检查更新弹窗与统计无关，照常。
                 LaunchedEffect(Unit) {
+                    // 快照未就绪时 isFirstLaunch() 会落到默认值 true，进而 markFirstLaunchDone()
+                    // 并弹隐私/更新窗——这是会写持久化状态且无法自愈的误判，必须先等预热完成。
+                    settingsManager.awaitLoaded()
                     val firstLaunch = settingsManager.isFirstLaunch()
                     if (firstLaunch) {
                         settingsManager.markFirstLaunchDone()
@@ -328,6 +369,18 @@ class MainActivity : ComponentActivity() {
             Live2dDelegate.getInstance().onStop()
         } catch (e: Exception) {
             Log.e(TAG, "onStop error: ${e.message}")
+        }
+        // 会话历史补写一次：persistAsync 是合并写队列，进程被系统回收时可能来不及落盘。
+        // 放到应用级 IO 作用域执行，主线程不阻塞；store 的 writer 永远写「最近记录的快照」，
+        // 因此这次补写与排队的合并写之间不会互相覆盖（见 ConversationStore 类注释）。
+        container.applicationScope.launch(Dispatchers.IO) {
+            try {
+                container.conversationManager.flush()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "conversation flush on stop failed: ${e.message}")
+            }
         }
     }
 

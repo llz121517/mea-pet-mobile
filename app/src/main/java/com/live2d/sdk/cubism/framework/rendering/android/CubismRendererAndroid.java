@@ -1107,11 +1107,13 @@ public class CubismRendererAndroid extends CubismRenderer {
     }
 
     /**
-     * 渲染器级整体不透明度（0.0~1.0）。
+     * 渲染器级整体不透明度（0.0~1.0）——逐 drawable 乘 alpha 的**兜底路径**。
      *
-     * 悬浮窗 Live2D 透明度调节走 GL 绘制管线内乘 alpha（见
-     * {@link CubismShaderAndroid#setupShaderProgramForDrawable}），而不是
-     * {@code View.setAlpha}：GLSurfaceView 的画面绘制在独立 Surface 上，View 层
+     * 悬浮窗正常走「离屏整幅合成」（见 app 侧 OverlayAlphaCompositor）：模型按不透明画进
+     * FBO 后整幅乘 alpha，避免半透明图层叠加处（嘴部内腔、腮红、阴影）alpha 累积而偏实；
+     * 只有离屏目标创建失败时才回退到这里的逐层乘 alpha。
+     *
+     * 为什么不用 {@code View.setAlpha}：GLSurfaceView 的画面绘制在独立 Surface 上，View 层
      * alpha 只作用于占位层，在部分机型（含大量 Android 10+ 国产 ROM）的合成路径上
      * 不进入 GL 像素，导致调透明度无效。GL 内乘 alpha 对所有机型统一生效。
      *

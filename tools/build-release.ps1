@@ -1,7 +1,7 @@
 ﻿#requires -Version 5.1
 <#
 .SYNOPSIS
-  构建并签名 v7a / v8a / both 三个 release APK → dist/MeaPet-v<版本>-<ABI>.apk
+  构建并签名 v7a / v8a / both 三个 release APK → dist/MeaPet-v<版本>-<ABI>.APK
 
 .DESCRIPTION
   依次用 -PappAbi 过滤 ABI 跑 assembleRelease，把签名产物复制改名进 dist/。
@@ -106,7 +106,7 @@ try {
             throw "release($abi) 未签名——请检查 keystore.properties 是否被 gradle 读到（生成的是 app-release-unsigned.apk）"
         }
 
-        $dst = Join-Path $dist "MeaPet-v$ver-$abi.apk"
+        $dst = Join-Path $dist "MeaPet-v$ver-$abi.APK"
         Copy-Item -Path $src -Destination $dst -Force
         $sizeMb = [math]::Round((Get-Item $dst).Length / 1MB, 1)
         Write-Host "✔ $dst ($sizeMb MB)"
@@ -116,4 +116,4 @@ try {
 }
 
 Write-Host "`n产物已放入 $dist :"
-Get-ChildItem $dist -Filter 'MeaPet-*.apk' | ForEach-Object { Write-Host "  $($_.Name)" }
+Get-ChildItem $dist -Filter 'MeaPet-*.APK' | ForEach-Object { Write-Host "  $($_.Name)" }

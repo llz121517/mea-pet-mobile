@@ -1,5 +1,7 @@
 package com.meapet.mobile.chat
 
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
@@ -61,6 +63,31 @@ class ConversationStoreTest {
 
         val loaded = ConversationStore(dir, backgroundScope).load()
         assertEquals(false, loaded.single().isStreaming)
+    }
+
+    // ── 合并写队列与同步落盘的顺序 ────────────────────
+
+    /**
+     * 复现回归：合并写队列里的**旧**快照不能在更新的同步落盘之后写入。
+     *
+     * 时序：writer 手里已取到旧快照（尚未拿锁）→ 同步落盘写入更新的快照 → writer
+     * 拿到锁后把旧快照写下去，磁盘倒退到旧内容（丢掉最新消息）。
+     */
+    @Test
+    fun queuedStaleSnapshotDoesNotOverwriteNewerWrite() = runTest {
+        val dir = tmp.newFolder()
+        val store = ConversationStore(dir, backgroundScope, StandardTestDispatcher(testScheduler))
+        val oldSnapshot = listOf(msg(ChatRole.user, "第一句"))
+        val newSnapshot = oldSnapshot + msg(ChatRole.assistant, "第二句")
+
+        store.persistAsync(oldSnapshot)   // 旧快照进队列，writer 尚未被调度
+        store.persist(newSnapshot)        // 同步写入更新后的快照（等价于 flush）
+        runCurrent()                      // 再让排队的 writer 跑：它手里只有旧快照
+
+        assertEquals(
+            newSnapshot.map { it.content },
+            store.load().map { it.content }
+        )
     }
 
     // ── ConversationManager.restore 语义 ──────────────

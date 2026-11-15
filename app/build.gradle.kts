@@ -6,11 +6,13 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-// 从 local.properties 读取友盟 AppKey 与独特性标识信息，与代码隔离
+// 从 local.properties 读取友盟 AppKey 与独特性标识信息，与代码隔离。
+// 必须按 UTF-8 读取：Properties.load(InputStream) 固定按 ISO-8859-1 解码，
+// 文件中含中文（如证书路径）时会被解成乱码，导致 key 读不到（本地构建曾因此静默跳过 release 签名）。
 val localProperties = Properties().apply {
     val file = rootProject.file("local.properties")
     if (file.exists()) {
-        file.inputStream().use { load(it) }
+        file.reader(Charsets.UTF_8).use { load(it) }
     }
 }
 val umengAppKey: String = localProperties.getProperty("umeng.appKey", "") ?: ""
@@ -37,10 +39,11 @@ val appAbi: String = (project.findProperty("appAbi") as String?) ?: "both"
 // ── Release 签名 ──
 // 证书信息优先读环境变量，其次读根目录 keystore.properties（gitignored，模板见 keystore.properties.example）。
 // 四者齐备且 keystore 文件存在时才给 release 配置签名；否则保持未签名（无证书也能 assembleRelease）。
+// 同 local.properties：必须按 UTF-8 读取，否则证书路径中的中文会乱码 → 误判为未配置 → 静默产出 unsigned。
 val keystoreProperties = Properties().apply {
     val file = rootProject.file("keystore.properties")
     if (file.exists()) {
-        file.inputStream().use { load(it) }
+        file.reader(Charsets.UTF_8).use { load(it) }
     }
 }
 fun signingValue(envKey: String, propKey: String): String? =
@@ -80,8 +83,8 @@ android {
         applicationId = "com.meapet.mobile"
         minSdk = 26
         targetSdk = 36
-        versionCode =  13
-        versionName = "1.7.2"
+        versionCode = 14
+        versionName = "1.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -132,11 +135,25 @@ android {
         compose = true
         buildConfig = true
     }
-    // ONNX Runtime 原生库（libonnxruntime.so）随 AAR 打包进 APK，由上方 abiFilters
-    // 限制为仅 arm64-v8a / armeabi-v7a 两份；ONNX 模型仍走运行时下载 / 本地导入。
-    // OpenJTalk 词典/拼音表等大文本 assets 需禁压缩（否则 aapt 压缩后某些读取路径会失败）
-    aaptOptions {
-        noCompress += listOf("bin", "dic", "txt")
+    // sherpa-onnx AAR 内嵌 4 个 .so（jni / c-api / cxx-api / onnxruntime），由上方 abiFilters
+    // 限制为仅 arm64-v8a / armeabi-v7a 两个 ABI；ONNX 模型仍走运行时下载 / 本地导入。
+    //
+    // 剔除 c-api / cxx-api 两个 .so：该 AAR 的 Kotlin API 只 System.loadLibrary("sherpa-onnx-jni")，
+    // jni.so 已静态链接 C/C++ API（DT_NEEDED 仅 libonnxruntime/liblog/libm/libdl），
+    // c-api 只被 cxx-api 依赖，二者在 App 里没有任何加载路径，v8a+v7a 合计省约 7.6MB。
+    packaging {
+        jniLibs {
+            excludes += listOf(
+                "**/libsherpa-onnx-c-api.so",
+                "**/libsherpa-onnx-cxx-api.so",
+            )
+        }
+    }
+    // 触摸语音 assets/voice/**/*.ogg 必须不压缩存储：VoicePlayer 用 AssetManager.openFd
+    // 直接拿 fd 喂 MediaPlayer，压缩过的 asset 不能 openFd（.ogg 本就在 aapt 默认不压缩
+    // 列表里，这里显式声明防回归）。
+    androidResources {
+        noCompress += listOf("ogg")
     }
     testOptions {
         unitTests {
@@ -202,8 +219,9 @@ dependencies {
         compileOnly(libs.umeng.umsdk.asms)
     }
 
-    // 本地 VITS TTS：ONNX Runtime（原生 so 随 AAR 打包进 APK，仅 v8a/v7a；模型仍走运行时下载，见 TtsModelManager）
-    implementation(libs.onnxruntime.android)
+    // 本地 VITS TTS：sherpa-onnx AAR（内含 JNI + libonnxruntime.so，仅 v8a/v7a 会被 abiFilters 打包进 APK；
+    // 模型仍走运行时下载，见 TtsModelManager）。
+    implementation(libs.sherpa.onnx)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
