@@ -12,17 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
-
-### Fixed
-
-- **英文句子中的数字按英文数词朗读** — 此前英文句里的阿拉伯数字会被 sherpa 的中文数字前端 `ruleFsts` 转成中文数词（`3`→sān、`12`→shí èr）。现 App 归一化层按上下文预转换：紧邻拉丁词的整数转英文基数词（three / twelve / one thousand …），中文与日文上下文保持原规则；`3.5`、`10:30`、电话号码等复合或超长数字不转换。日文句中的数字读法（`15 時`→じゅうごじ）仍是已知边界，排入 1.9.0。
-
-### Documentation
-
-- **文档整理** — `docs/` 新增总索引 [`docs/README.md`](docs/README.md)（文档地图、权威性说明、维护规则）；修正失效链接与过期说明（`TODO.md` 移除 1.8.0 已作废项并补「发布收尾」、TTS 迁移报告与真机清单状态对齐、客户端模块 README 路径纠正）；1.8.0 的实施计划归档到 [`docs/archive/plans/`](docs/archive/plans/)；**删除过时文档**：2026-08/09 的 48 项代码审查报告、逐条判定表、旧批次清单（描述 1.7.2 之前的代码，结论已并入 `TODO.md`）。
-- **`NOTICE.md` 补 TTS 第三方组件** — sherpa-onnx / ONNX Runtime，以及模型与 G2P 数据（JMdict、open_jtalk 词典、CMUdict、pypinyin、ruleFsts）和随 APK 分发的派生产物。
-
 ## [1.8.0] - 2026-11-01
 
 ### Changed
@@ -35,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **破坏性操作统一为「立即执行 + 可撤销」** — 「清除对话」「清除全部记忆」「恢复默认 System Prompt」「恢复默认壁纸」四处原先分别是弹窗确认、两段式点击、无提示直接删除，现统一为 Gmail 式撤销：点击即执行，底部弹出「提示语 + 撤销键 + 倒计时进度条」，窗口内点撤销用快照回滚，走完即提交。窗口默认 5 秒（开启无障碍时按系统建议延长）；快照与到期定时器都在 ViewModel，转屏、切页不会误提交或丢掉撤销机会；同一状态被新的写入覆盖时（发新消息、导入新壁纸、保存新提示词、删除单条记忆）窗口立即作废。壁纸移除改为窗口到期才真正删文件，否则撤销时无图可恢复。
 - **软键盘改用应用自己的 inset 避让** — 窗口不再随键盘 resize / pan（此前主页会整体上跳、设置页底部提示条被键盘盖住），改为按 IME inset 让页面自行收窄：输入栏、消息列表与底部提示条（含撤销条）始终在键盘上方；提示条另补了左右留边与远离屏幕底边、手势区的余量。
 
+### Fixed
+
+- **英文句子中的数字按英文数词朗读** — 此前英文句里的阿拉伯数字会被 sherpa 的中文数字前端 `ruleFsts` 转成中文数词（`3`→sān、`12`→shí èr）。现 App 归一化层按上下文预转换：紧邻拉丁词的整数转英文基数词（three / twelve / one thousand …），中文与日文上下文保持原规则；`3.5`、`10:30`、电话号码等复合或超长数字不转换。日文句中的数字读法（`15 時`→じゅうごじ）仍是已知边界，排入 1.9.0。
+
 ### Notes
 
 - **中文声调准确度为模型语料上限** — 该模型以日语语料微调，少数多音字声调仍不完美（如「今」）；听感与旧版一致，已确认接受，不作为本版回归项。
@@ -42,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **设置页 Debug 构建新增「试听文本」入口** — 任意文本直接合成，便于真机验证数字 / 日期 / 日语 / 中英混排；release 构建不显示该入口。
 - 版本号升至 1.8.0（versionCode 14）；applicationId 与签名不变，可覆盖安装，但**升级后必须重新准备语音模型**（见上）。
 - 真机验收清单见 [`docs/tts/device-test-checklist.md`](docs/tts/device-test-checklist.md)。
+
+### Documentation
+
+- **文档整理** — `docs/` 新增总索引 [`docs/README.md`](docs/README.md)（文档地图、权威性说明、维护规则）；修正失效链接与过期说明（`TODO.md` 移除 1.8.0 已作废项并补「发布收尾」、TTS 迁移报告与真机清单状态对齐、客户端模块 README 路径纠正）；1.8.0 的实施计划归档到 [`docs/archive/plans/`](docs/archive/plans/)；**删除过时文档**：2026-08/09 的 48 项代码审查报告、逐条判定表、旧批次清单（描述 1.7.2 之前的代码，结论已并入 `TODO.md`）。
+- **`NOTICE.md` 补 TTS 第三方组件** — sherpa-onnx / ONNX Runtime，以及模型与 G2P 数据（JMdict、open_jtalk 词典、CMUdict、pypinyin、ruleFsts）和随 APK 分发的派生产物。
 
 ---
 
