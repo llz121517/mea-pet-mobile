@@ -146,9 +146,11 @@ jobs:
           fi
           digest=""
           for apk in dist/*.APK; do
-            out="$("$apksigner" verify --print-certs "$apk")"
-            one="$(printf '%s\n' "$out" | sed -nE 's/^Signer #1 certificate SHA-256 digest: *//p' | head -n1)"
-            [ -n "$one" ] || { echo "::error::$apk 未通过签名校验"; exit 1; }
+            # 先完整打印 apksigner 输出，失败时能直接在日志里看到原因
+            out="$("$apksigner" verify --verbose --print-certs "$apk" 2>&1)" || { echo "$out"; echo "::error::$apk 未通过 apksigner verify"; exit 1; }
+            echo "$out"
+            one="$(printf '%s\n' "$out" | tr -d '\r' | grep -iE 'certificate SHA-256 digest' | head -n1 | sed -E 's/.*SHA-256 digest: *//I' || true)"
+            [ -n "$one" ] || { echo "::error::$apk 无法从 apksigner 输出解析证书 SHA-256（原始输出见上）"; exit 1; }
             if [ -n "$digest" ] && [ "$digest" != "$one" ]; then
               echo "::error::各 ABI 产物的签名证书不一致"; exit 1
             fi
