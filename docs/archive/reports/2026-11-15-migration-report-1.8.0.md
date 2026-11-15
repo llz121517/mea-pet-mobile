@@ -1,7 +1,9 @@
 # MeaPet 1.8.0 · TTS 迁移 sherpa-onnx 详细报告
 
+> **已归档（2026-11-15）**：1.8.0 已发布前验收通过，本报告为历史记录、不再更新；后续变化以 [`../../TODO.md`](../../TODO.md) 与 [`../../../CHANGELOG.md`](../../../CHANGELOG.md) 为准。
+
 > 版本：`1.8.0`（versionCode 14）｜分支 `dev`｜核心范围 `9cda4ca..fc70902`（17 commits），后续补充提交见 §12
-> 状态：代码与构建完成、单测全绿、整分支 final review **已通过**（§11，ship-ready）；**真机语音验证待执行**（见 §9 与 [`device-test-checklist.md`](device-test-checklist.md)）；**`v1.8.0` tag 尚未发布**（最新 tag 仍为 `v1.7.2`），发布收尾项见 [`../TODO.md`](../TODO.md) 待办 0。
+> 状态：代码与构建完成、单测全绿、整分支 final review **已通过**（§11，ship-ready）；**真机语音验证已完成（2026-11-15，记录见 [`../checklists/2026-11-15-tts-device-test-1.8.0.md`](../checklists/2026-11-15-tts-device-test-1.8.0.md)）**；**`v1.8.0` tag 尚未发布**（最新 tag 仍为 `v1.7.2`），发布收尾项见 [`../../TODO.md`](../../TODO.md) 待办 0。
 
 ---
 
@@ -85,7 +87,7 @@
 | fsts/date.fst | 59,154 | `eb8aa079…0e718` |
 | fsts/number.fst | 64,482 | `743f4021…8bd5bd` |
 
-（完整 sha256 与生成脚本见 [`model-package.md`](model-package.md)；打包脚本已入库为 [`tools/tts/build_package.py`](../../tools/tts/build_package.py)，旧的 `.tools/tts-spike/scripts/build_app_model_package.py` 是 spike 一次性脚本、已被取代。）
+（完整 sha256 与生成脚本见 [`../../tts/model-package.md`](../../tts/model-package.md)；打包脚本已入库为 [`tools/tts/build_package.py`](../../../tools/tts/build_package.py)，旧的 `.tools/tts-spike/scripts/build_app_model_package.py` 是 spike 一次性脚本、已被取代。）
 
 **两种分发方式**
 
@@ -136,7 +138,7 @@ legacy/LegacyMigration.kt         旧版迁移总入口（启动时异步执行�
 legacy/LegacyMigration{Context,Step}.kt  迁移上下文 + 单步接口
 legacy/steps/*.kt                 每步一个文件：旧模型 / native 库 / 开关重置
 assets/tts/ja_reading_map.json    日语改写映射（515KB）
-docs/tts/{architecture,model-package,device-test-checklist}.md
+docs/tts/{architecture,model-package}.md、docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md
 ```
 
 **测试新增 10 个类**：`TtsTextNormalizerTest`、`SherpaDependencyTest`、`TtsModelPackageTest`、`LegacyTtsModelCleanupTest`、`LegacyTtsNativeLibCleanupTest`、`LegacyTtsSwitchResetTest`、`TtsModelManagerTest`、`TtsManagerTest`、`TtsAudioPlayerTest`、`SherpaTtsEngineConfigTest`。
@@ -164,7 +166,7 @@ docs/tts/{architecture,model-package,device-test-checklist}.md
 | 模型包 | 6 文件逐字节与 `dist/manifest.json` 一致；commit 内资产 blob 与源文件 hash 完全相同 |
 | 桌面 spike（迁移前） | pth→单图 ONNX：ORT vs PyTorch 最大误差 3e-5；sherpa 加载/合成正常；13 条综合样本试听通过 |
 | AAR 依赖 | `debugRuntimeClasspath` 仅 `com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1`，无 onnxruntime-android |
-| **真机** | **未执行**（无 adb 设备；截至 2026-11-15 仍未执行），已交付 [`device-test-checklist.md`](device-test-checklist.md)（21 条用例） |
+| **真机** | **已执行通过（2026-11-15）**：Xiaomi 22041216UC / MT6895Z / Android 14，21 条试听 + SIGILL/内存/打断/悬浮窗/删除重导/升级迁移全部通过，记录见 [`../checklists/2026-11-15-tts-device-test-1.8.0.md`](../checklists/2026-11-15-tts-device-test-1.8.0.md) |
 
 ---
 
@@ -180,7 +182,7 @@ docs/tts/{architecture,model-package,device-test-checklist}.md
 **发布前需人工完成**
 
 1. 按 `docs/tts/model-package.md` 把 6 个文件上传到 GitHub Release（平铺文件名，保留旧文件）；或用 `dist/tts-model-v1.zip` 作为本地导入分发；
-2. 真机执行 `docs/tts/device-test-checklist.md`（重点：SIGILL、首载耗时、内存、打断、悬浮窗、删除重导入、升级迁移）；
+2. 真机执行 `docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md`（重点：SIGILL、首载耗时、内存、打断、悬浮窗、删除重导入、升级迁移）；
 3. 配置签名（`keystore.properties` / 环境变量）后出正式 release APK。
 
 **回滚**：`git revert fc70902` 及此前 TTS 相关提交，或回到 `1.7.2` tag；模型侧旧 release 资源未删除，回滚后旧版 App 仍可正常下载。
@@ -239,7 +241,7 @@ docs/tts/{architecture,model-package,device-test-checklist}.md
 - **整分支 final review（`9cda4ca..fc70902`）**：集成层面（数据流、引擎/播放器、生命周期、并发、R8/ABI/16KB、模型包校验）全部干净；提出 2 个 Important —— ①模型目录替换期间 TTS 可能重建引擎（状态序缺陷）、②README 仍描述旧 4-ONNX 包。
 - **修复**：`cf37b7b`（`TtsModelManager.markMutating()` + 导入/删除/下载流程先失效 `speak` 门禁再 `releaseEngine()`，`synthMutex` 内复查 Ready；193 tests）+ `7e35e0f`（README/architecture/checklist/计划文档同步）。
 - **scoped re-review**：4 项全部 **ADDRESSED**，无新破坏，**Verdict: approved**。
-- **最终结论：代码 SHIP-READY**。发布前仅剩两项仓库外动作：上传 6 个模型文件（平铺名）到 `app.ttsModelBaseUrl`，以及按 `docs/tts/device-test-checklist.md` 跑真机验证（SIGILL/音频/升级迁移）。
+- **最终结论：代码 SHIP-READY**。发布前仅剩两项仓库外动作：上传 6 个模型文件（平铺名）到 `app.ttsModelBaseUrl`，以及按 `docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md` 跑真机验证（SIGILL/音频/升级迁移）。
 - Deferred triage：`must-fix-before-merge = none`；历史工具的 minor 全部 acceptable。
 
 *本报告由实施过程逐任务记录汇总。*
@@ -258,8 +260,8 @@ docs/tts/{architecture,model-package,device-test-checklist}.md
 - `verify_assets.py` 8/8 通过：tokens / ja_reading_map / bloom / fsts 逐字节一致，lexicon 内容一致（仅 41,923 条单字行序不同，已注明）。
 - `model.onnx` 不在管线内（需外部 `G_latest.pth` + 模块拼接），来源与自备方式见 `tools/tts/build_model.md`。
 
-**仍待完成（发布阻塞项，见 [`../TODO.md`](../TODO.md) 待办 0）**
+**仍待完成（发布阻塞项，见 [`../../TODO.md`](../../TODO.md) 待办 0）**
 
-- 真机执行 [`device-test-checklist.md`](device-test-checklist.md)（当前 21 条用例全未勾选）；
+- ~~真机执行 device-test-checklist（21 条用例）~~ → **已完成（2026-11-15）**，见 [`../checklists/2026-11-15-tts-device-test-1.8.0.md`](../checklists/2026-11-15-tts-device-test-1.8.0.md)；
 - 模型包 `lexicon.txt` 重传确认：发布包 sha `97e2b4fb…`，本地 `tools/tts/dist` 为生成型行序 `261ee0a7…`（内容一致、字节不同，App 只校验字节数）；
 - 打 `v1.8.0` tag 走 release workflow（当前最新 tag 仍为 `v1.7.2`）。

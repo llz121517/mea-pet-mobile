@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **设置页 Debug 构建新增「试听文本」入口** — 任意文本直接合成，便于真机验证数字 / 日期 / 日语 / 中英混排；release 构建不显示该入口。
 - 版本号升至 1.8.0（versionCode 14）；applicationId 与签名不变，可覆盖安装，但**升级后必须重新准备语音模型**（见上）。
 - **流式播放的句间停顿** — 真机合成速度约为实时的 1.1 倍（RTF≈1.1），句子之间可能有轻微停顿，属流式播放的预期代价；多句并行（`maxNumSentences > 1`）实测只快约 8%，本版未启用。
-- 真机验收清单见 [`docs/tts/device-test-checklist.md`](docs/tts/device-test-checklist.md)。
+- 真机验收记录（已通过、已归档）见 [`docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md)。
 
 ### Documentation
 

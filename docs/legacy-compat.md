@@ -43,7 +43,7 @@
 1. 删除 `steps/LegacyTtsModelCleanup.kt`、`steps/LegacyTtsNativeLibCleanup.kt`、`steps/LegacyTtsSwitchReset.kt`；
 2. 从 `LegacyMigration.STEPS` 移除对应注册项；若该组独占字段（如 `LegacyMigrationContext.ttsLegacyDetected`）已无人使用，一并清理；
 3. 删除 `app/src/test/java/com/meapet/mobile/legacy/` 下对应测试类；
-4. 更新本文 §3 与 `docs/tts/migration-report-1.8.0.md` 的升级说明（改为「不再需要旧版 TTS 迁移」）；
+4. 更新本文 §3 与 `docs/archive/reports/2026-11-15-migration-report-1.8.0.md` 的升级说明（改为「不再需要旧版 TTS 迁移」）；
 5. 全仓 grep 确认无残留引用：
    ```
    grep -rn "LegacyTts\|ttsLegacyDetected" app/src docs
@@ -70,4 +70,4 @@ adb logcat -s LegacyMigration
 ## 6. 验证方式
 
 - 单测：`app/src/test/java/com/meapet/mobile/legacy/`（目录清理、幂等、开关联动）；
-- 真机模拟升级：把旧 `enc_p.onnx` 推到 `files/tts_model/` 后启动，确认目录被清空、两个开关关闭、设置页显示未下载（详见 `docs/tts/device-test-checklist.md` 升级迁移用例）。
+- 真机模拟升级：把旧 `enc_p.onnx` 推到 `files/tts_model/` 后启动，确认目录被清空、两个开关关闭、设置页显示未下载（详见 `docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md` 升级迁移用例）。

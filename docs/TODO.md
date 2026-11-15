@@ -9,7 +9,7 @@
 | 内容 | 位置 |
 |---|---|
 | 修复的逐条记录(已发布口径) | `CHANGELOG.md`（[1.7.2] / [1.8.0]） |
-| TTS 迁移(1.8.0)结论、验证记录与遗留项 | [`docs/tts/migration-report-1.8.0.md`](tts/migration-report-1.8.0.md) |
+| TTS 迁移(1.8.0)结论、验证记录与遗留项 | [`docs/archive/reports/2026-11-15-migration-report-1.8.0.md`](archive/reports/2026-11-15-migration-report-1.8.0.md) |
 | 待办条目编号(#N / 新-N)的来源说明 | 见下方「命名对照」与「背景」（原审查文档已删除） |
 
 背景:48 条审查(08-31)→ 09-03 独立复核(剔除 #6、#43、#44,新增新-1~新-10)→ 09-05/06 真机验证发现候选-1 与两条用户反馈 bug。
@@ -31,7 +31,7 @@
 - **小改动高收益批 = 旧「批次 1」**(PR #18, `34d8a29`):新-1 系统气泡「挤旧反延长」(改绝对 deadline + `BubbleLife`)、#18 网关错误详情可见、新-4 `onResume` 等悬浮窗停止加 2s 超时、#38 `LogExporter.waitFor` 加超时、新-6 TTS attn 护栏改内存封顶、新-7/#32 修正 `ConversationManager` 文档、新-10 重试边界守卫。附 `SystemBubblePolicy`/`ApiResponse` 回归单测。
 - **用户反馈批**(PR #20, `6eb4311`):发送失败回滚防「幽灵消息」、乐观/入史同 id、`mergeWithHistory` 按时间戳过滤、`retryLastMessage`→`retryMessage`(目标由 UI 按 id 指定,防重发旧消息 + LazyColumn 重复 key 崩溃)、分界丢失不再清空全部回复、`MessageList` 加 `distinctBy` 兜底、宽表格按段渲染 + 横向滚动 + 气泡宽度放开。附 14 条单测(全绿)。
 - **复核定案剔除**:#6(合法 Compose 用法)、#43、#44(理由见「不做」)。
-- **1.8.0 TTS 迁移批**(2026-11-01, `fc70902`..`aed66e6`):推理链整体换成 sherpa-onnx,连带作废本清单两条旧项——**#41 失效**(`DurationExpander` 连同旧 G2P/四模块引擎整体删除,无优化对象)、**「无 CI」失效**(`.github/workflows/ci.yml` 已上线:`:app:testDebugUnitTest` + PR 构建 debug APK)。新-6 的 attention 内存护栏代码与测试也随旧引擎删除。详见 [`tts/migration-report-1.8.0.md`](tts/migration-report-1.8.0.md)。
+- **1.8.0 TTS 迁移批**(2026-11-01, `fc70902`..`aed66e6`):推理链整体换成 sherpa-onnx,连带作废本清单两条旧项——**#41 失效**(`DurationExpander` 连同旧 G2P/四模块引擎整体删除,无优化对象)、**「无 CI」失效**(`.github/workflows/ci.yml` 已上线:`:app:testDebugUnitTest` + PR 构建 debug APK)。新-6 的 attention 内存护栏代码与测试也随旧引擎删除。详见 [`archive/reports/2026-11-15-migration-report-1.8.0.md`](archive/reports/2026-11-15-migration-report-1.8.0.md)。
 - **英文数字读法**(未发布, 真机验收期修复):英文句中的阿拉伯数字在 App 归一化层预转换为英文数词(`3`→three、`12`→twelve),不再被 sherpa 中文 `ruleFsts` 读成 sān/shí èr;中文/日文上下文数字保持原路径;`3.5`/`10:30`/电话等复合或长数字不转换。补 3 组单测。日文数字读法见「待办 D」。
 - **逐句流式播放**(未发布, 2026-11-15):`TtsEngine.synthesizeStreaming` 走 `OfflineTts.generateWithConfigAndCallback`,每句合成完即回调;`TtsManager` 首块到达才点亮/停触摸语音并开播,后续分块进 `TtsAudioPlayer` 队列、由专用写线程写 AudioTrack;打断时回调返回 0 让原生推理中止剩余句子(不再白算完)。桌面 4 句首块 ~1.1s(整段 3.8s);补 `TtsManagerTest` 流式契约 8 条(含迟到分块中止、releaseEngine 串行)。并行(`maxNumSentences>1`)实测只快 ~8%,不启用;JNI 回调必须用 Java 适配器 `TtsStreamCallback`(sherpa 按 `invoke([F)Ljava/lang/Integer;` 查方法,Kotlin indy lambda 没这个签名,直接传会 CheckJNI SIGABRT,已加 `TtsStreamCallbackTest` 反射守护)。
 
@@ -39,7 +39,7 @@
 
 ## 📌 待办 0 · 1.8.0 发布收尾(阻塞 v1.8.0 发布,tag 仍未打)
 
-- [x] **真机验收** 按 [`tts/device-test-checklist.md`](tts/device-test-checklist.md) 逐条执行(21 条试听 + SIGILL/内存/打断/悬浮窗/删除重导入/1.7.x 升级迁移),结论回填清单 §3。**已完成(2026-11-15)**:清单全部勾选、§3 结论回填(设备 Xiaomi 22041216UC / MT6895Z / Android 14);自动化记录见清单 §A。当天修复并复验:英文数字读法、流式回调 JNI 签名崩溃、≤2s 短片段无声。
+- [x] **真机验收** 按 [`archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](archive/checklists/2026-11-15-tts-device-test-1.8.0.md) 逐条执行(21 条试听 + SIGILL/内存/打断/悬浮窗/删除重导入/1.7.x 升级迁移),结论回填清单 §3。**已完成(2026-11-15)**:清单全部勾选、§3 结论回填(设备 Xiaomi 22041216UC / MT6895Z / Android 14);自动化记录见清单 §A。当天修复并复验:英文数字读法、流式回调 JNI 签名崩溃、≤2s 短片段无声。
 - [ ] **模型包 `lexicon.txt` 重传确认** — **已实测确认(2026-11-15)**:App 只校验字节数;`artifacts.json` 把 `lexicon.txt` 标为 `content-identical`,发布包 `97e2b4fb…`(打包型行序)与本地 `tools/tts/dist` 的 `261ee0a7…`(生成型行序)`content_sha256` 相同、字节不同。设备当前为本地 zip 导入版本(`261ee0a7…`),功能与发布包一致。**结论:Release 上的包即最终版,无需重传**;保持 `tts/model-package.md` 的双 sha 口径即可。
 - [ ] **打 tag `v1.8.0`** 走 `.github/workflows/release.yml`(须在 `main` 上且与 `versionName` 一致;当前最新 tag 仍为 `v1.7.2`)。
 - [ ] **1.9.0:删除 legacy TTS 迁移步骤** — 按 [`legacy-compat.md`](legacy-compat.md) §3/§4 删 3 个 step + 注册项 + 测试,保留迁移框架本身。
@@ -108,7 +108,7 @@
 
 ## 📌 待办 D · 语音增强(1.9.0)
 
-- [ ] **日文上下文数字/日期读法** — 目前日文句里的阿拉伯数字走 sherpa 中文 `ruleFsts`,读作中文数词(`15 時`→shí wǔ shí、`9 月 1 日`→jiǔ yuè yī rì),假名数词(じゅうごじ)与日文日期(くがつついたち)都不对。需要:数字→假名数词 + 日文日期/量词特殊读法(1日→ついたち、9月→くがつ)与计数器规则。建议照 `docs/tts/architecture.md` §3 英文数字预转换的做法在 App 归一化层实现并补单测;用例来自 [`tts/device-test-checklist.md`](tts/device-test-checklist.md) #19/#21。
+- [ ] **日文上下文数字/日期读法** — 目前日文句里的阿拉伯数字走 sherpa 中文 `ruleFsts`,读作中文数词(`15 時`→shí wǔ shí、`9 月 1 日`→jiǔ yuè yī rì),假名数词(じゅうごじ)与日文日期(くがつついたち)都不对。需要:数字→假名数词 + 日文日期/量词特殊读法(1日→ついたち、9月→くがつ)与计数器规则。建议照 `docs/tts/architecture.md` §3 英文数字预转换的做法在 App 归一化层实现并补单测;用例来自 [`archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](archive/checklists/2026-11-15-tts-device-test-1.8.0.md) #19/#21。
 
 ---
 

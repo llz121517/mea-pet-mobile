@@ -1,7 +1,9 @@
 # TTS 真机验收清单（1.8.0 · sherpa-onnx）
 
+> **已归档（2026-11-15）**：1.8.0 真机验收已全部通过，本文件仅作验收记录保留，不再更新；后续版本的真机验收请**新写清单**，不要改本文件。
+
 > **状态：已完成（2026-11-15 真机验收通过，结论见 §3；自动化记录见 §A）。** 机型/SoC/Android 版本/`ro.product.cpu.abilist` 见 §A 与 §3。
-> 上游：发布收尾项见 [`../TODO.md`](../TODO.md) 待办 0；迁移报告见 [`migration-report-1.8.0.md`](migration-report-1.8.0.md)。
+> 上游：发布收尾项见 [`../../TODO.md`](../../TODO.md) 待办 0；迁移报告见 [`../reports/2026-11-15-migration-report-1.8.0.md`](../reports/2026-11-15-migration-report-1.8.0.md)。
 
 > 本版（1.8.0 / versionCode 14）语音合成已迁移到 sherpa-onnx，模型包、采样率、播放链路全部更换。
 > 构建期校验（单测 / R8 / 16KB 对齐 / so 清单）已在桌面完成，**本清单是需要真机才能确认的部分**，请在 Android 设备上逐条执行并勾选。
@@ -108,7 +110,7 @@ adb shell run-as $PKG ls -lR files/tts_model
 ## 1. 逐条试听用例
 
 入口：Debug 构建「设置 → 语音 → 试听文本（Debug）」，或直接在主界面/悬浮窗发一条让模型复述该文本的消息。
-预期读法按 [`architecture.md`](architecture.md) 的规则给出（lexicon 命中 → ruleFsts → 字符兜底）。**每条都要能完整念完、不吞句、不卡死。**
+预期读法按 [`../../tts/architecture.md`](../../tts/architecture.md) 的规则给出（lexicon 命中 → ruleFsts → 字符兜底）。**每条都要能完整念完、不吞句、不卡死。**
 
 ### 1.1 中文
 
@@ -269,4 +271,4 @@ adb logcat -b crash -d | Select-String "Fatal|signal|DEBUG"
 - 遗留观察项：TTS 合成后 native 内存 +约 300MB（超预期，1.9.0 观察是否持续增长）；日文数字/日期读法排入 1.9.0。
 ```
 
-> 参考：[`architecture.md`](architecture.md)（改写规则与边界）、[`model-package.md`](model-package.md)（模型包清单与 sha256）。
+> 参考：[`../../tts/architecture.md`](../../tts/architecture.md)（改写规则与边界）、[`../../tts/model-package.md`](../../tts/model-package.md)（模型包清单与 sha256）。

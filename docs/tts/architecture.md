@@ -29,7 +29,7 @@ VITS 单图推理 → 22050Hz 音频
 >
 > **多句并行（`maxNumSentences > 1`）仍未启用**：批量并行实测只快约 8%（8 句 8.41s→7.79s），且 batch 越大句间停顿越短、听感有变化，收益不抵复杂度。已知取舍：真机合成约 1.1× 实时（RTF≈1.1），所以句间可能有轻微停顿，这是流式播放在"合成慢于实时"设备上的预期代价。
 >
-> **AudioTrack 的两个平台坑（Xiaomi 22041216UC / MIUI 14 实测，2026-11-15）**：①空 buffer 就 `play()` 的 track 会一帧不渲染（无声）——写线程改为先写入首批数据再 `play()`；②总帧数 < track buffer（2 秒）的片段，AudioFlinger 一直挂着不消费：`playState=PLAYING`、`underrun=0`、播放头恒 0、marker 永不到，表现为 **≤2 秒的短回复/试听整段无声**（此前只能靠轮询超时收尾，用户听到的是静音）。现在写线程在结束标记前用**静音补齐到 buffer 容量**逼其开始渲染，marker 仍打在真实音频末尾（补齐静音不可闻）。修复前后对照见 [`device-test-checklist.md`](device-test-checklist.md) §2.8。
+> **AudioTrack 的两个平台坑（Xiaomi 22041216UC / MIUI 14 实测，2026-11-15）**：①空 buffer 就 `play()` 的 track 会一帧不渲染（无声）——写线程改为先写入首批数据再 `play()`；②总帧数 < track buffer（2 秒）的片段，AudioFlinger 一直挂着不消费：`playState=PLAYING`、`underrun=0`、播放头恒 0、marker 永不到，表现为 **≤2 秒的短回复/试听整段无声**（此前只能靠轮询超时收尾，用户听到的是静音）。现在写线程在结束标记前用**静音补齐到 buffer 容量**逼其开始渲染，marker 仍打在真实音频末尾（补齐静音不可闻）。修复前后对照见 [`../archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](../archive/checklists/2026-11-15-tts-device-test-1.8.0.md) §2.8。
 
 ## 2. 数据文件（模型包内）
 
@@ -103,9 +103,9 @@ add_blank=1 → 运行时自动生成 `[0,s0,0,s1,…,sN,0]`。
 - 数字：中文/日文上下文仍走 ruleFsts；日文数字读法（じゅうごじ 等）是已知边界，排 1.9.0。
 - 综合样本：samples/comprehensive/（13 条）。
 
-## 7. 集成后剩余（真机验证等）
+## 7. 真机验证（已完成，2026-11-15）
 
-1.8.0 已完成 Android 侧集成（sherpa AAR、`SherpaTtsEngine`、动态采样率播放器、模型包管理、第 3 节日文改写规则），以下仅剩真机确认项，逐条见 `docs/tts/device-test-checklist.md`：
+1.8.0 已完成 Android 侧集成（sherpa AAR、`SherpaTtsEngine`、动态采样率播放器、模型包管理、第 3 节日文改写规则）；以下真机确认项已于 2026-11-15 全部通过，逐条记录见归档清单 [`../archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](../archive/checklists/2026-11-15-tts-device-test-1.8.0.md)：
 
 1. 真机验证 lexicon 8.9MB + 模型 75MB 的加载时间与内存占用；
 2. 真机验证 16KB page size / SIGILL（sherpa AAR 内嵌 ORT 1.28.2）、打断抢占、悬浮窗朗读、删除后重新导入；

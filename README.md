@@ -203,7 +203,7 @@ secret 注入），改公共配置请直接改模板。
 | 文档地图（**先看这里**） | [`docs/README.md`](docs/README.md) |
 | 待办与代码审查遗留项 | [`docs/TODO.md`](docs/TODO.md) |
 | 语音合成（TTS）设计、模型包与生成管线 | [`docs/tts/`](docs/tts/) · [`tools/tts/README.md`](tools/tts/README.md) |
-| 发布前真机验收清单 | [`docs/tts/device-test-checklist.md`](docs/tts/device-test-checklist.md) |
+| 1.8.0 真机验收记录（已归档） | [`docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md) |
 | 旧版本迁移（1.7.x → 1.8.0）说明与移除计划 | [`docs/legacy-compat.md`](docs/legacy-compat.md) |
 | 变更记录 | [`CHANGELOG.md`](CHANGELOG.md) |
 | 第三方组件许可与署名 | [`NOTICE.md`](NOTICE.md) |
