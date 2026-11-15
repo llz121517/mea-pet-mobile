@@ -6,11 +6,13 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-// 从 local.properties 读取友盟 AppKey 与独特性标识信息，与代码隔离
+// 从 local.properties 读取友盟 AppKey 与独特性标识信息，与代码隔离。
+// 必须按 UTF-8 读取：Properties.load(InputStream) 固定按 ISO-8859-1 解码，
+// 文件中含中文（如证书路径）时会被解成乱码，导致 key 读不到（本地构建曾因此静默跳过 release 签名）。
 val localProperties = Properties().apply {
     val file = rootProject.file("local.properties")
     if (file.exists()) {
-        file.inputStream().use { load(it) }
+        file.reader(Charsets.UTF_8).use { load(it) }
     }
 }
 val umengAppKey: String = localProperties.getProperty("umeng.appKey", "") ?: ""
@@ -37,10 +39,11 @@ val appAbi: String = (project.findProperty("appAbi") as String?) ?: "both"
 // ── Release 签名 ──
 // 证书信息优先读环境变量，其次读根目录 keystore.properties（gitignored，模板见 keystore.properties.example）。
 // 四者齐备且 keystore 文件存在时才给 release 配置签名；否则保持未签名（无证书也能 assembleRelease）。
+// 同 local.properties：必须按 UTF-8 读取，否则证书路径中的中文会乱码 → 误判为未配置 → 静默产出 unsigned。
 val keystoreProperties = Properties().apply {
     val file = rootProject.file("keystore.properties")
     if (file.exists()) {
-        file.inputStream().use { load(it) }
+        file.reader(Charsets.UTF_8).use { load(it) }
     }
 }
 fun signingValue(envKey: String, propKey: String): String? =
