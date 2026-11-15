@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **进后台可能丢失最新会话历史** — 会话落盘是 conflate 合并写队列，进程被系统回收时排队快照可能来不及写盘；`onStop` 时同步补写一次，确保最新对话不丢。
+- **老用户被误判为首次启动** — 快照预热完成前同步 getter 落到默认值，而 `isFirstLaunch()` 默认 `true`：老用户会被当首启，写入 `first_launch=false` 并重弹隐私 / 更新窗，且状态已写坏无法自愈。新增 `SettingsManager.awaitLoaded()`，启动期的判定型读取先等预热完成（不回退到主线程阻塞读盘）。
+- **任务根外启动崩溃** — `MainActivity.onCreate` 的 `isTaskRoot` 防护在退出路径上未调用 `super.onCreate()`，系统抛 `SuperNotCalledException` 直接崩溃；改为先走 `super.onCreate()` 再判断退出。
 
 ---
 
@@ -60,7 +62,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`NOTICE.md` 补 TTS 第三方组件** — sherpa-onnx / ONNX Runtime，以及模型与 G2P 数据（JMdict、open_jtalk 词典、CMUdict、pypinyin、ruleFsts）和随 APK 分发的派生产物。
 
 ---
-
 
 ## [1.7.2] - 2026-09-11
 
