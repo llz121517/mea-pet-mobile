@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **语音模型包换新** — 新模型 6 个文件、约 84MB，与旧版 4 文件模型不兼容：升级后启动时会自动清理旧包并引导重新下载（网络受限可在设置页「从本地导入」）。
 - **移除 onnxruntime-android 依赖** — 原生库改由 sherpa AAR 提供，不再有重复 so，仅保留 arm64-v8a / armeabi-v7a 两个 ABI。
 - **Release 包剔除未使用的 sherpa C/C++ API 原生库** — sherpa AAR 带 `libsherpa-onnx-c-api.so` / `libsherpa-onnx-cxx-api.so`，但 App 使用的 Kotlin API 只加载 `libsherpa-onnx-jni.so`（jni 已静态链接 C/C++ API，且只有 cxx-api 依赖 c-api），两者在 App 内无任何加载路径；release 打包剔除后 v8a 单 ABI APK 36.2MB、双 ABI 54.3MB（原 61.6MB，减小约 7.4MB）。
+- **触摸语音改为 Opus** — 21 个触摸语音从 32kHz 单声道 WAV（2.7MB）转成 48kHz Opus 48kbps（共 225KB，减小 92%），听感无明显损失；assets 仍不压缩存储（`androidResources.noCompress` 显式声明），播放路径不变（`openFd` → MediaPlayer），重新编码用 `tools/encode-voice-assets.ps1`。
 - **播放采样率跟随引擎输出** — 不再硬编码 22050Hz，换模型或换采样率不会变速、变调。
 - **删除自写 G2P 与拼音资产** — 相关引擎与约 8.9 万行词表全部移除，APK 减小约 1.65MB。
 - **破坏性操作统一为「立即执行 + 可撤销」** — 清除对话 / 清除全部记忆 / 恢复默认 System Prompt / 恢复默认壁纸四处原为弹窗确认、两段式点击或无提示直接删除，现统一改为点击即执行 + 底部倒计时撤销条（默认 5 秒，窗口内按快照回滚）；转屏切页不丢撤销机会，被新写入覆盖时窗口立即作废，壁纸到窗口到期才真正删文件。

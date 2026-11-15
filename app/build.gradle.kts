@@ -149,6 +149,12 @@ android {
             )
         }
     }
+    // 触摸语音 assets/voice/**/*.ogg 必须不压缩存储：VoicePlayer 用 AssetManager.openFd
+    // 直接拿 fd 喂 MediaPlayer，压缩过的 asset 不能 openFd（.ogg 本就在 aapt 默认不压缩
+    // 列表里，这里显式声明防回归）。
+    androidResources {
+        noCompress += listOf("ogg")
+    }
     testOptions {
         unitTests {
             // JVM 单测中 android.util.Log 等桩方法返回默认值而非抛异常
