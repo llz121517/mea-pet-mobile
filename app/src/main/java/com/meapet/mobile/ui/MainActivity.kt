@@ -105,9 +105,9 @@ class MainActivity : ComponentActivity() {
         container = MeaPetApplication.from(applicationContext as android.app.Application)
 
         // 启动即按持久化主题设定 Live2D 背景与窗口背景，让首帧直接是主题色，
-        // 避免"先浅后深"的闪烁（Compose 内 themeModeFlow 异步收集稍后才会接管，
-        // 在此之前若只靠默认值，深色主题下会先白后黑）。
-        // getThemeMode 在快照未就绪时退化为一次 runBlocking 读盘兜底（值小、量级可接受）。
+        // 避免"先浅后深"的闪烁（Compose 内 themeModeFlow 异步收集稍后才会接管）。
+        // 快照未就绪时 getThemeMode 落到默认值且不读盘：首帧可能浅色一闪，随后由
+        // themeModeFlow 订阅修正——onCreate 无法挂起，这个极短窗口只能接受。
         try {
             val themeMode = container.settingsManager.getThemeMode()
             val isDark = isDarkTheme(this, themeMode)
@@ -120,8 +120,8 @@ class MainActivity : ComponentActivity() {
             window.setBackgroundDrawable(ColorDrawable(0xFFF7F7F7.toInt()))
         }
 
-        // 首帧即预置背景壁纸路径与模糊强度（从 DataStore 读），避免旋转/重建后先闪纯色再上壁纸；
-        // 后续由 Compose 内 wallpaperPathFlow / wallpaperBlurFlow 响应式接管（见 setContent）
+        // 首帧即预置背景壁纸路径与模糊强度（读内存快照，不读盘），避免旋转/重建后先闪纯色再上壁纸；
+        // 快照未就绪时退化为默认纯色，后续由 Compose 内 wallpaperPathFlow / wallpaperBlurFlow 接管
         try {
             val d = Live2dDelegate.getInstance()
             d.wallpaperPath = container.settingsManager.getWallpaperPath().ifBlank { null }
@@ -193,6 +193,9 @@ class MainActivity : ComponentActivity() {
                 //   版本不匹配会重新弹窗（若在此记录，同版本下换回 SDK 构建不再弹、授权又默认
                 //   未同意 → 统计永远不会初始化）。检查更新弹窗与统计无关，照常。
                 LaunchedEffect(Unit) {
+                    // 快照未就绪时 isFirstLaunch() 会落到默认值 true，进而 markFirstLaunchDone()
+                    // 并弹隐私/更新窗——这是会写持久化状态且无法自愈的误判，必须先等预热完成。
+                    settingsManager.awaitLoaded()
                     val firstLaunch = settingsManager.isFirstLaunch()
                     if (firstLaunch) {
                         settingsManager.markFirstLaunchDone()

@@ -9,10 +9,12 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -42,12 +44,19 @@ class SettingsManager(context: Context) {
 
     private val cacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** 首次快照就绪信号；预热失败或流结束时同样完成，避免等待方永久挂起。 */
+    private val loadedSignal = CompletableDeferred<Unit>()
+
     init {
         // 构造即预热：首次加载后持续订阅，保证快照与磁盘一致
         cacheScope.launch {
-            dataStore.data.collect { prefs ->
-                cachedPrefs = prefs
-            }
+            dataStore.data
+                .catch { e -> Log.w(TAG, "settings warm-up failed: ${e.message}") }
+                .collect { prefs ->
+                    cachedPrefs = prefs
+                    loadedSignal.complete(Unit)
+                }
+            loadedSignal.complete(Unit)
         }
     }
 
@@ -192,6 +201,17 @@ class SettingsManager(context: Context) {
     // 绝不在主线程阻塞读盘（首帧真实值由对应 Flow 就绪后修正）
 
     private fun currentPrefs(): Preferences = cachedPrefs ?: emptyPreferences()
+
+    /**
+     * 等待内存快照完成首次加载（预热失败时也会立即返回）。
+     *
+     * 只供启动期的**判定型**读取使用：快照未就绪时同步 getter 落到默认值，而
+     * 「是否首次启动」这类判定的默认值恰好是可执行分支（true），误判会写入持久化
+     * 状态并弹窗，无法自行恢复。展示型读取不必等待，由对应 Flow 就绪后修正即可。
+     */
+    suspend fun awaitLoaded() {
+        loadedSignal.await()
+    }
 
     fun getApiKey(): String = currentPrefs()[KEY_API_KEY] ?: ""
     fun getApiUrl(): String = currentPrefs()[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL
