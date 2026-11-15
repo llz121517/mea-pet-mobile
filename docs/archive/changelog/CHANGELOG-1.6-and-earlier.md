@@ -1,6 +1,6 @@
 # Changelog 归档 · 1.6.0 及更早
 
-本文件于 2026-09-07 自主 [`CHANGELOG.md`](../../CHANGELOG.md) 归档，保留 1.6.0 及更早版本的发布记录，仅作历史查询，不再维护。格式沿用 Keep a Changelog。
+本文件于 2026-09-07 自主 [`CHANGELOG.md`](../../../CHANGELOG.md) 归档，保留 1.6.0 及更早版本的发布记录，仅作历史查询，不再维护。格式沿用 Keep a Changelog。
 
 ---
 

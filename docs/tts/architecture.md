@@ -14,13 +14,16 @@
 ③ 上下文改写：日语片段（连续汉字且紧挨假名）→ 用映射表改写为假名
    │
    ▼  sherpa C++ 内部
-④ 句切分（。！？,.!?…）→ 按句合成（maxNumSentences=1，句子级回调）
+④ 句切分（。！？,.!?…）→ 逐句合成：每批 1 句（maxNumSentences=1）串行合成，结果拼接后整段返回；
+   App 未注册逐句回调（generateWithConfigAndCallback）
 ⑤ ruleFsts：phone.fst → date.fst → number.fst（顺序重要！）
 ⑥ CharacterLexicon 最长匹配（统一 lexicon.txt）
 ⑦ 符号 → ID（tokens.txt）+ add_blank
    ▼
 VITS 单图推理 → 22050Hz 音频
 ```
+
+> **多句并行 / 逐句流式播放均未启用**（有意简化，1.6 前的变更记录已定稿为「整段一次合成」）：`maxNumSentences = 1` 时 sherpa 仍按句切分、逐句串行合成，但 App 用的是无回调的 `generateWithConfig`，拿到的是拼接后的整段音频——既无并行加速，也无逐句流式。桌面实测（同版本 sherpa-onnx、同一模型、numThreads=2、4 句中文）：mns=1 → 3.78s、4 次逐句回调（首句 1.10s）；mns=4 → 3.50s、1 次回调（首音 3.50s）。即**并行只快约 8%**（8 句文本 8.41s→7.79s），且 batch 越大句间停顿越短、听感有差异；真正收益在「回调到达即开播」（首音 1.10s vs 3.50s，约 -70%），需把 `TtsManager`/播放器改成增量写 PCM，排 1.9.0 评估（见 `TODO.md` 待办 D）。
 
 ## 2. 数据文件（模型包内）
 
@@ -61,12 +64,22 @@ sherpa 的 CharacterLexicon 对词表外英文词**整词丢弃**（日志 `char
 
 例：`今天用 kotlin 写了个 app` → 归一化后 `今天用 k o t l i n 写了个 app`，sherpa 日志不再出现 `Ignore OOV 'kotlin'`。
 
+### 英文数字：预转换为英文数词
+
+lexicon 里**没有阿拉伯数字条目**，数字由 sherpa 的 `ruleFsts`（中文数字前端）在查表前转成中文数词——这在英文句子里会把 `3` 读成 `sān`。因此 App 在 OOV 兜底之后、日文改写之前加了 `convertEnglishNumbers`：
+
+- 整数 run 任一侧（跳过空格的最近邻）是拉丁字母 → 视为英文上下文，转英文基数词：`3`→`three`、`12`→`twelve`、`1234`→`one thousand two hundred thirty four`（lexicon 已覆盖 zero…million）；
+- 相邻是 CJK/假名 → 保持原样，继续走 `ruleFsts`（中文「3 个」= sān、电话逐位、日期读法都不受影响）；
+- 复合数字不转：紧邻 `.` `:` `/` `%` `-` `+` 且再外侧是数字（`3.5`、`10:30`、`3/4`、`-5`）；≥7 位（电话）或 `0` 开头的多位数也不转。
+
+> 已知边界：**日文句子里的数字仍走中文 `ruleFsts`**，读作中文数词（`15 時` → shí wǔ shí、`9 月 1 日` → jiǔ yuè yī rì）；假名数词/日文日期读法（じゅうごじ、くがつついたち）需要量词与日期规则，排在 1.9.0（见 `TODO.md`）。
+
 ## 4. 各语言/符号来源
 
 - 中文：pypinyin BOPOMOFO → bopomofo_to_ipa（训练同源），词组表 47k + 单字 41,923；多音字靠词条（行长 háng zhǎng、重庆 chóng qìng）。
 - 英文：CMUdict ARPAbet → IPA（重音 ˈ/ˌ），词表 126k + 41 条手工 OOV 补条；运行时文本转小写，词表外多字母词由 App 逐字母兜底。
 - 日文：JMdict 常用词 → 假名读音 → pyopenjtalk IPA2；lexicon 里只放**假名**，汉字由 App 改写。
-- 数字：ruleFsts（phone→date→number）；电话逐位（1 读幺），年龄/时间按数词（十八岁、八点三十分）。
+- 数字：英文上下文由 App `convertEnglishNumbers` 预转英文数词；中文与日文上下文走 ruleFsts（phone→date→number）：电话逐位（1 读幺），年龄/时间按数词（十八岁、八点三十分）；日文数字仍是已知边界（读中文数词，1.9.0 处理）。
 - 未知内容兜底：中文单字条目、假名单字、英文字母（App 侧把词表外的多字母英文词拆成字母拼读）、日文单字/词干。
 
 ## 5. tokens.txt 约定
@@ -80,7 +93,8 @@ add_blank=1 → 运行时自动生成 `[0,s0,0,s1,…,sN,0]`。
 - 混合精度可拼接（74.9MB），sherpa 正常加载；预分词路径勿用（piper 双插 blank 导致语速翻倍）。
 - 中文：多音字、词边界、数字/日期/电话正常；在 13 条综合样本上 OOV=0（lexicon 覆盖范围外仍会逐字/字母兜底）。
 - 日文：今日→きょう、一緒→いっしょ、天気→てんき、私は→わたし、知らない→しらない。
-- 英文：126k 词覆盖 + 词表外逐字母兜底；中英混排正常。
+- 英文：126k 词覆盖 + 词表外逐字母兜底；中英混排正常；英文句中的整数经 `convertEnglishNumbers` 预转为英文数词（`3`→three、`12`→twelve，单测覆盖）。
+- 数字：中文/日文上下文仍走 ruleFsts；日文数字读法（じゅうごじ 等）是已知边界，排 1.9.0。
 - 综合样本：samples/comprehensive/（13 条）。
 
 ## 7. 集成后剩余（真机验证等）

@@ -83,4 +83,32 @@ class TtsTextNormalizerTest {
         assertEquals("you.", normalizer().normalize("YOU."))
         assertEquals("k o t l i n.", normalizer(knownEnglishWord = { it == "app" }).normalize("kotlin."))
     }
+
+    @Test
+    fun `英文句中的整数转英文数词`() {
+        assertEquals(
+            "i have three apples and twelve oranges.",
+            normalizer().normalize("I have 3 apples and 12 oranges."),
+        )
+        assertEquals("there are twenty six letters.", normalizer().normalize("There are 26 letters."))
+        assertEquals("have one thousand two hundred thirty four apples", normalizer().normalize("Have 1234 apples"))
+    }
+
+    @Test
+    fun `中文与日文上下文的数字保持原样交由 ruleFsts`() {
+        assertEquals("我今年 18 岁", normalizer().normalize("我今年 18 岁"))
+        assertEquals("今天是 2026 年 11 月 1 日", normalizer().normalize("今天是 2026 年 11 月 1 日"))
+        assertEquals("我用 python 写了 3 个脚本", normalizer().normalize("我用 Python 写了 3 个脚本"))
+        // 日文数字仍是已知边界：不转英文，进 sherpa 后走中文 ruleFsts
+        assertEquals("きょうの meeting は 15 時からです", normalizer().normalize("今日の meeting は 15 時からです"))
+    }
+
+    @Test
+    fun `复合数字与长数字不转英文`() {
+        assertEquals("3.5 倍", normalizer().normalize("3.5 倍"))
+        assertEquals("10:30", normalizer().normalize("10:30"))
+        assertEquals("3/4", normalizer().normalize("3/4"))
+        assertEquals("call 13800138000 now", normalizer().normalize("call 13800138000 now"))
+        assertEquals("1 2 3", normalizer().normalize("1 2 3"))
+    }
 }

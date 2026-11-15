@@ -78,6 +78,47 @@ Interface icons converted to `VectorDrawable`.
 
 ---
 
+## sherpa-onnx / ONNX Runtime (NOT included)
+
+The on-device text-to-speech pipeline uses the **sherpa-onnx** Android AAR
+(`com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1`, see
+`gradle/libs.versions.toml`). It is fetched from JitPack at build time and is
+**not distributed** in this repository.
+
+- **Project:** https://github.com/k2-fsa/sherpa-onnx
+- **License:** Apache License 2.0
+- **Notes:** the AAR bundles prebuilt native libraries, including **ONNX Runtime**
+  (MIT License, https://github.com/microsoft/onnxruntime). The repo therefore
+  no longer declares an `onnxruntime-android` dependency of its own.
+
+---
+
+## TTS Model Assets & G2P Data (NOT included)
+
+- **Mea VITS2 model weights** — `model.onnx` (~75 MB), together with
+  `lexicon.txt` / `tokens.txt` / `fsts/{phone,date,number}.fst`, is packaged as
+  `tts-model-v1.zip` (6 files, ~84 MB) and distributed as a separate GitHub
+  Release asset. It is **not** in this repository; copyright and licensing of the
+  model and voice data remain with the original author(s) — see the release notes.
+- **Build-time G2P data** (downloaded by `tools/tts/`, datasets themselves not
+  committed):
+  - **JMdict** (jmdict-simplified) — © EDRDG, CC BY-SA 4.0
+  - **open_jtalk 1.11 dictionary** — © 名古屋工業大学 / NAIST (see `COPYING` in the dictionary package)
+  - **CMUdict** (via the `cmudict` package) — BSD-2-Clause
+  - **pypinyin** word tables — MIT
+  - **`fsts/*.fst`** (rule FSTs for phone/date/number normalization) — Apache-2.0 (sherpa-onnx / icefall model directory)
+- **Vendored VITS front-end code** — `tools/tts/vendor/vits_text/` is a copy of MIT-licensed
+  VITS / vits-zh implementations; sources and sha256 are recorded in
+  `tools/tts/vendor/vits_text/SOURCE.md`.
+- **Derived assets shipped inside the APK** — `app/src/main/assets/tts/ja_reading_map.json`
+  (derived from JMdict + the open_jtalk dictionary) and
+  `app/src/main/assets/tts/en_words.bloom` (derived from the English entries of
+  `lexicon.txt`). Redistributing these derived files should respect the data
+  licenses listed above.
+- Full license breakdown: `tools/tts/README.md` §12.
+
+---
+
 ## Umeng+ (友盟+) U-APP Statistics SDK (NOT included)
 
 The Umeng+ analytics SDK is integrated as a Gradle dependency

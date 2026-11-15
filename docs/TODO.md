@@ -1,16 +1,16 @@
 # MeaPet 待办 · 代码审查跟踪
 
-> **本文档是全项目唯一在维护的待办清单。** 三份历史审查文档已归档到 [`docs/archive/`](archive/)。
+> **本文档是全项目唯一在维护的待办清单。** 历史代码审查文档（2026-08/09 的 48 项报告、逐条判定表、旧批次清单）已删除——其描述的是 1.7.2 之前的代码，结论已并入本文，留档会误导；需要追溯可查 git 历史。
 > 每次在此勾掉/新增条目时,顺手把对应的用户可见改动写进 [`CHANGELOG.md`](../CHANGELOG.md)。
+> 文档地图与各文档的权威性/维护状态见 [`docs/README.md`](README.md)。
 
 ## 权威入口
 
 | 内容 | 位置 |
 |---|---|
-| 修复的逐条记录(已发布口径) | `CHANGELOG.md` [1.7.2] |
-| 原 48 项审查完整证据 | `docs/archive/mea-pet-mobile-code-review.html`(2026-08-31) |
-| 48 项逐条判定表(属实/部分/剔除 + 证据行号) | `docs/archive/code-review-triage.md` |
-| 旧批次清单(内容已并入本文,留档备查) | `docs/archive/code-review-todo-2026-09-03.md` |
+| 修复的逐条记录(已发布口径) | `CHANGELOG.md`（[1.7.2] / [1.8.0]） |
+| TTS 迁移(1.8.0)结论、验证记录与遗留项 | [`docs/tts/migration-report-1.8.0.md`](tts/migration-report-1.8.0.md) |
+| 待办条目编号(#N / 新-N)的来源说明 | 见下方「命名对照」与「背景」（原审查文档已删除） |
 
 背景:48 条审查(08-31)→ 09-03 独立复核(剔除 #6、#43、#44,新增新-1~新-10)→ 09-05/06 真机验证发现候选-1 与两条用户反馈 bug。
 
@@ -25,12 +25,23 @@
 
 ---
 
-## ✅ 已完成(全部已并入 1.7.2,逐条细节见 CHANGELOG)
+## ✅ 已完成(1.7.2 / 1.8.0,逐条细节见 CHANGELOG)
 
 - **P0 批**(2026-08-31, `8371c3b`):#4 清空对话误清弹窗 · #7 persistAsync 静默丢数据 · #3 消息裁剪乱序 · #5 Markwon 缓存键 · #2+#46 吞 CancellationException;顺手 #39 Markdown 重复解析、#40 重试过滤 O(n²)→O(n)、#1 线程约束注释加固。
 - **小改动高收益批 = 旧「批次 1」**(PR #18, `34d8a29`):新-1 系统气泡「挤旧反延长」(改绝对 deadline + `BubbleLife`)、#18 网关错误详情可见、新-4 `onResume` 等悬浮窗停止加 2s 超时、#38 `LogExporter.waitFor` 加超时、新-6 TTS attn 护栏改内存封顶、新-7/#32 修正 `ConversationManager` 文档、新-10 重试边界守卫。附 `SystemBubblePolicy`/`ApiResponse` 回归单测。
 - **用户反馈批**(PR #20, `6eb4311`):发送失败回滚防「幽灵消息」、乐观/入史同 id、`mergeWithHistory` 按时间戳过滤、`retryLastMessage`→`retryMessage`(目标由 UI 按 id 指定,防重发旧消息 + LazyColumn 重复 key 崩溃)、分界丢失不再清空全部回复、`MessageList` 加 `distinctBy` 兜底、宽表格按段渲染 + 横向滚动 + 气泡宽度放开。附 14 条单测(全绿)。
 - **复核定案剔除**:#6(合法 Compose 用法)、#43、#44(理由见「不做」)。
+- **1.8.0 TTS 迁移批**(2026-11-01, `fc70902`..`aed66e6`):推理链整体换成 sherpa-onnx,连带作废本清单两条旧项——**#41 失效**(`DurationExpander` 连同旧 G2P/四模块引擎整体删除,无优化对象)、**「无 CI」失效**(`.github/workflows/ci.yml` 已上线:`:app:testDebugUnitTest` + PR 构建 debug APK)。新-6 的 attention 内存护栏代码与测试也随旧引擎删除。详见 [`tts/migration-report-1.8.0.md`](tts/migration-report-1.8.0.md)。
+- **英文数字读法**(未发布, 真机验收期修复):英文句中的阿拉伯数字在 App 归一化层预转换为英文数词(`3`→three、`12`→twelve),不再被 sherpa 中文 `ruleFsts` 读成 sān/shí èr;中文/日文上下文数字保持原路径;`3.5`/`10:30`/电话等复合或长数字不转换。补 3 组单测。日文数字读法见「待办 D」。
+
+---
+
+## 📌 待办 0 · 1.8.0 发布收尾(阻塞 v1.8.0 发布,tag 仍未打)
+
+- [ ] **真机验收** 按 [`tts/device-test-checklist.md`](tts/device-test-checklist.md) 逐条执行(21 条试听 + SIGILL/内存/打断/悬浮窗/删除重导入/1.7.x 升级迁移),结论回填清单 §3。**自动化部分已执行(2026-11-15,见清单 §A:构建/安装/APK 与模型 sha/冷启动/内存基线);余下试听与交互项待设备解锁后人工执行。**
+- [ ] **模型包 `lexicon.txt` 重传确认** — **已实测确认(2026-11-15)**:设备上有效模型包 6 个文件 sha256 与 `artifacts.json` 发布值逐字节一致,其中 `lexicon.txt`=**`97e2b4fb…`**(发布型行序);本地 `tools/tts/dist` 的生成型行序 `261ee0a7…` 与之内容相同、字节不同(App 只校验字节数)。**结论:Release 上的包即最终版,无需重传**;保持 `tts/model-package.md` 的双 sha 口径即可。
+- [ ] **打 tag `v1.8.0`** 走 `.github/workflows/release.yml`(须在 `main` 上且与 `versionName` 一致;当前最新 tag 仍为 `v1.7.2`)。
+- [ ] **1.9.0:删除 legacy TTS 迁移步骤** — 按 [`legacy-compat.md`](legacy-compat.md) §3/§4 删 3 个 step + 注册项 + 测试,保留迁移框架本身。
 
 ---
 
@@ -50,7 +61,7 @@
 
 按依赖排序,越靠前越先做:
 
-- [ ] **#13** 服务定位器 → CompositionLocal / 构造注入 — 7 处使用方:`MainActivity` / `ChatScreen` / `OverlayMenu` / `FloatingLive2dService` / `OverlayPalette` / `ChatViewModel` / `SettingsViewModel`。`MeaPetApplication.from()` 的 KDoc 自称"仅在无法构造注入时用",现状是全线在用;Compose 侧换 `LocalContainer`,ViewModel 侧换 `ViewModelProvider.Factory`。
+- [ ] **#13** 服务定位器 → CompositionLocal / 构造注入 — 1.8.0 后 `MeaPetApplication.from()` 只剩 **3 处**:`MainActivity` / `ChatViewModel` / `SettingsViewModel`(Compose 各屏与悬浮窗已改为参数传入)。剩余工作:Compose 侧换 `LocalContainer`、ViewModel 侧换 `ViewModelProvider.Factory`,让 `from()` 只作进程内兜底。
 - [ ] **#11 + 新-3** 消息源统一 — 让 `ConversationManager` 暴露 `StateFlow<List<ChatMessage>>` 成为唯一真相源,ViewModel 只订阅;触摸气泡改为独立 `overlayBubbles` 在 UI 层拼接。删掉 `mergeWithHistory`(含时间戳过滤兜底)、`takeLast(5)` 兜底、`reloadHistory` 的 ON_RESUME hook。
 - [ ] **#14 并发原语统一(含 #1 lifeMap)** — `ConversationManager` 的 `synchronized(lock)` 改协程 `Mutex` + `suspend`(主线程确实会进这把锁:ChatViewModel 三条路径);lifeMap 随 #11 收敛为 actor / 单协程状态机(#1 目前仅线程约束注释,actor 化在此一并做)。
 - [ ] **#16** 客户端生命周期统一 — `SettingsViewModel.fetchModels` 里 `reloadClient()` 对本次拉取无作用(用的是临时 new 的实例);改成"落盘 → `reloadClient()` → 用容器 `apiClient` 拉取",删临时客户端。
@@ -62,7 +73,7 @@
 
 ---
 
-## 📌 待办 C · 异味 / 规范 / 性能(可按主题打包提交)
+## 📌 待办 C · 异味 / 规范 / 工程(可按主题打包提交)
 
 **重复代码**
 
@@ -86,15 +97,17 @@
 - [ ] #30 + 新-2 `isStreaming` 处置 — main 源码从未置 true(`ChatService` 固定 `stream = false`)。要么删掉它连同 `ChatBubble` 的死 UI 分支与 `MarkdownText` 的 `closeUnclosedFences` 参数,要么真的把流式做出来,别留着当装饰
 - [ ] #28 清死代码:`Live2dSprite` `textureId` 构造参数(被同名形参遮蔽)、`Live2dView.setClearColor()`、`Type.kt` 注释掉的 16 行、`ApiRequest` 三个仅测试调用的方法、`MeaPetApplication.onTerminate()`、`Color.kt` 6 个零引用常量
 
-**性能**
-
-- [ ] #41 `DurationExpander` 稠密 attn 矩阵改稀疏/逐行流式(正常路径 12–36 MiB,不是数百 MB;优先级可放低,与新-6 的护栏一起看)
-
 **工程**
 
 - [ ] #33 手写 Animatable 三态机 → `AnimatedVisibility`(`OverlayMenu` 与 `AppearanceSettings` 逐字重复;`PrivacyDialog` 仅单向进场,另算)
-- [ ] #34 依赖拉齐:`coreKtx 1.10.1`/`lifecycleRuntime 2.6.1` 与 `agp 9.3.0`/`kotlin 2.2.10`/`composeBom 2026.02.01` 断层严重;Java 11 可升 17;`abiFilters` 缺 x86_64/x86(模拟器调试不便)
-- [ ] **无 CI** — 补一个只跑 `./gradlew testDebugUnitTest` 的 GitHub Actions workflow;对话/气泡链路的单测已补齐,CI 能兜住"纯函数测了、接线没测"这类漏洞
+- [ ] #34 依赖拉齐:`coreKtx 1.10.1`/`lifecycleRuntime 2.6.1` 与 `agp 9.3.0`/`kotlin 2.2.10`/`composeBom 2026.02.01` 断层严重;Java 11 可升 17(现 `sourceCompatibility`/`jvmTarget` 均为 11);`abiFilters` 只有 arm(v8a/v7a)——**不是疏漏**:sherpa-onnx AAR 只带 arm 原生库,带语音的构建无法出 x86 包,模拟器调试需要另出不含 TTS 的变体
+
+---
+
+## 📌 待办 D · 语音增强(1.9.0)
+
+- [ ] **日文上下文数字/日期读法** — 目前日文句里的阿拉伯数字走 sherpa 中文 `ruleFsts`,读作中文数词(`15 時`→shí wǔ shí、`9 月 1 日`→jiǔ yuè yī rì),假名数词(じゅうごじ)与日文日期(くがつついたち)都不对。需要:数字→假名数词 + 日文日期/量词特殊读法(1日→ついたち、9月→くがつ)与计数器规则。建议照 `docs/tts/architecture.md` §3 英文数字预转换的做法在 App 归一化层实现并补单测;用例来自 [`tts/device-test-checklist.md`](tts/device-test-checklist.md) #19/#21。
+- [ ] **逐句流式播放(首音延迟,先评估)** — 现状 `maxNumSentences=1` + 无回调,整段合成完才播:真机 24 字试听合成 3.1s(RTF≈1.1),200 字上限的回复首音可能 >10s。sherpa 提供 `generateWithConfigAndCallback` 逐句回调(AAR v2.0.1 已确认,回调返回 0 中止、1 继续),桌面 4 句实测首句 1.10s vs 整段 3.78s;`TtsAudioPlayer.writePcm` 已能增量写 PCM。改造点:`TtsManager` 的原子播放/打断/`speakSeq` 语义、句间停顿(`silenceScale`)、player 的 gen 过期逻辑。**并行(`maxNumSentences>1`)只快约 8%,不单独启用**。
 
 ---
 

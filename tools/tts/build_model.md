@@ -13,7 +13,7 @@
 | 图结构 | 混合精度单图：prior encoder / duration predictor 为 fp32，flow / decoder 为 fp16 |
 | metadata | `sample_rate=22050, n_speakers=1, speaker_id=0, add_blank=1, blank_id=0, language=Chinese, voice=Mea, comment=icefall, use_eos_bos=0, version=1, model_type=vits, jieba=1` |
 
-该 sha256 记在 [`artifacts.json`](../artifacts.json) 的 `model.onnx` 条目里，级别是
+该 sha256 记在 [`artifacts.json`](artifacts.json) 的 `model.onnx` 条目里，级别是
 `record-only`：`verify_assets.py` 找到就顺带校验，找不到不视为失败。
 
 ## 生成路径（一次性离线步骤，需要自备 checkpoint）

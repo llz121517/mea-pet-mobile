@@ -88,7 +88,7 @@ internal fun BackgroundWallpaperSection(
 ) {
     SectionTitle("背景壁纸")
     Text(
-        text = "从相册选一张图片作为主界面聊天背景，实时生效；悬浮窗保持透明",
+        text = "从相册选一张图片作为主界面聊天背景，实时生效",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = ALPHA_MUTED_TEXT),
         modifier = Modifier.padding(bottom = 8.dp)

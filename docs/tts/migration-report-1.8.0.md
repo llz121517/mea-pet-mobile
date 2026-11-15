@@ -1,7 +1,7 @@
 # MeaPet 1.8.0 · TTS 迁移 sherpa-onnx 详细报告
 
-> 版本：`1.8.0`（versionCode 14）｜分支 `dev`｜范围 `9cda4ca..fc70902`（17 commits）
-> 状态：代码与构建全部完成并通过单测；**真机语音验证待执行**（当前无 adb 设备，见 §9）；整分支 final review 进行中。
+> 版本：`1.8.0`（versionCode 14）｜分支 `dev`｜核心范围 `9cda4ca..fc70902`（17 commits），后续补充提交见 §12
+> 状态：代码与构建完成、单测全绿、整分支 final review **已通过**（§11，ship-ready）；**真机语音验证待执行**（见 §9 与 [`device-test-checklist.md`](device-test-checklist.md)）；**`v1.8.0` tag 尚未发布**（最新 tag 仍为 `v1.7.2`），发布收尾项见 [`../TODO.md`](../TODO.md) 待办 0。
 
 ---
 
@@ -85,7 +85,7 @@
 | fsts/date.fst | 59,154 | `eb8aa079…0e718` |
 | fsts/number.fst | 64,482 | `743f4021…8bd5bd` |
 
-（完整 sha256 与生成脚本见 `docs/tts/model-package.md`；打包脚本 `.tools/tts-spike/scripts/build_app_model_package.py`。）
+（完整 sha256 与生成脚本见 [`model-package.md`](model-package.md)；打包脚本已入库为 [`tools/tts/build_package.py`](../../tools/tts/build_package.py)，旧的 `.tools/tts-spike/scripts/build_app_model_package.py` 是 spike 一次性脚本、已被取代。）
 
 **两种分发方式**
 
@@ -100,7 +100,7 @@
 
 ### 日语上下文改写（`TtsTextNormalizer`）
 
-与桌面参考实现 `.tools/tts-spike/scripts/test_final_design.py::rewrite` **逐行为对齐**：
+与桌面参考实现 `.tools/tts-spike/scripts/test_final_design.py::rewrite`（本地 spike 存档，gitignored）**逐行为对齐**：
 
 1. 扫描连续汉字段；仅当该段**紧挨假名**（前或后）才视为日语片段；
 2. 片段内用 `ja_reading_map.word` 最长匹配（≤8 字）；
@@ -164,7 +164,7 @@ docs/tts/{architecture,model-package,device-test-checklist}.md
 | 模型包 | 6 文件逐字节与 `dist/manifest.json` 一致；commit 内资产 blob 与源文件 hash 完全相同 |
 | 桌面 spike（迁移前） | pth→单图 ONNX：ORT vs PyTorch 最大误差 3e-5；sherpa 加载/合成正常；13 条综合样本试听通过 |
 | AAR 依赖 | `debugRuntimeClasspath` 仅 `com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1`，无 onnxruntime-android |
-| **真机** | **未执行**（无 adb 设备），已交付 `docs/tts/device-test-checklist.md`（21 条用例） |
+| **真机** | **未执行**（无 adb 设备；截至 2026-11-15 仍未执行），已交付 [`device-test-checklist.md`](device-test-checklist.md)（21 条用例） |
 
 ---
 
@@ -258,4 +258,8 @@ docs/tts/{architecture,model-package,device-test-checklist}.md
 - `verify_assets.py` 8/8 通过：tokens / ja_reading_map / bloom / fsts 逐字节一致，lexicon 内容一致（仅 41,923 条单字行序不同，已注明）。
 - `model.onnx` 不在管线内（需外部 `G_latest.pth` + 模块拼接），来源与自备方式见 `tools/tts/build_model.md`。
 
-**仍待完成**：真机执行 `docs/tts/device-test-checklist.md`。
+**仍待完成（发布阻塞项，见 [`../TODO.md`](../TODO.md) 待办 0）**
+
+- 真机执行 [`device-test-checklist.md`](device-test-checklist.md)（当前 21 条用例全未勾选）；
+- 模型包 `lexicon.txt` 重传确认：发布包 sha `97e2b4fb…`，本地 `tools/tts/dist` 为生成型行序 `261ee0a7…`（内容一致、字节不同，App 只校验字节数）；
+- 打 `v1.8.0` tag 走 release workflow（当前最新 tag 仍为 `v1.7.2`）。

@@ -14,7 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- 暂无可记录变更 -->
+### Fixed
+
+- **英文句子中的数字按英文数词朗读** — 此前英文句里的阿拉伯数字会被 sherpa 的中文数字前端 `ruleFsts` 转成中文数词（`3`→sān、`12`→shí èr）。现 App 归一化层按上下文预转换：紧邻拉丁词的整数转英文基数词（three / twelve / one thousand …），中文与日文上下文保持原规则；`3.5`、`10:30`、电话号码等复合或超长数字不转换。日文句中的数字读法（`15 時`→じゅうごじ）仍是已知边界，排入 1.9.0。
+
+### Documentation
+
+- **文档整理** — `docs/` 新增总索引 [`docs/README.md`](docs/README.md)（文档地图、权威性说明、维护规则）；修正失效链接与过期说明（`TODO.md` 移除 1.8.0 已作废项并补「发布收尾」、TTS 迁移报告与真机清单状态对齐、客户端模块 README 路径纠正）；1.8.0 的实施计划归档到 [`docs/archive/plans/`](docs/archive/plans/)；**删除过时文档**：2026-08/09 的 48 项代码审查报告、逐条判定表、旧批次清单（描述 1.7.2 之前的代码，结论已并入 `TODO.md`）。
+- **`NOTICE.md` 补 TTS 第三方组件** — sherpa-onnx / ONNX Runtime，以及模型与 G2P 数据（JMdict、open_jtalk 词典、CMUdict、pypinyin、ruleFsts）和随 APK 分发的派生产物。
 
 ## [1.8.0] - 2026-11-01
 

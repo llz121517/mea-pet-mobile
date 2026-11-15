@@ -1,5 +1,11 @@
 # sherpa-onnx TTS Android 集成实施计划
 
+> **状态：✅ 已执行完成（1.8.0）。归档保留作过程记录，不再维护。**
+> 本文是逐任务实施计划（含代码与命令），下方勾选框**未回填**（执行时以 ledger 为准）。
+> 文中 `.tools/tts-spike/...` 路径与脚本名是执行当时的状态，生成管线其后已收编进 `tools/tts/`。
+> 结论与验证记录以 [`../tts/migration-report-1.8.0.md`](../../tts/migration-report-1.8.0.md) 为准；
+> 设计规则见 [`../../tts/architecture.md`](../../tts/architecture.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 App 现有「4 个 ONNX + 自写 G2P + 固定 22050Hz 播放器」的 VITS 推理链，替换为「sherpa-onnx AAR + 单图 model.onnx + 统一 lexicon + App 侧一层日文上下文改写 + ruleFsts」，保留 Mea 音色与 `TtsManager` 对外 API。

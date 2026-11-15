@@ -3,6 +3,7 @@
 > 框架位置：`app/src/main/java/com/meapet/mobile/legacy/`（**长期保留**）
 > 模块内纪律：见同目录 `README.md`
 > 本文记录**具体引用点、当前 step 的移除计划、删除步骤**，新增/删除迁移时必须同步更新本文。
+> 关联：1.9.0 的删除动作在 [`TODO.md`](TODO.md) 待办 0 跟踪；文档地图见 [`README.md`](README.md)。
 
 ---
 

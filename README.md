@@ -4,7 +4,7 @@ Android 上的 Live2D AI 桌宠
 
 本项目由 [suan-11/mea-pet-public](https://github.com/suan-11/mea-pet-public) 衍生。
 
-- 本项目由 LLM 驱动的 Agent 辅助开发
+wish coding 项目
 
 ---
 
@@ -196,10 +196,23 @@ secret 注入），改公共配置请直接改模板。
 - 重跑幂等（已存在的 Release 更新标题/正文并覆盖 APK）。
 - 本地预览正文 / 自检：`python tools/release_meta.py --tag v1.7.3 --notes-file -`、`python tools/test-release-meta.py`
 
+## 文档
+
+| 内容 | 位置 |
+|------|------|
+| 文档地图（**先看这里**） | [`docs/README.md`](docs/README.md) |
+| 待办与代码审查遗留项 | [`docs/TODO.md`](docs/TODO.md) |
+| 语音合成（TTS）设计、模型包与生成管线 | [`docs/tts/`](docs/tts/) · [`tools/tts/README.md`](tools/tts/README.md) |
+| 发布前真机验收清单 | [`docs/tts/device-test-checklist.md`](docs/tts/device-test-checklist.md) |
+| 旧版本迁移（1.7.x → 1.8.0）说明与移除计划 | [`docs/legacy-compat.md`](docs/legacy-compat.md) |
+| 变更记录 | [`CHANGELOG.md`](CHANGELOG.md) |
+| 第三方组件许可与署名 | [`NOTICE.md`](NOTICE.md) |
+
 ## 技术栈
 
 ```
 Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Markwon  ·  Coroutines  ·  GLSurfaceView
+sherpa-onnx  ·  Kotlin 2.2 / AGP 9.3 / minSdk 26
 ```
 
 ## Live2D 模型来源
