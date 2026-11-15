@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **窗口背景跟随主题** — Compose 侧主题解析后同步窗口背景色（此前只在 `onCreate` 设一次），切换主题或 Activity 重建、GL 画面短暂不可见时不再露出旧主题底色。
 - **LaTeX 字体表解析移出首帧** — `MarkdownText` 原先在首次组合时同步触发 jlatexmath 的 `TeXFormula` 类初始化（解析十来份字体/符号 XML，真机 debug 包实测 1s+），直接把首帧卡住；改为组合期只做毫秒级的 assets 加载器挂载，重量级预热由 `MainActivity` 投递到后台线程（`warmUpLatex`）。真机冷启动首帧 4.1s → 2.2s。
 - **更新检查的 JSON 解析移出主线程** — `UpdateChecker.check()` 里的 `parseRelease` 改到 `Dispatchers.Default`，启动时静默检测不再占用主线程。
+- **助手气泡去掉左侧圆形 M 头像** — 该头像只是装饰，去掉后助手消息与用户消息左右对称，气泡左缘统一对齐 12dp 边距。
 
 ### Fixed
 
