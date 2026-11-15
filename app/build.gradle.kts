@@ -132,12 +132,19 @@ android {
         compose = true
         buildConfig = true
     }
-    // sherpa-onnx AAR 内嵌 libsherpa-onnx-c-api.so + libsherpa-onnx-cxx-api.so +
-    // libsherpa-onnx-jni.so + libonnxruntime.so 共四个 .so，由上方 abiFilters
+    // sherpa-onnx AAR 内嵌 4 个 .so（jni / c-api / cxx-api / onnxruntime），由上方 abiFilters
     // 限制为仅 arm64-v8a / armeabi-v7a 两个 ABI；ONNX 模型仍走运行时下载 / 本地导入。
-    // OpenJTalk 词典/拼音表等大文本 assets 需禁压缩（否则 aapt 压缩后某些读取路径会失败）
-    aaptOptions {
-        noCompress += listOf("bin", "dic", "txt")
+    //
+    // 剔除 c-api / cxx-api 两个 .so：该 AAR 的 Kotlin API 只 System.loadLibrary("sherpa-onnx-jni")，
+    // jni.so 已静态链接 C/C++ API（DT_NEEDED 仅 libonnxruntime/liblog/libm/libdl），
+    // c-api 只被 cxx-api 依赖，二者在 App 里没有任何加载路径，v8a+v7a 合计省约 7.6MB。
+    packaging {
+        jniLibs {
+            excludes += listOf(
+                "**/libsherpa-onnx-c-api.so",
+                "**/libsherpa-onnx-cxx-api.so",
+            )
+        }
     }
     testOptions {
         unitTests {

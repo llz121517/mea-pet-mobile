@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **英文句中的数字按英文数词朗读** — App 归一化层按上下文预转换：紧邻拉丁词的整数转英文基数词（`3`→three、`12`→twelve、`1000`→one thousand …），不再落入 sherpa 中文数字前端 `ruleFsts`（会读成 sān、shí èr）；中文与日文上下文保持原规则，`3.5`、`10:30`、电话号码等复合或超长数字不转换。日文句中的数字读法（`15 時`→じゅうごじ）仍是已知边界，排入 1.9.0。
 - **语音模型包换新** — 新模型 6 个文件、约 84MB，与旧版 4 文件模型不兼容：升级后启动时会自动清理旧包并引导重新下载（网络受限可在设置页「从本地导入」）。
 - **移除 onnxruntime-android 依赖** — 原生库改由 sherpa AAR 提供，不再有重复 so，仅保留 arm64-v8a / armeabi-v7a 两个 ABI。
+- **Release 包剔除未使用的 sherpa C/C++ API 原生库** — sherpa AAR 带 `libsherpa-onnx-c-api.so` / `libsherpa-onnx-cxx-api.so`，但 App 使用的 Kotlin API 只加载 `libsherpa-onnx-jni.so`（jni 已静态链接 C/C++ API，且只有 cxx-api 依赖 c-api），两者在 App 内无任何加载路径；release 打包剔除后 v8a 单 ABI APK 36.2MB、双 ABI 54.3MB（原 61.6MB，减小约 7.4MB）。
 - **播放采样率跟随引擎输出** — 不再硬编码 22050Hz，换模型或换采样率不会变速、变调。
 - **删除自写 G2P 与拼音资产** — 相关引擎与约 8.9 万行词表全部移除，APK 减小约 1.65MB。
 - **破坏性操作统一为「立即执行 + 可撤销」** — 清除对话 / 清除全部记忆 / 恢复默认 System Prompt / 恢复默认壁纸四处原为弹窗确认、两段式点击或无提示直接删除，现统一改为点击即执行 + 底部倒计时撤销条（默认 5 秒，窗口内按快照回滚）；转屏切页不丢撤销机会，被新写入覆盖时窗口立即作废，壁纸到窗口到期才真正删文件。
@@ -30,11 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
-- **中文声调准确度为模型语料上限** — 该模型以日语语料微调，少数多音字声调仍不完美（如「今」）；听感与旧版一致，已确认接受，不作为本版回归项。
+- **中文声调准确度为模型语料上限** — 该模型以日语语料微调，少数多音字声调仍不完美；听感与旧版一致，已确认接受，不作为本版回归项。
 - **历史 SIGILL 坑已包含修复** — 1.7.1 记录的 ORT 1.23.2 KleidiAI SME 崩溃（[onnxruntime#26921](https://github.com/microsoft/onnxruntime/issues/26921)）在 sherpa 内嵌的 1.28.2 中已含修复。
 - **设置页 Debug 构建新增「试听文本」入口** — 任意文本直接合成，便于真机验证数字 / 日期 / 日语 / 中英混排；release 构建不显示该入口。
 - 版本号升至 1.8.0（versionCode 14）；applicationId 与签名不变，可覆盖安装，但**升级后必须重新准备语音模型**（见上）。
-- **流式播放的句间停顿** — 真机合成速度约为实时的 1.1 倍（RTF≈1.1），句子之间可能有轻微停顿，属流式播放的预期代价；多句并行（`maxNumSentences > 1`）实测只快约 8%，本版未启用。
+- **流式播放的句间停顿** — 真机合成速度约为实时的 1.1 倍（RTF≈1.1），句子之间可能有轻微停顿，属流式播放的预期代价；多句并行未启用。
+- **构建配置精简** — R8 增加 `-allowaccessmodification`（配合 optimize 规则做跨包类合并/内联）；移除 1.8.0 已无对应资产的旧 G2P 压缩豁免（`aaptOptions.noCompress` 的 `bin/dic/txt`），debug APK 同步从 80.9MB 降到 73.2MB。
 - 真机验收记录（已通过、已归档）见 [`docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md)。
 
 ### Documentation

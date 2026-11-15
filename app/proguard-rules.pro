@@ -3,6 +3,10 @@
 #  保留反射 / 序列化 / native 依赖，防止 Release 构建运行时崩溃
 # ─────────────────────────────────────────────────────────
 
+# 允许 R8 放宽被优化类的访问修饰符（配合 proguard-android-optimize.txt，
+# 才能做跨包类合并 / 内联等优化；被 -keep 的类不受影响）
+-allowaccessmodification
+
 # ── Live2D Cubism SDK ──────────────────────────────────
 # 模型 JSON / moc 解析、native 方法加载依赖反射与类名，禁止混淆移除
 -keep class com.live2d.sdk.cubism.** { *; }
