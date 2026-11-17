@@ -146,9 +146,14 @@ jobs:
           fi
           digest=""
           for apk in dist/*.APK; do
-            out="$("$apksigner" verify --print-certs "$apk")"
-            one="$(printf '%s\n' "$out" | sed -nE 's/^Signer #1 certificate SHA-256 digest: *//p' | head -n1)"
-            [ -n "$one" ] || { echo "::error::$apk 未通过签名校验"; exit 1; }
+            # 根因：APK 仅用 v2 方案签名（v1/v3 均为 false），apksigner 输出的证书行是
+            # "V2 Signer: certificate SHA-256 digest: ..."，而不是 "Signer #1 ..."，原 sed 永远匹配不到。
+            # 这里加 --verbose 并完整打印输出，按真实格式严格匹配（V<方案号> Signer），不放宽匹配规则。
+            out="$("$apksigner" verify --verbose --print-certs "$apk" 2>&1 | tr -d '\r')" || { echo "$out"; echo "::error::$apk 未通过 apksigner verify"; exit 1; }
+            echo "$out"
+            printf '%s\n' "$out" | grep -qx 'Verifies' || { echo "::error::$apk 未通过签名校验（输出中无 Verifies）"; exit 1; }
+            one="$(printf '%s\n' "$out" | sed -nE 's/^V[0-9.]+ Signer: certificate SHA-256 digest: *//p' | head -n1)"
+            [ -n "$one" ] || { echo "::error::$apk 无法解析签名证书 SHA-256 摘要"; exit 1; }
             if [ -n "$digest" ] && [ "$digest" != "$one" ]; then
               echo "::error::各 ABI 产物的签名证书不一致"; exit 1
             fi
