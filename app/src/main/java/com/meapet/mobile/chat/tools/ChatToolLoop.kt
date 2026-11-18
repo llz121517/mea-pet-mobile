@@ -59,11 +59,17 @@ class ChatToolLoop(
         private const val TAG = "ChatToolLoop"
 
         /**
-         * 最大请求轮数。6 轮足够「检索 → 纠错 → 再检索 → 最终回复」这类多步记忆操作；
-         * 太少（如 4）会在「删掉多余的两条再查一遍」这类请求上被卡到最后一轮，
-         * 而最后一轮 `tool_choice=none` 会让模型把工具调用当文本吐出来。
+         * 最大请求轮数。
+         *
+         * 取 12 轮（较宽松）：
+         * - 多步记忆操作（检索 → 删两条 → 再检索 → 回复）通常 5~6 轮；
+         * - 后续还会加入 **web 搜索等工具**，一次回答可能需要「检索记忆 → 搜索 → 再搜索 → 汇总」，
+         *   轮数上限太紧会把模型逼到最后一轮（`tool_choice=none`），反而让它把工具调用当文本吐出。
+         *
+         * 代价是异常情况下延迟会叠加（每轮一次请求），但正常对话极少逼近上限；
+         * 每轮内部的调用数另有 [DEFAULT_MAX_CALLS_PER_ROUND] 限制。
          */
-        const val DEFAULT_MAX_ROUNDS = 6
+        const val DEFAULT_MAX_ROUNDS = 12
 
         /** 单轮最多执行多少个工具调用（模型偶尔会一口气返回一串）。 */
         const val DEFAULT_MAX_CALLS_PER_ROUND = 8
