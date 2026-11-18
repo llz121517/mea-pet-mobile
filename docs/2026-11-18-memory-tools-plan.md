@@ -1,6 +1,6 @@
 # 1.9 计划：记忆工具化 + 记忆检索工具（修订版）
 
-> 状态：待实施（Dev 分支）。本版在 2026-11-18 调查报告基础上，按 M0 探针与已落地的存储层修订。
+> 状态：待实施（Dev 分支）。本版在 2026-11-18 调查报告基础上，按 M0 探针、已落地的存储层与多 system 兼容性调研修订。
 
 ## 0. 结论
 
@@ -17,12 +17,12 @@
 - 标准 `tools` / `tool_calls` 可用，`tool_choice: auto` 与 `none` 可用，且模型会在一轮里并行返回多个 tool_calls，执行器必须支持多调用并按 tool_call_id 一一回填。
 - `reasoning_content` 回传非必需（去掉后第二轮也成功），但仍建议原样透传 assistant message，兼容思考模式的端点。
 - 以 `tool_choice: none` 收尾可用；保持 tools 字段不变以稳定前缀。
-- usage 含 `prompt_cache_hit_tokens`，可用来验证工具化后的缓存收益；注意改了 tools 字段的位置或内容会使缓存失效一次。
-- 仍未核实：`required` / 指定函数名与思考模式的冲突（本方案不使用）；content 与写类 tool_calls 同时出现的频率（决定「终结型写入」优化是否可用，需统计）。
+- usage 含 `prompt_cache_hit_tokens`，可用来验证工具化后的缓存收益；改了 tools 字段的位置或内容会使缓存失效一次。
+- 仍未核实：`required` / 指定函数名与思考模式的冲突（本方案不使用）；content 与写类 tool_calls 同时出现的频率。
 
 ## 2. 与已落地存储层的关系
 
-- `MemoryStore` 接口已存在（save、saveAll、applyChanges、findById、getAll、getByType、getPersonaFacts、delete、deleteAll、clear、search、getRelevant、markAccessed、getStats、trimCache、loadFromDisk），`AppContainer` 已切到 `SqliteMemoryStore`。
+- `MemoryStore` 接口已存在，`AppContainer` 已切到 `SqliteMemoryStore`。
 - 本计划需要在接口上新增：`query(MemoryQuery)`（types、limit、sort，返回 items 与 totalMatched）。排序打分放在接口之上，FTS 仅作候选召回加速。
 - `MemoryManager`、`MemoryService` 已改依赖 `MemoryStore`，无需再做抽象工作。
 
@@ -46,7 +46,7 @@
 
 ## 5. 提示词与缓存
 
-- 首条 system 保留人设与用户人设；记忆协议说明改为几行固定的工具使用说明；删除尾部收尾提醒与相关回忆注入，尾部只剩时间。
+- 首条 system 保留人设与用户人设；记忆协议说明改为几行固定的工具使用说明；删除收尾提醒与相关回忆注入。
 - 缓存：P2（协议块回贴窗口滑动）消失；P1 由压缩计划处理；P3（人设变化使前缀失效）不变，可选方案是人设快照仅在压缩边界刷新。
 
 ## 6. 兼容与降级
@@ -59,7 +59,6 @@
 
 - 保留：MemoryOpsProtocolTest 等文本协议用例；MemoryManagerTest 增加工具模式断言。
 - 新增：MemoryToolExecutorTest；ChatToolLoop 用 FakeHttpClientEngine 按请求序号脚本化多轮响应；OpenAiCompatibleClientTest 对 tools 数组做字节快照；ChatServiceFailureRollbackTest 增加第二轮失败、取消、重试不重复写入的用例。
-- JVM 单测里的 SQLite 实现测试已具备 `JdbcSQLiteDriver` 基础设施。
 
 ## 8. 里程碑
 
@@ -73,8 +72,65 @@
 
 回滚：memoryMode 默认值切回 TEXT 即恢复当前行为；记忆与会话数据格式不变，无需数据回滚。
 
-## 9. 未核实项
+## 9. TailMode：每轮动态内容的发送方式（文件级常量 + KDoc）
 
-- deepseek-v4-flash 默认是否开启思考模式及关闭参数的确切形态。
+> 已定决策（2026-11-18）：**放弃尾部 system**，全面转用「并入最后一条 user」；额外保留「独立一条 user 消息」作备用。tail 只放每轮变化的动态内容，**不进历史**。
+> 依据：兼容性取决于后端与聊天模板；llama.cpp 对模板异常返回 500，vLLM/SGLang 返回 400，Gemma/Mistral 严格交替模板会直接报错；Anthropic 兼容层与 DeepSeek-V3 模板会把 system 提升到最前。
+
+### 9.1 定义位置与形式
+
+- 新建文件 `chat/TailMode.kt`，所有 tail 策略值提升为**文件级（top-level）常量**，不放进 `AppConfig` 或散落在 `ConversationManager`，调用方只引用常量名。
+- 每个常量与枚举都必须带 KDoc，写明含义、取值依据、降级关系和修改后果（影响前缀缓存）。
+
+```kotlin
+/**
+ * 每轮变化的附加上下文（时间等）在请求中的发送方式。tail 只承载动态内容，不写入会话历史。
+ *
+ * - [MERGE_USER]：并入最后一条 user 消息（默认）。兼容性最好，不引入新角色、不破坏
+ *   user/assistant 交替，所有聊天模板通用。
+ * - [SEPARATE_USER]：作为带标签的独立 user 消息（备用）。会产生连续两条 user，
+ *   对 Gemma/Mistral 等严格交替模板会报错，仅在探测确认接受连续 user 后启用。
+ *
+ * 已弃用尾部 system：llama.cpp 模板拒绝返回 500，vLLM/SGLang 返回 400，
+ * Gemma 2/Mistral 旧模板抛异常，Anthropic 兼容层与 DeepSeek-V3 模板会把它提升到最前。
+ *
+ * 修改默认值会使所有用户的前缀缓存失效一次，应视为版本事件。
+ */
+enum class TailMode { MERGE_USER, SEPARATE_USER }
+
+/** 默认方式：并入最后一条 user。 */
+internal val DEFAULT_TAIL_MODE: TailMode = TailMode.MERGE_USER
+
+/** 备用方式：独立 user 消息（仅探测确认接受连续 user 时可用）。 */
+internal val FALLBACK_TAIL_MODE: TailMode = TailMode.SEPARATE_USER
+
+/** 并入或独立时使用的标签（固定字符串，保证缓存前缀稳定）。 */
+internal const val TAIL_LABEL: String = "[系统提示]"
+```
+
+### 9.2 策略
+
+| 场景 | 方式 | 说明 |
+|---|---|---|
+| 所有端点（含回环、私网、云端） | MERGE_USER | 不做端点区分，兼容性最稳 |
+| DeepSeek 官方端点（可选优化） | 时间/语言/平台映射为 `latest_reminder`，其余走 MERGE_USER | 仅限 `日期,星期,地点,平台,语言` 五字段，须紧跟 user；格式非法返回 400；需随历史回传，与「tail 不进历史」冲突，故首版不启用，后续按实测决定 |
+| 备用 SEPARATE_USER | 仅在能力探测确认接受连续 user 时 | 严格交替模板禁用 |
+
+### 9.3 要点
+
+- tail 不进历史：每轮重新生成并并入当前最后一条 user 的发出副本，会话历史里保存的仍是原始用户文本。因此上一轮含 tail 的 user 在下一轮会不含 tail，分叉点就在该 user，之前的前缀保持稳定。此缓存影响为推断，未实测，用 `prompt_cache_hit_tokens` 验证。
+- 压缩摘要并入首条 system 末尾，不作为第二条 system；`buildApiMessages` 会过滤历史中的 system，摘要须单独传入。
+- 当最后一条消息是 tool 或带 tool_calls 的 assistant 时没有 user 可并入，tail 只允许放在 tool 结果之后，禁止夹在工具调用与结果之间。
+- 降级：并入 user 方案兼容性最好，原则上无需降级；若备用方式返回 400/500 且正文命中 `Conversation roles must alternate`、`Jinja Exception` 等，则退回 MERGE_USER，并按 `baseUrl+model` 缓存结果。
+
+### 9.4 新增测试
+
+MERGE_USER 与 SEPARATE_USER 的消息构造、严格交替校验、tail 不进历史（历史存原文）、前缀逐字节稳定、最后一条为 tool 的边界、摘要并入首条 system、遵从度回归（并入 user 对比独立 user）。
+
+## 10. 未核实项
+
+- deepseek-flash 默认是否开启思考模式及关闭参数的确切形态。
 - 写类 tool_calls 同时给出 content 的频率。
 - tools 字段在 DeepSeek 前缀缓存中的位置（可用 usage 的 cache_hit 字段在 M1 观察）。
+- 并入最后一条 user 与独立 user 的指令遵从度没有直接实测。
+- DeepSeek 官方端点对多条/末尾 system 的行为未核实（已弃用 tail system，影响降低）。
