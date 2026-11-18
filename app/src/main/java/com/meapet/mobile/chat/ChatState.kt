@@ -23,6 +23,7 @@ import com.meapet.mobile.memory.MemoryStats
  * @property canCompactContext 上下文是否已长到值得显示手动压缩入口
  * @property isCompacting 是否正在压缩
  * @property compactedUpToMessageId 已被摘要覆盖的最后一条消息 id（UI 在此后画「早些时候」分隔条）
+ * @property initialLoadDone 启动时首屏历史是否已加载完成（完成前不要自动滚动，避免滚到一半又插页）
  */
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
@@ -37,7 +38,8 @@ data class ChatUiState(
     val compactHint: Boolean = false,
     val canCompactContext: Boolean = false,
     val isCompacting: Boolean = false,
-    val compactedUpToMessageId: String? = null
+    val compactedUpToMessageId: String? = null,
+    val initialLoadDone: Boolean = false
 )
 
 /** UI 层展示的更新提示。 */

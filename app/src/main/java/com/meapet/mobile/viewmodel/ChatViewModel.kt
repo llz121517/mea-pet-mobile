@@ -108,6 +108,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
             // 冷启动恢复长会话后也要判断一次压缩提醒/入口
             refreshCompactionUi()
+            // 首屏历史已就绪：允许 UI 做「无动画」的初始定位（避免先滚到中途再插页）
+            _state.update { it.copy(initialLoadDone = true) }
         }
 
         // 监听 Live2D 触摸分区事件→添加系统消息气泡

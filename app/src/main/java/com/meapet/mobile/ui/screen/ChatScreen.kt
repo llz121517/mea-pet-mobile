@@ -182,11 +182,21 @@ private fun ChatPage(
 
     // 新消息或错误卡片出现时自动滚动到底部。
     // 错误卡片是列表末尾的额外 item，所以它出现时也要滚一次，否则用户看不到重试按钮。
-    // 以「最后一条消息的 id」为触发键而非条数：向上懒加载会在头部插入消息，
-    // 条数变化不能把用户拽回底部（LazyColumn 带 key，头部插入时滚动位置自动锚定）。
-    LaunchedEffect(state.messages.lastOrNull()?.id, state.error) {
+    // 自动滚动到底部。
+    // - 启动首屏：等 initialLoadDone 后用「无动画」定位到底部。否则会先滚到 35 条窗口的底部，
+    //   随后首屏 50 条在头部插入 15 条旧消息，LazyColumn 按 key 锚定原位置 → 停留在半途
+    //   （表现为打开 App 停在中间某条消息，且看到一段从上面滚下来的动画）。
+    // - 之后：新消息或错误卡片出现才带动画滚动。
+    // 触发键仍是「最后一条消息 id」而非条数：向上懒加载会在头部插消息，条数变化不能把用户拽回底部。
+    var pendingInitialScroll by remember { mutableStateOf(true) }
+    LaunchedEffect(state.initialLoadDone, state.messages.lastOrNull()?.id, state.error) {
+        if (!state.initialLoadDone) return@LaunchedEffect
         val lastIndex = state.messages.size - 1 + if (state.error != null) 1 else 0
-        if (lastIndex >= 0) {
+        if (lastIndex < 0) return@LaunchedEffect
+        if (pendingInitialScroll) {
+            listState.scrollToItem(lastIndex)
+            pendingInitialScroll = false
+        } else {
             listState.animateScrollToItem(lastIndex)
         }
     }
