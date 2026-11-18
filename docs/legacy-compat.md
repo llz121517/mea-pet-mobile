@@ -20,8 +20,10 @@
 
 | 被引用 | 引用方 | 说明 |
 |---|---|---|
-| `LegacyMigration.run(context, settingsManager, ttsModelManager)` | `AppContainer.warmUp()`（`app/src/main/java/com/meapet/mobile/app/AppContainer.kt`） | App 启动时异步执行，不 join、不阻塞其它预热 |
+| `LegacyMigration.run(context, settingsManager, ttsModelManager, memoryStore)` | `AppContainer.warmUp()`（`app/src/main/java/com/meapet/mobile/app/AppContainer.kt`） | App 启动时异步执行，不 join、不阻塞其它预热 |
 | `TtsModelManager.modelDir()` / `refreshState()` | `LegacyMigration.kt` | 只读目录路径与状态刷新，不写模型管理逻辑 |
+| `MemoryStore`（`memoryRepository`） | `AppContainer.warmUp()` → `LegacyMigration.run` | 供「运行状态从 DataStore 迁到数据库」类步骤读写 |
+| `SettingsManager.getLegacyExchangeCount()` / `clearLegacyExchangeCount()` | `steps/LegacyExchangeCountMigration.kt` | 仅供该 step 读取并删除旧键，业务代码不得使用 |
 | `LegacyMigrationContext` / `LegacyMigrationStep` | 仅本包内 `steps/*` | 业务代码不得直接引用 |
 
 ---
@@ -33,8 +35,10 @@
 | `steps/LegacyTtsModelCleanup.kt` | 旧版 4 模块 ONNX（`enc_p/dp/flow/dec.onnx`，~73MB）→ 删除整个 `tts_model` 目录，置 `ttsLegacyDetected` | 1.9.0 | `LegacyMigration.STEPS` |
 | `steps/LegacyTtsNativeLibCleanup.kt` | 旧版下载的 `tts_model/lib/<abi>/`（~20MB）→ 删除；置 `ttsLegacyDetected` | 1.9.0 | `LegacyMigration.STEPS` |
 | `steps/LegacyTtsSwitchReset.kt` | `ttsLegacyDetected == true` 时关闭两个语音开关（主界面 / 悬浮窗） | 1.9.0 | `LegacyMigration.STEPS`（必须排在最后） |
+| `steps/LegacyExchangeCountMigration.kt` | 旧版存在 DataStore 的对话轮数计数迁入 SQLite `meta` 表（库中已有则不覆盖），随后删除 DataStore 旧键 | 1.10.0 | `LegacyMigration.STEPS` |
 
-依赖关系：`LegacyTtsSwitchReset` 依赖前两步置位的 `ttsLegacyDetected`，因此 `STEPS` 顺序不可调整。
+依赖关系：`LegacyTtsSwitchReset` 依赖前两步置位的 `ttsLegacyDetected`，因此其前面两个 TTS step 顺序不可调整。
+`LegacyExchangeCountMigration` 不依赖其它 step，但必须在 `AppContainer.warmUp()` 完成 legacy JSON 导入、数据库已可打开之后运行（当前 `run` 即在此之后）。
 
 ---
 

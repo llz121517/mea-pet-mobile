@@ -1,6 +1,7 @@
 package com.meapet.mobile.legacy
 
 import com.meapet.mobile.legacy.steps.LegacyTtsNativeLibCleanup
+import com.meapet.mobile.memory.MemoryStore
 import com.meapet.mobile.settings.SettingsManager
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertFalse
@@ -17,9 +18,10 @@ class LegacyTtsNativeLibCleanupTest {
     val tmp = TemporaryFolder()
 
     private val settingsManager: SettingsManager = mock()
+    private val memoryStore: MemoryStore = mock()
     private val step = LegacyTtsNativeLibCleanup()
 
-    private fun context(dir: File) = LegacyMigrationContext(dir, settingsManager)
+    private fun context(dir: File) = LegacyMigrationContext(dir, settingsManager, memoryStore)
 
     @Test
     fun `旧版 native 库目录会被删除并置命中标记`() = runBlocking {

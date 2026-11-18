@@ -19,11 +19,19 @@ object SettingsKeys {
     const val SUMMARY_INTERVAL = "summary_interval"
 
     /**
-     * 距上次摘要已进行的对话轮数。
+     * 旧版遗留：距上次摘要已进行的对话轮数。
      *
-     * 不是用户设置，只是借 DataStore 存一个跨进程存活的计数器——放内存里的话
-     * 每次冷启动归零，默认 10 轮的间隔实际上永远走不满（见 MemoryManager）。
+     * 1.9.0 起该计数改存 SQLite（记忆存储的 `meta` 表），不再是设置项——
+     * 它是记忆运行状态而非用户配置，留在 DataStore 会混进「设置部分导出」。
+     *
+     * **预计移除版本：1.10.0**。当前仅由
+     * [com.meapet.mobile.legacy.steps.LegacyExchangeCountMigration] 读取并删除。
      */
+    @Deprecated(
+        "1.9.0 起计数已迁到 SQLite meta 表，此键仅供 legacy 迁移读取与删除",
+        ReplaceWith("SqliteMemoryStore.META_EXCHANGE_COUNT"),
+        level = DeprecationLevel.WARNING
+    )
     const val EXCHANGE_COUNT = "exchange_count"
     const val SYSTEM_PROMPT = "system_prompt"
     const val THEME_MODE = "theme_mode"  // "system" | "light" | "dark"

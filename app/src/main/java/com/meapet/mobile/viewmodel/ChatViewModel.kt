@@ -434,7 +434,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             // 快照含对话轮数：clearAll 会把它一并归零，撤销要一起还原
             val snapshot = memoryManager.getAllMemories()
-            val exchangeCount = container.settingsManager.getExchangeCount()
+            val exchangeCount = memoryManager.getExchangeCount()
             memoryManager.clearAll()
             _state.update {
                 it.copy(
@@ -530,7 +530,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             is ChatUndo.ClearMemory -> {
                 viewModelScope.launch {
                     memoryManager.restoreAll(undo.snapshot)
-                    container.settingsManager.setExchangeCount(undo.exchangeCount)
+                    memoryManager.setExchangeCount(undo.exchangeCount)
                     _state.update { it.copy(pendingUndo = null) }
                 }
             }

@@ -37,6 +37,10 @@ class MemoryRepository(
     /** 是否已从磁盘加载过（成功或损坏丢弃均算完成）。 */
     private var loaded = false
 
+    /** 对话轮数计数（JSON 备胎版不落盘，见 [getExchangeCount]）。 */
+    @Volatile
+    private var exchangeCount = 0
+
     companion object {
         private const val TAG = "MemoryRepository"
         private const val FILE_NAME = "meapet_memories.json"
@@ -280,6 +284,17 @@ class MemoryRepository(
             persistLocked()
         }
         Log.d(TAG, "Memory cache trimmed")
+    }
+
+    /**
+     * 距上次摘要的对话轮数（JSON 备胎实现：仅内存，进程重启归零）。
+     *
+     * SQLite 实现见 [com.meapet.mobile.storage.SqliteMemoryStore]（持久化在 meta 表）。
+     */
+    override suspend fun getExchangeCount(): Int = exchangeCount
+
+    override suspend fun setExchangeCount(count: Int) {
+        exchangeCount = count
     }
 
     // ── 持久化 ────────────────────────────────────────

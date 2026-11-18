@@ -29,4 +29,15 @@ interface MemoryStore {
     suspend fun getStats(): MemoryStats
     suspend fun trimCache()
     suspend fun loadFromDisk()
+
+    /**
+     * 距上次短期记忆摘要已进行的对话轮数（跨进程存活）。
+     *
+     * 属记忆系统运行状态而非用户设置，故不放 DataStore：避免混进「设置部分导出」，
+     * 也便于与记忆清除/撤销同处一个存储。
+     */
+    suspend fun getExchangeCount(): Int
+
+    /** 写回轮数计数（摘要触发后归零）。 */
+    suspend fun setExchangeCount(count: Int)
 }

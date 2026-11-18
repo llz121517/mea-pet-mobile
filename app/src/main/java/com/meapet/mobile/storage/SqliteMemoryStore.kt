@@ -23,6 +23,9 @@ class SqliteMemoryStore(
     companion object {
         private const val TAG = "SqliteMemoryStore"
 
+        /** meta 表中存对话轮数计数的键。属记忆运行状态，不是用户设置。 */
+        internal const val META_EXCHANGE_COUNT = "memory_exchange_count"
+
         private fun isPermanent(item: MemoryItem) =
             item.type == MemoryType.FACTUAL || item.type == MemoryType.CORE_TRAIT
     }
@@ -150,6 +153,23 @@ class SqliteMemoryStore(
     /** 预热：触发数据库打开与 schema 迁移。 */
     override suspend fun loadFromDisk() {
         db.withConnection { }
+    }
+
+    override suspend fun getExchangeCount(): Int = db.withConnection { c ->
+        c.prepare("SELECT value FROM meta WHERE key = ?").use { st ->
+            st.bindText(1, META_EXCHANGE_COUNT)
+            if (st.step()) st.getText(0).toIntOrNull() ?: 0 else 0
+        }
+    }
+
+    override suspend fun setExchangeCount(count: Int) {
+        db.transaction { c ->
+            c.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)").use { st ->
+                st.bindText(1, META_EXCHANGE_COUNT)
+                st.bindText(2, count.toString())
+                st.step()
+            }
+        }
     }
 
     // ── 内部（均在 db 锁内调用）─────────────────────────

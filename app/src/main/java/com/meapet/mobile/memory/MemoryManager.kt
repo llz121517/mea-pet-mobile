@@ -50,8 +50,9 @@ class MemoryManager(
     /**
      * 在一次对话交换完成后调用。
      *
-     * 轮数计数落在 DataStore 里（[SettingsManager.getExchangeCount]）而非内存：
+     * 轮数计数存在记忆存储里（[MemoryStore.getExchangeCount]）而非内存：
      * 一次会话往往聊不满默认的 10 轮，计数器若随进程归零，摘要就永远不会触发。
+     * 也不放 DataStore——它是记忆运行状态而非用户设置，避免混进「设置部分导出」。
      *
      * @param ops 模型本轮回复中声明的记忆操作（由 [MemoryOpsProtocol.extract] 解析得到）
      */
@@ -71,9 +72,9 @@ class MemoryManager(
         // 计数改为「攒够 interval 就清零重来」而非取模：用户中途调小间隔时，
         // 取模会让已攒下的轮数错过触发点，白等一整个新周期
         val reached = stateMutex.withLock {
-            val count = settingsManager.getExchangeCount() + 1
+            val count = repository.getExchangeCount() + 1
             val reached = count >= interval
-            settingsManager.setExchangeCount(if (reached) 0 else count)
+            repository.setExchangeCount(if (reached) 0 else count)
             Log.d(TAG, "Exchange $count/$interval since last summary")
             reached
         }
@@ -153,6 +154,20 @@ class MemoryManager(
     }
 
     /**
+     * 读取距上次摘要的对话轮数。
+     *
+     * 供「清除记忆」的撤销快照使用：清空会把计数归零，撤销要一并还原。
+     */
+    suspend fun getExchangeCount(): Int = repository.getExchangeCount()
+
+    /**
+     * 写回对话轮数计数（撤销「清除记忆」时还原用）。
+     */
+    suspend fun setExchangeCount(count: Int) {
+        stateMutex.withLock { repository.setExchangeCount(count) }
+    }
+
+    /**
      * 获取所有记忆（按重要性排序）。
      */
     suspend fun getAllMemories(): List<MemoryItem> = repository.getAll()
@@ -177,7 +192,7 @@ class MemoryManager(
      */
     suspend fun clearAll() {
         repository.clear()
-        stateMutex.withLock { settingsManager.setExchangeCount(0) }
+        stateMutex.withLock { repository.setExchangeCount(0) }
         Log.i(TAG, "Memory manager reset")
     }
 

@@ -98,6 +98,18 @@ class SqliteMemoryStoreTest {
     }
 
     @Test
+    fun exchangeCountPersistsInMetaTable() = runBlocking {
+        val s = SqliteMemoryStore(db)
+        assertEquals(0, s.getExchangeCount())
+        s.setExchangeCount(7)
+        assertEquals(7, s.getExchangeCount())
+        // 换一个实例仍读得到（存在库里而非内存）
+        assertEquals(7, SqliteMemoryStore(db).getExchangeCount())
+        s.setExchangeCount(0)
+        assertEquals(0, s.getExchangeCount())
+    }
+
+    @Test
     fun clearRemovesEverythingAndStatsCount() = runBlocking {
         val s = SqliteMemoryStore(db)
         s.saveAll(listOf(item("a"), item("b", MemoryType.LONG_TERM)))

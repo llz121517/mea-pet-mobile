@@ -1,6 +1,7 @@
 package com.meapet.mobile.legacy
 
 import com.meapet.mobile.legacy.steps.LegacyTtsSwitchReset
+import com.meapet.mobile.memory.MemoryStore
 import com.meapet.mobile.settings.SettingsManager
 import kotlinx.coroutines.runBlocking
 import org.junit.Rule
@@ -17,11 +18,12 @@ class LegacyTtsSwitchResetTest {
     val tmp = TemporaryFolder()
 
     private val settingsManager: SettingsManager = mock()
+    private val memoryStore: MemoryStore = mock()
     private val step = LegacyTtsSwitchReset()
 
     private fun context(legacyDetected: Boolean): LegacyMigrationContext {
         val dir = tmp.newFolder()
-        return LegacyMigrationContext(dir, settingsManager).apply {
+        return LegacyMigrationContext(dir, settingsManager, memoryStore).apply {
             ttsLegacyDetected = legacyDetected
         }
     }

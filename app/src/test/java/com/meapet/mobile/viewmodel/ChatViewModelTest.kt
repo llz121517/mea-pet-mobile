@@ -361,7 +361,7 @@ class ChatViewModelTest {
             MemoryItem(id = "m2", content = "猫叫 Mea", type = MemoryType.FACTUAL)
         )
         wheneverBlocking { memoryManager.getAllMemories() }.thenReturn(memories)
-        whenever(settingsManager.getExchangeCount()).thenReturn(7)
+        wheneverBlocking { memoryManager.getExchangeCount() }.thenReturn(7)
         val vm = ChatViewModel(application)
         vm.advance()
 
@@ -377,7 +377,7 @@ class ChatViewModelTest {
         vm.advance()
 
         verifyBlocking(memoryManager) { restoreAll(memories) }
-        verifyBlocking(settingsManager) { setExchangeCount(7) }
+        verifyBlocking(memoryManager) { setExchangeCount(7) }
         assertNull(vm.state.value.pendingUndo)
     }
 

@@ -238,8 +238,23 @@ class SettingsManager(context: Context) {
     /** 颜色预设 ID（"default" | "ocean" | ...）。 */
     fun getColorPreset(): String = currentPrefs()[KEY_COLOR_PRESET] ?: SettingsKeys.Defaults.COLOR_PRESET
 
-    /** 距上次摘要已进行的对话轮数（跨进程存活，见 [SettingsKeys.EXCHANGE_COUNT]）。 */
-    fun getExchangeCount(): Int = currentPrefs()[KEY_EXCHANGE_COUNT] ?: 0
+    /**
+     * 仅 1.9 存储迁移使用：读取旧版存在 DataStore 的对话轮数计数。
+     *
+     * 该计数已迁到 SQLite（记忆存储的 meta 表），见
+     * [com.meapet.mobile.legacy.steps.LegacyExchangeCountMigration]。
+     * 返回 null 表示旧值不存在或已被迁走。
+     */
+    fun getLegacyExchangeCount(): Int? = currentPrefs()[KEY_EXCHANGE_COUNT]
+
+    /**
+     * 仅 1.9 存储迁移使用：删除旧版存在 DataStore 的计数字段。
+     *
+     * 迁移完成后调用，保证设置里不再残留这项运行状态（「设置部分导出」不会再带上它）。
+     */
+    suspend fun clearLegacyExchangeCount() {
+        cachedPrefs = dataStore.edit { prefs -> prefs.remove(KEY_EXCHANGE_COUNT) }
+    }
 
     /** 主界面语音开关。 */
     fun isTtsMainEnabled(): Boolean = currentPrefs()[KEY_TTS_MAIN_ENABLED] ?: SettingsKeys.Defaults.TTS_MAIN_ENABLED
@@ -312,10 +327,6 @@ class SettingsManager(context: Context) {
 
     suspend fun setSummaryInterval(interval: Int) {
         cachedPrefs = dataStore.edit { prefs -> prefs[KEY_SUMMARY_INTERVAL] = interval }
-    }
-
-    suspend fun setExchangeCount(count: Int) {
-        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_EXCHANGE_COUNT] = count }
     }
 
     suspend fun setSystemPrompt(prompt: String) {
