@@ -7,6 +7,9 @@ import com.meapet.mobile.BuildConfig
 import com.meapet.mobile.client.KtorHttpClientEngine
 import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.chat.ChatService
+import com.meapet.mobile.chat.tools.ChatToolLoop
+import com.meapet.mobile.memory.search.BigramMemorySearcher
+import com.meapet.mobile.memory.tools.MemoryToolExecutor
 import com.meapet.mobile.chat.compaction.ContextCompactor
 import com.meapet.mobile.chat.ConversationManager
 import com.meapet.mobile.chat.ConversationStore
@@ -161,6 +164,18 @@ class AppContainer(
         )
     }
 
+    /** 记忆工具循环（仅 enableMemoryTools 开启时创建）。 */
+    private val chatToolLoop: ChatToolLoop? by lazy {
+        if (!config.enableMemoryTools) {
+            null
+        } else {
+            ChatToolLoop(
+                clientProvider = { apiClient },
+                executor = MemoryToolExecutor(BigramMemorySearcher(memoryRepository))
+            )
+        }
+    }
+
     /** 聊天服务（核心业务逻辑）。 */
     val chatService: ChatService by lazy {
         ChatService(
@@ -173,7 +188,8 @@ class AppContainer(
             config = config,
             compactionStore = compactionStore,
             compactor = contextCompactor,
-            budgetProvider = { contextCapacity.budget() }
+            budgetProvider = { contextCapacity.budget() },
+            toolLoop = chatToolLoop
         )
     }
 

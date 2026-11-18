@@ -37,6 +37,13 @@ data class AppConfig(
     val memoryOpsEchoTurns: Int = 3,
     val enableMemory: Boolean = true,
     val enableAutoSummary: Boolean = true,
+    /**
+     * 是否启用「记忆工具调用」模式（function calling）。
+     *
+     * 1.9 首个版本默认关闭：先用文本协议跑通全部功能，工具化在验证稳定后再灰度开启。
+     * 开启后模型通过 `search_memory` 等工具主动检索/写入记忆，替代文本协议块。
+     */
+    val enableMemoryTools: Boolean = false,
     val appVersion: String = "1.0.0",
     /**
      * TTS 模型包（6 个文件）的下载基础地址，尾部不带文件名；远端以平铺文件名上传

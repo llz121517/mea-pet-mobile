@@ -67,7 +67,12 @@ class ChatService(
     private val compactionStore: CompactionStore? = null,
     private val compactor: ContextCompactor? = null,
     private val estimator: TokenEstimator = TokenEstimator(),
-    private val budgetProvider: () -> Int = { CompactionConfig.COMPACT_HINT_TOKENS }
+    private val budgetProvider: () -> Int = { CompactionConfig.COMPACT_HINT_TOKENS },
+    /**
+     * 记忆工具循环（null = 未启用）。仅在 [AppConfig.enableMemoryTools] 为 true 时使用，
+     * 否则走原来的单次请求 + 文本协议链路。
+     */
+    private val toolLoop: com.meapet.mobile.chat.tools.ChatToolLoop? = null
 ) {
     companion object {
         private const val TAG = "ChatService"
@@ -211,17 +216,31 @@ class ChatService(
                 // 校准用的原始估算（未乘校准系数），与 usage.prompt_tokens 同口径比较
                 val rawEstimate = apiMessages.sumOf { estimator.rawTokens(it) }
 
-                // 5) 发送请求
-                val responseJson = clientProvider().chatCompletion(requestBody)
-
-                // 5b) 用服务端真实 prompt_tokens 校准本地估算（缺 usage 时保持原比值）
-                ApiResponse.usagePromptTokens(responseJson)?.let { actual ->
-                    estimator.calibrate(rawEstimate, actual)
+                // 5) 发送请求。开启记忆工具时走工具循环（可能多轮），否则单次请求。
+                val loop = if (config.enableMemoryTools) toolLoop else null
+                val assistantContent: String? = if (loop != null) {
+                    val loopResult = try {
+                        loop.run(model, jsonMessages, temperature, maxTokens)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Tool loop failed", e)
+                        conversationManager.removeMessage(userMessage.id)
+                        return@withContext Result.failure(e)
+                    }
+                    // 用第一轮的真实 prompt_tokens 校准本地估算
+                    loopResult.firstPromptTokens?.let { actual -> estimator.calibrate(rawEstimate, actual) }
+                    loopResult.finalContent
+                } else {
+                    val responseJson = clientProvider().chatCompletion(requestBody)
+                    // 5b) 用服务端真实 prompt_tokens 校准本地估算（缺 usage 时保持原比值）
+                    ApiResponse.usagePromptTokens(responseJson)?.let { actual ->
+                        estimator.calibrate(rawEstimate, actual)
+                    }
+                    ApiResponse.chatCompletionContent(responseJson)?.takeIf { it.isNotBlank() }
                 }
 
                 // 6) 解析响应（choices 为空或 content 缺失视为失败，不入史）
-                val assistantContent = ApiResponse.chatCompletionContent(responseJson)
-                    ?.takeIf { it.isNotBlank() }
                 if (assistantContent == null) {
                     Log.w(TAG, "Unexpected API response: missing choices or content")
                     conversationManager.removeMessage(userMessage.id)
