@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -513,29 +514,33 @@ private fun MemoryDialog(
 }
 
 /**
- * 分隔条：`──────── 今天 ────────` 样式的淡色横线 + 居中文案。
+ * 分隔条：`──── 今天 ────` 样式的淡色短横线 + 居中文案。
  *
- * 用于「按天时间」与「早些时候（已压缩）」两种分隔，两者共用同一组件，仅文案不同。
+ * 横线用固定短宽度（不铺满整行），视觉更轻，不会把消息列表切得太重。
  */
 @Composable
 private fun DividerLabel(text: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         val lineColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-        HorizontalDivider(modifier = Modifier.weight(1f), color = lineColor)
+        HorizontalDivider(modifier = Modifier.width(DIVIDER_LINE_WIDTH), color = lineColor)
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             modifier = Modifier.padding(horizontal = 10.dp)
         )
-        HorizontalDivider(modifier = Modifier.weight(1f), color = lineColor)
+        HorizontalDivider(modifier = Modifier.width(DIVIDER_LINE_WIDTH), color = lineColor)
     }
 }
+
+/** 分隔条两侧横线的固定长度（短横线，避免铺满整行）。 */
+private val DIVIDER_LINE_WIDTH = 50.dp
 
 /**
  * 按天分隔条文案：相邻两条消息跨自然日（设备本地时区）时返回文案，同一天返回 null。

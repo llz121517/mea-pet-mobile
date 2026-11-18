@@ -270,6 +270,13 @@ class AppContainer(
     /** 启动时异步加载持久化的记忆与会话历史（不阻塞主线程）。 */
     fun warmUp() {
         warmUpJob = applicationScope.launch(Dispatchers.IO) {
+            // 0. 等 DataStore 内存快照就绪再做任何依赖设置的事。
+            //    否则冷启动早期构建的 apiClient 会拿到空 API Key（→ 首次请求 401），
+            //    容量探测也会因 401 被负缓存 5 分钟（表现为「读不到上下文窗口」）。
+            settingsManager.awaitLoaded()
+            // 丢弃可能在快照就绪前用空 Key 建好的客户端，保证首次请求就是正确配置
+            reloadClient()
+
             // 1.9 存储迁移：旧 JSON -> SQLite 必须先于会话/记忆的首次访问同步完成（旧 JSON 文件保留不动）
             com.meapet.mobile.storage.LegacyJsonImporter(database, context.filesDir).importIfNeeded()
             // 首次启动：后台探测上下文容量（失败降级兜底）

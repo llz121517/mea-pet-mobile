@@ -101,6 +101,11 @@ class ContextCapacityProvider(
             }
             // 失败同样写入（tokens = null），借 TTL 充当负缓存
             cache = Entry(key, tokens, clock())
+            if (tokens != null) {
+                Log.i("ContextCapacity", "probed capacity=$tokens for $key")
+            } else {
+                Log.w("ContextCapacity", "probe returned no capacity for $key, falling back")
+            }
         }
     }
 }
