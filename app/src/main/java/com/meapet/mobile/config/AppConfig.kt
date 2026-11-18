@@ -40,10 +40,13 @@ data class AppConfig(
     /**
      * 是否启用「记忆工具调用」模式（function calling）。
      *
-     * 1.9 首个版本默认关闭：先用文本协议跑通全部功能，工具化在验证稳定后再灰度开启。
-     * 开启后模型通过 `search_memory` 等工具主动检索/写入记忆，替代文本协议块。
+     * 开启后模型通过 `search_memory` / `create_memory` / `update_memory` / `delete_memory`
+     * 主动检索与写入记忆，替代文本围栏协议（不再注入协议说明与关键词回忆）。
+     *
+     * 端点不支持 tools（400/422）时，ChatService 会在本会话内自动回退到单次请求，
+     * 保证聊天不中断。
      */
-    val enableMemoryTools: Boolean = false,
+    val enableMemoryTools: Boolean = true,
     val appVersion: String = "1.0.0",
     /**
      * TTS 模型包（6 个文件）的下载基础地址，尾部不带文件名；远端以平铺文件名上传

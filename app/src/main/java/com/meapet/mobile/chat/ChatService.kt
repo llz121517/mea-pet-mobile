@@ -78,7 +78,28 @@ class ChatService(
 ) {
     companion object {
         private const val TAG = "ChatService"
+
+        /**
+         * 工具模式下的固定说明（拼进首条 system）。
+         *
+         * 必须**字节级稳定**：它属于请求前缀，含任何动态内容都会破坏缓存。
+         * 只讲「何时用」，具体参数由 tools schema 承担。
+         */
+        internal const val MEMORY_TOOL_HINT: String =
+            "【记忆工具】你不确定是否记过用户过去说过的事时，先调用 search_memory 检索；" +
+                "用户明确要求记住、忘记或纠正信息时，用 create_memory / update_memory / delete_memory。" +
+                "不要记录你自己的提议或猜测。"
+
+        /** 端点「不支持 tools」的典型状态码（OpenAI 兼容网关多为 400，部分为 422）。 */
+        private val TOOLS_UNSUPPORTED_STATUS = setOf(400, 404, 422, 501)
     }
+
+    /**
+     * 当前端点是否已被判定为不支持 tools（会话内缓存，避免每轮都先失败一次）。
+     * 一旦置位，本进程内退回单次请求（文本协议）。
+     */
+    @Volatile
+    private var toolsUnsupported = false
 
     /** 压缩状态（内存缓存，首次访问时从存储加载）。 */
     @Volatile
@@ -127,7 +148,9 @@ class ChatService(
                 // 2) 获取记忆上下文（拆成稳定段与每轮都变的尾部段，见 MemoryContext）。
                 //    工具模式下不再注入文本协议说明与关键词回忆：记忆通过 search_memory 工具检索，
                 //    两套协议同时存在会让模型在「输出围栏块」和「调用工具」之间摇摆。
-                val memoryContext = if (config.enableMemoryTools) null else memoryManager?.buildContext(content)
+                val toolsOn = config.enableMemoryTools && !toolsUnsupported
+                val memoryContext = if (toolsOn) null else memoryManager?.buildContext(content)
+                val stableContext = if (toolsOn) MEMORY_TOOL_HINT else (memoryContext?.stable ?: "")
 
                 // 3) 获取设置
                 val systemPrompt = settingsManager.getSystemPrompt()
@@ -192,11 +215,11 @@ class ChatService(
                 lastContextTokens = estimated
 
                 // 记忆关闭时 stable 为空（模型压根没收到协议说明），历史里也不该回贴协议块
-                val memoryOn = !memoryContext?.stable.isNullOrBlank()
+                val memoryOn = stableContext.isNotBlank() && !toolsOn
                 val compactionEnabled = compactionStore != null && compactor != null
                 val apiMessages = conversationManager.buildApiMessages(
                     systemPrompt = systemPrompt,
-                    stableContext = memoryContext?.stable ?: "",
+                    stableContext = stableContext,
                     tailFragments = tailFragments,
                     maxMessages = if (compactionEnabled) Int.MAX_VALUE else config.maxHistoryMessages,
                     memoryOpsEchoTurns = if (memoryOn) config.memoryOpsEchoTurns else 0,
@@ -224,21 +247,34 @@ class ChatService(
                 // 校准用的原始估算（未乘校准系数），与 usage.prompt_tokens 同口径比较
                 val rawEstimate = apiMessages.sumOf { estimator.rawTokens(it) }
 
-                // 5) 发送请求。开启记忆工具时走工具循环（可能多轮），否则单次请求。
-                val loop = if (config.enableMemoryTools) toolLoop else null
+                // 5) 发送请求。工具模式下走工具循环（可能多轮）；端点明确不支持 tools 时
+                //    本次自动降级为单次请求，并记住「本会话不再尝试工具」，保证聊天不中断。
+                val loop = if (toolsOn) toolLoop else null
                 val assistantContent: String? = if (loop != null) {
-                    val loopResult = try {
-                        loop.run(model, jsonMessages, temperature, maxTokens)
+                    try {
+                        val loopResult = loop.run(model, jsonMessages, temperature, maxTokens)
+                        // 用第一轮的真实 prompt_tokens 校准本地估算
+                        loopResult.firstPromptTokens?.let { actual -> estimator.calibrate(rawEstimate, actual) }
+                        loopResult.finalContent
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        Log.w(TAG, "Tool loop failed", e)
-                        conversationManager.removeMessage(userMessage.id)
-                        return@withContext Result.failure(e)
+                        if (e is com.meapet.mobile.client.exception.ApiException &&
+                            e.statusCode in TOOLS_UNSUPPORTED_STATUS
+                        ) {
+                            Log.w(TAG, "Endpoint rejected tools (HTTP ${e.statusCode}), falling back to single request")
+                            toolsUnsupported = true
+                            val fallbackJson = clientProvider().chatCompletion(requestBody)
+                            ApiResponse.usagePromptTokens(fallbackJson)?.let { actual ->
+                                estimator.calibrate(rawEstimate, actual)
+                            }
+                            ApiResponse.chatCompletionContent(fallbackJson)?.takeIf { it.isNotBlank() }
+                        } else {
+                            Log.w(TAG, "Tool loop failed", e)
+                            conversationManager.removeMessage(userMessage.id)
+                            return@withContext Result.failure(e)
+                        }
                     }
-                    // 用第一轮的真实 prompt_tokens 校准本地估算
-                    loopResult.firstPromptTokens?.let { actual -> estimator.calibrate(rawEstimate, actual) }
-                    loopResult.finalContent
                 } else {
                     val responseJson = clientProvider().chatCompletion(requestBody)
                     // 5b) 用服务端真实 prompt_tokens 校准本地估算（缺 usage 时保持原比值）
