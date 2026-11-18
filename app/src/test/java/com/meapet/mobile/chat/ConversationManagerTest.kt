@@ -36,16 +36,16 @@ class ConversationManagerTest {
         val sent = mgr.buildApiMessages(
             systemPrompt = "你是梅尔",
             stableContext = "【记忆协议】…",
-            tailContext = "【当前时间】现在"
+            tailFragments = listOf("【当前时间】现在")
         )
 
-        assertEquals(3, sent.size)
+        assertEquals(2, sent.size)
         assertEquals(ChatRole.system, sent[0].role)
         assertEquals("你是梅尔\n\n【记忆协议】…", sent[0].content)
         assertEquals(ChatRole.user, sent[1].role)
         // 每轮都变的内容必须排在历史之后，否则它之后的一切都无法命中 prefix cache
-        assertEquals(ChatRole.system, sent[2].role)
-        assertEquals("【当前时间】现在", sent[2].content)
+        assertEquals(1, sent.count { it.role == ChatRole.system })
+        assertEquals("你好\n\n$TAIL_LABEL\n【当前时间】现在", sent[1].content)
     }
 
     @Test
@@ -53,7 +53,7 @@ class ConversationManagerTest {
         val mgr = ConversationManager()
         mgr.addMessage(ChatMessage(role = ChatRole.user, content = "你好"))
 
-        val sent = mgr.buildApiMessages(systemPrompt = "你是梅尔", tailContext = "  ")
+        val sent = mgr.buildApiMessages(systemPrompt = "你是梅尔", tailFragments = listOf("  "))
 
         assertEquals(2, sent.size)
         assertEquals(ChatRole.user, sent.last().role)

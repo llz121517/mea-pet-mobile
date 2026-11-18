@@ -160,13 +160,14 @@ class ConversationManager(
      * ```
      * system  : systemPrompt + stableContext   ← 基本不变
      * 历史消息 ...                              ← 追加式增长（裁剪见 trimWindow）
-     * system  : tailContext                    ← 每轮都变，但压在最尾部
+     * 最后一条 user 的发出副本 += tail           ← 每轮都变，只并入副本，不进历史
      * ```
      *
      * @param systemPrompt 系统提示词
      * @param stableContext 轮与轮之间基本不变的上下文，拼进首条 system 消息
-     * @param tailContext 每轮都变的上下文（时间、相关回忆、收尾提醒），
-     *   作为对话历史之后的尾部 system 消息；空则不生成该条
+     * @param tailFragments 每轮都变的上下文片段（时间等，有序），拼成 tail 后按 [tailMode]
+     *   并入最后一条 user 的发出副本，**不写入历史**；全部为空则不附加
+     * @param tailMode tail 的发送方式，见 [TailMode]
      * @param maxMessages 最大消息数（滑动窗口，从末尾取）
      * @param memoryOpsEchoTurns 最近多少条助手消息要把 [ChatMessage.memoryOpsBlock] 贴回正文
      *   （0 = 不贴）。仅影响发给模型的副本，不改动会话历史本身
@@ -174,7 +175,8 @@ class ConversationManager(
     fun buildApiMessages(
         systemPrompt: String,
         stableContext: String = "",
-        tailContext: String = "",
+        tailFragments: List<String> = emptyList(),
+        tailMode: TailMode = DEFAULT_TAIL_MODE,
         maxMessages: Int = 30,
         memoryOpsEchoTurns: Int = 0
     ): List<ChatMessage> {
@@ -191,10 +193,13 @@ class ConversationManager(
 
         return buildList {
             add(ChatMessage(role = ChatRole.system, content = systemContent))
-            addAll(echoMemoryOps(recentMessages, memoryOpsEchoTurns))
-            if (tailContext.isNotBlank()) {
-                add(ChatMessage(role = ChatRole.system, content = tailContext))
-            }
+            addAll(
+                applyTail(
+                    echoMemoryOps(recentMessages, memoryOpsEchoTurns),
+                    composeTail(tailFragments),
+                    tailMode
+                )
+            )
         }
     }
 

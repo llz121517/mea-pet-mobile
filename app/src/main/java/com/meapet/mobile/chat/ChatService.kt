@@ -88,17 +88,17 @@ class ChatService(
 
                 // 4) 构建 API 请求。时间与记忆回忆一起压在历史之后：都是每轮都变的内容，
                 //    放前面会让排在其后的协议说明与全部历史都无法命中服务端 prefix cache
-                val tailContext = listOfNotNull(
+                val tailFragments = listOfNotNull(
                     TimeContext.describe(),
                     memoryContext?.tail?.takeIf { it.isNotBlank() }
-                ).joinToString("\n\n")
+                )
 
                 // 记忆关闭时 stable 为空（模型压根没收到协议说明），历史里也不该回贴协议块
                 val memoryOn = !memoryContext?.stable.isNullOrBlank()
                 val apiMessages = conversationManager.buildApiMessages(
                     systemPrompt = systemPrompt,
                     stableContext = memoryContext?.stable ?: "",
-                    tailContext = tailContext,
+                    tailFragments = tailFragments,
                     maxMessages = config.maxHistoryMessages,
                     memoryOpsEchoTurns = if (memoryOn) config.memoryOpsEchoTurns else 0
                 )
