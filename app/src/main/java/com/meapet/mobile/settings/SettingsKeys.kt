@@ -24,7 +24,7 @@ object SettingsKeys {
      * 1.9.0 起该计数改存 SQLite（记忆存储的 `meta` 表），不再是设置项——
      * 它是记忆运行状态而非用户配置，留在 DataStore 会混进「设置部分导出」。
      *
-     * **预计移除版本：1.10.0**。当前仅由
+     * **预计移除版本：1.11.0**。当前仅由
      * [com.meapet.mobile.legacy.steps.LegacyExchangeCountMigration] 读取并删除。
      */
     @Deprecated(

@@ -317,7 +317,7 @@ class AppContainer(
             listOf(
                 launch { memoryRepository.loadFromDisk() },
                 launch { conversationManager.restoreFromRepository() },
-                // 版本迁移：启动时异步执行（框架长期保留；当前 TTS step 预计 1.9.0 移除，见 docs/legacy-compat.md）
+                // 版本迁移：启动时异步执行（框架长期保留；当前 TTS step 预计 1.11.0 移除，见 docs/legacy-compat.md）
                 launch { LegacyMigration.run(context, settingsManager, ttsModelManager, memoryRepository) }
             ).joinAll()
         }

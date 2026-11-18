@@ -7,7 +7,7 @@ import com.meapet.mobile.legacy.LegacyMigrationStep
 /**
  * 旧版 TTS 残留命中后关闭两个语音开关（1.7.x → 1.8.0 升级路径）。
  *
- * **预计移除版本：1.9.0**
+ * **预计移除版本：1.11.0**
  * **被引用点：`LegacyMigration.STEPS`**（必须排在模型 / native 库清理之后，依赖前两步置位
  * [LegacyMigrationContext.ttsLegacyDetected]）
  *

@@ -3,7 +3,7 @@
 > 框架位置：`app/src/main/java/com/meapet/mobile/legacy/`（**长期保留**）
 > 模块内纪律：见同目录 `README.md`
 > 本文记录**具体引用点、当前 step 的移除计划、删除步骤**，新增/删除迁移时必须同步更新本文。
-> 关联：1.9.0 的删除动作在 [`TODO.md`](TODO.md) 待办 0 跟踪；文档地图见 [`README.md`](README.md)。
+> 关联：1.11.0 的删除动作在 [`TODO.md`](TODO.md) 待办 0 跟踪；文档地图见 [`README.md`](README.md)。
 
 ---
 
@@ -32,17 +32,17 @@
 
 | 文件 | 职责 | 预计移除版本 | 被引用点 |
 |---|---|---|---|
-| `steps/LegacyTtsModelCleanup.kt` | 旧版 4 模块 ONNX（`enc_p/dp/flow/dec.onnx`，~73MB）→ 删除整个 `tts_model` 目录，置 `ttsLegacyDetected` | 1.9.0 | `LegacyMigration.STEPS` |
-| `steps/LegacyTtsNativeLibCleanup.kt` | 旧版下载的 `tts_model/lib/<abi>/`（~20MB）→ 删除；置 `ttsLegacyDetected` | 1.9.0 | `LegacyMigration.STEPS` |
-| `steps/LegacyTtsSwitchReset.kt` | `ttsLegacyDetected == true` 时关闭两个语音开关（主界面 / 悬浮窗） | 1.9.0 | `LegacyMigration.STEPS`（必须排在最后） |
-| `steps/LegacyExchangeCountMigration.kt` | 旧版存在 DataStore 的对话轮数计数迁入 SQLite `meta` 表（库中已有则不覆盖），随后删除 DataStore 旧键 | 1.10.0 | `LegacyMigration.STEPS` |
+| `steps/LegacyTtsModelCleanup.kt` | 旧版 4 模块 ONNX（`enc_p/dp/flow/dec.onnx`，~73MB）→ 删除整个 `tts_model` 目录，置 `ttsLegacyDetected` | 1.11.0 | `LegacyMigration.STEPS` |
+| `steps/LegacyTtsNativeLibCleanup.kt` | 旧版下载的 `tts_model/lib/<abi>/`（~20MB）→ 删除；置 `ttsLegacyDetected` | 1.11.0 | `LegacyMigration.STEPS` |
+| `steps/LegacyTtsSwitchReset.kt` | `ttsLegacyDetected == true` 时关闭两个语音开关（主界面 / 悬浮窗） | 1.11.0 | `LegacyMigration.STEPS`（必须排在最后） |
+| `steps/LegacyExchangeCountMigration.kt` | 旧版存在 DataStore 的对话轮数计数迁入 SQLite `meta` 表（库中已有则不覆盖），随后删除 DataStore 旧键 | 1.11.0 | `LegacyMigration.STEPS` |
 
 依赖关系：`LegacyTtsSwitchReset` 依赖前两步置位的 `ttsLegacyDetected`，因此其前面两个 TTS step 顺序不可调整。
 `LegacyExchangeCountMigration` 不依赖其它 step，但必须在 `AppContainer.warmUp()` 完成 legacy JSON 导入、数据库已可打开之后运行（当前 `run` 即在此之后）。
 
 ---
 
-## 4. 删除单个 step 的步骤（以 TTS 组为例，预计 1.9.0）
+## 4. 删除单个 step 的步骤（以 TTS 组为例，预计 1.11.0）
 
 1. 删除 `steps/LegacyTtsModelCleanup.kt`、`steps/LegacyTtsNativeLibCleanup.kt`、`steps/LegacyTtsSwitchReset.kt`；
 2. 从 `LegacyMigration.STEPS` 移除对应注册项；若该组独占字段（如 `LegacyMigrationContext.ttsLegacyDetected`）已无人使用，一并清理；

@@ -7,7 +7,7 @@ import com.meapet.mobile.legacy.LegacyMigrationStep
 /**
  * 把 1.8 及更早存在 DataStore 的对话轮数计数迁入 SQLite，并删除旧键（1.8.x → 1.9.0 升级路径）。
  *
- * **预计移除版本：1.10.0**
+ * **预计移除版本：1.11.0**
  * **被引用点：`LegacyMigration.STEPS`**
  *
  * 计数是记忆系统的运行状态而非用户设置，1.9.0 起改存记忆存储的 `meta` 表

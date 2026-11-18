@@ -8,7 +8,7 @@ import java.io.File
 /**
  * 旧版 4 模块 ONNX 模型清理（1.7.x → 1.8.0 升级路径）。
  *
- * **预计移除版本：1.9.0**
+ * **预计移除版本：1.11.0**
  * **被引用点：`LegacyMigration.STEPS`**
  *
  * 旧版模型 `enc_p/dp/flow/dec.onnx`（约 73MB）与新 sherpa 6 文件包不兼容，检测到任一即**整目录删除**
