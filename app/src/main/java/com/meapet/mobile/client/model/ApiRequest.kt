@@ -2,6 +2,7 @@ package com.meapet.mobile.client.model
 
 import com.meapet.mobile.client.MultipartPart
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -21,20 +22,46 @@ object ApiRequest {
      * 构建 `/chat/completions` 请求体。
      *
      * @param messages 消息列表，由 [textMessage] 或 [visionMessage] 生成
+     * @param tools 工具定义数组（null = 不输出该字段，保持旧请求体逐字节不变）
+     * @param toolChoice `auto` / `none` / 指定函数；null = 不输出
      */
     fun chatCompletion(
         model: String,
         messages: List<JsonObject>,
         temperature: Double? = null,
         maxTokens: Int? = null,
-        stream: Boolean = false
+        stream: Boolean = false,
+        tools: JsonArray? = null,
+        toolChoice: String? = null
     ): String = buildJsonObject {
         put("model", model)
         put("messages", buildJsonArray { messages.forEach { add(it) } })
         temperature?.let { put("temperature", it) }
         maxTokens?.let { put("max_tokens", it) }
         put("stream", stream)
+        // 工具字段放在最后且固定顺序：tools schema 是缓存前缀的一部分，必须字节级稳定
+        tools?.let { put("tools", it) }
+        toolChoice?.let { put("tool_choice", it) }
     }.let { json.encodeToString(it) }
+
+    /**
+     * `role=tool` 的工具结果消息。
+     *
+     * @param toolCallId 对应 assistant 消息里 `tool_calls[].id`，必须一一对应
+     */
+    fun toolMessage(toolCallId: String, content: String): JsonObject = buildJsonObject {
+        put("role", "tool")
+        put("tool_call_id", toolCallId)
+        put("content", content)
+    }
+
+    /**
+     * 把模型返回的 assistant 原始 message 原样放回下一轮请求。
+     *
+     * **不要重新拼装**：思考模式要求 `reasoning_content` 等字段随消息回传，
+     * 重新构造会丢字段导致接口报错。这里只做原样透传。
+     */
+    fun assistantRawMessage(rawMessage: JsonObject): JsonObject = rawMessage
 
     /** 纯文本消息。 */
     fun textMessage(role: String, content: String): JsonObject = buildJsonObject {

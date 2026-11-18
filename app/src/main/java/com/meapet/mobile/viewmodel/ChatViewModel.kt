@@ -301,6 +301,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             is ChatEvent.DismissUpdateNotice -> dismissUpdateNotice()
             is ChatEvent.CompactContext -> compactContext()
             is ChatEvent.DismissCompactHint -> dismissCompactHint()
+            is ChatEvent.DismissCompactionNotice -> dismissCompactionNotice()
         }
     }
 
@@ -621,10 +622,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(isCompacting = true, compactHint = false) }
         viewModelScope.launch {
             val result = chatService.compactContext()
+            val folded = result.getOrNull()
+            val notice = if (folded != null) {
+                "整理好啦，前面的 ${folded} 条已经收进摘要喵"
+            } else {
+                result.exceptionOrNull()?.message ?: "整理失败了，稍后再试试喵"
+            }
             _state.update {
                 it.copy(
                     isCompacting = false,
-                    error = result.exceptionOrNull()?.message ?: it.error
+                    compactionNotice = notice
                 )
             }
             compactHintShown = false
@@ -635,6 +642,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** 用户忽略本次压缩提醒：同一会话不再重复弹。 */
     private fun dismissCompactHint() {
         _state.update { it.copy(compactHint = false) }
+    }
+
+    /** 压缩结果提示已展示。 */
+    private fun dismissCompactionNotice() {
+        _state.update { it.copy(compactionNotice = null) }
     }
 
     /**

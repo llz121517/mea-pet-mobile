@@ -39,4 +39,7 @@ sealed interface ChatEvent {
 
     /** 压缩提醒已展示（同一会话不重复弹）。 */
     data object DismissCompactHint : ChatEvent
+
+    /** 压缩结果提示已展示。 */
+    data object DismissCompactionNotice : ChatEvent
 }

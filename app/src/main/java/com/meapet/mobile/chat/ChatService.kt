@@ -308,8 +308,10 @@ class ChatService(
      * 手动压缩上下文（用户点「整理一下」/菜单「压缩上下文」）。
      *
      * 与自动压缩共用同一套滚动摘要与按轮对齐规则；失败时给出可展示的原因，不做重试风暴。
+     *
+     * @return 成功时返回本次折叠的消息条数（供 UI 反馈），失败时返回可展示的原因
      */
-    suspend fun compactContext(): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun compactContext(): Result<Int> = withContext(Dispatchers.IO) {
         try {
             val store = compactionStore
                 ?: return@withContext Result.failure(IllegalStateException("当前不支持整理上下文"))
@@ -337,7 +339,7 @@ class ChatService(
             compactionState = newState
             refreshContextTokens()
             Log.i(TAG, "Manual compaction done, $fold message(s) folded")
-            Result.success(Unit)
+            Result.success(fold)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

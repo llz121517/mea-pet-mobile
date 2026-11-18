@@ -26,6 +26,64 @@ object ApiResponse {
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
+     * 一次工具调用（`tool_calls[]` 的元素）。
+     *
+     * @property arguments 模型给出的参数是 **JSON 字符串**，需要调用方二次解析
+     */
+    data class ParsedToolCall(val id: String, val name: String, val arguments: String)
+
+    /**
+     * 解析后的一条 assistant 消息。
+     *
+     * @property raw 原始 message JsonObject（含 `tool_calls`、`reasoning_content` 等全部字段），
+     *   下一轮请求必须**原样回传**它，不要重新拼装
+     * @property content 文本内容（有工具调用时可能为 null 或空串）
+     * @property toolCalls 本轮的并行工具调用（按数组顺序）
+     * @property finishReason `stop` / `tool_calls` / `length` 等
+     */
+    data class ParsedMessage(
+        val raw: JsonObject,
+        val content: String?,
+        val toolCalls: List<ParsedToolCall>,
+        val finishReason: String?
+    )
+
+    /**
+     * 从 `/chat/completions` 响应中解析首个 choice 的完整 assistant 消息。
+     *
+     * 与 [chatCompletionContent] 并存：老调用方继续用后者，工具循环用本方法。
+     *
+     * @return `choices` 为空或结构不符时返回 null（此时视为接口异常）
+     */
+    fun chatCompletionMessage(body: String): ParsedMessage? = try {
+        val choice = json.parseToJsonElement(body).jsonObject["choices"]
+            ?.jsonArray?.firstOrNull()
+            ?.jsonObject ?: return null
+        val message = choice["message"]?.jsonObject ?: return null
+        val content = (message["content"] as? JsonPrimitive)?.contentOrNull
+        val toolCalls = (message["tool_calls"] as? JsonArray)?.mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            val fn = obj["function"]?.jsonObject ?: return@mapNotNull null
+            val id = (obj["id"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+            val name = (fn["name"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+            // arguments 是 JSON 字符串；个别端点直接给对象，这里统一成字符串
+            val args = when (val a = fn["arguments"]) {
+                is JsonPrimitive -> a.contentOrNull ?: "{}"
+                is JsonObject -> a.toString()
+                else -> "{}"
+            }
+            ParsedToolCall(id = id, name = name, arguments = args)
+        } ?: emptyList()
+        val finishReason = (choice["finish_reason"] as? JsonPrimitive)?.contentOrNull
+        ParsedMessage(raw = message, content = content, toolCalls = toolCalls, finishReason = finishReason)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w(TAG, "Failed to parse assistant message: ${e.message}")
+        null
+    }
+
+    /**
      * 从 `/chat/completions` 响应中提取首个 choice 的 `message.content`。
      *
      * @return 消息文本；`choices` 为空、content 缺失或结构不符时返回 null

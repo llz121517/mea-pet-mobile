@@ -66,6 +66,7 @@ import com.meapet.mobile.ui.component.AppSnackbarHost
 import com.meapet.mobile.ui.component.ChatBubble
 import com.meapet.mobile.ui.component.ChatInputBar
 import com.meapet.mobile.ui.component.ErrorBubble
+import com.meapet.mobile.ui.component.MeaBusyBar
 import com.meapet.mobile.ui.component.OverlayMenu
 import com.meapet.mobile.ui.component.UndoSnackbarEffect
 import com.meapet.mobile.ui.screen.settings.SettingsScreen
@@ -252,6 +253,20 @@ private fun ChatPage(
         chatViewModel.onEvent(ChatEvent.DismissCompactHint)
     }
 
+    // 压缩进行中：贴在输入栏上方的「Mea 还在…」状态条（不是 Snackbar），见 MeaBusyBar
+
+    // 压缩完成/失败：一次性反馈（含折叠条数或失败原因）
+    LaunchedEffect(state.compactionNotice) {
+        val notice = state.compactionNotice ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(
+            message = notice,
+            actionLabel = "知道了",
+            duration = SnackbarDuration.Long,
+            withDismissAction = true
+        )
+        chatViewModel.onEvent(ChatEvent.DismissCompactionNotice)
+    }
+
     // 整页躲开软键盘：输入栏、撤销条、消息列表都随键盘收窄（窗口不再替我们
     // resize/pan，见 MainActivity 的 edge-to-edge 说明）
     Box(modifier = Modifier.fillMaxSize().imePadding()) {
@@ -282,14 +297,19 @@ private fun ChatPage(
             modifier = Modifier.align(Alignment.TopEnd)
         )
 
-        // ── Layer 3: 底部输入栏 ──
-        ChatInputBar(
-            inputText = state.inputText,
-            onInputChange = { chatViewModel.onEvent(ChatEvent.UpdateInput(it)) },
-            onSend = { chatViewModel.onEvent(ChatEvent.SendMessage(state.inputText)) },
-            isLoading = state.isLoading,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
+        // ── Layer 3: 底部输入栏（压缩中上方多一条「Mea 还在…」状态条）──
+        Column(modifier = Modifier.align(Alignment.BottomCenter)) {
+            if (state.isCompacting) {
+                MeaBusyBar(text = "Mea 还在整理前面的内容…")
+            }
+            ChatInputBar(
+                inputText = state.inputText,
+                onInputChange = { chatViewModel.onEvent(ChatEvent.UpdateInput(it)) },
+                onSend = { chatViewModel.onEvent(ChatEvent.SendMessage(state.inputText)) },
+                isLoading = state.isLoading,
+                modifier = Modifier
+            )
+        }
 
         // ── Layer 4: Snackbar（提示 + 破坏性操作的二次确认） ──
         // 动作文案跟随主题 primary，见 AppSnackbarHost

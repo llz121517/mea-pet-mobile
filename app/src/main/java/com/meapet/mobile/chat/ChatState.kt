@@ -39,7 +39,9 @@ data class ChatUiState(
     val canCompactContext: Boolean = false,
     val isCompacting: Boolean = false,
     val compactedUpToMessageId: String? = null,
-    val initialLoadDone: Boolean = false
+    val initialLoadDone: Boolean = false,
+    /** 压缩完成后的一次性提示（成功/失败文案），由 UI 弹完即清空。 */
+    val compactionNotice: String? = null
 )
 
 /** UI 层展示的更新提示。 */
