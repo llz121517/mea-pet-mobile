@@ -164,16 +164,25 @@ class AppContainer(
         )
     }
 
-    /** 记忆工具循环（仅 enableMemoryTools 开启时创建）。 */
-    private val chatToolLoop: ChatToolLoop? by lazy {
+    /** 记忆工具执行器（仅 enableMemoryTools 开启时创建；工具循环与 turn 提交共用同一实例）。 */
+    private val memoryToolExecutor: MemoryToolExecutor? by lazy {
         if (!config.enableMemoryTools) {
             null
         } else {
-            ChatToolLoop(
-                clientProvider = { apiClient },
-                executor = MemoryToolExecutor(BigramMemorySearcher(memoryRepository))
+            MemoryToolExecutor(
+                search = BigramMemorySearcher(memoryRepository),
+                store = memoryRepository
             )
         }
+    }
+
+    /** 记忆工具循环（仅 enableMemoryTools 开启时创建）。 */
+    private val chatToolLoop: ChatToolLoop? by lazy {
+        val executor = memoryToolExecutor ?: return@lazy null
+        ChatToolLoop(
+            clientProvider = { apiClient },
+            executor = executor
+        )
     }
 
     /** 聊天服务（核心业务逻辑）。 */
@@ -189,7 +198,8 @@ class AppContainer(
             compactionStore = compactionStore,
             compactor = contextCompactor,
             budgetProvider = { contextCapacity.budget() },
-            toolLoop = chatToolLoop
+            toolLoop = chatToolLoop,
+            memoryTools = memoryToolExecutor
         )
     }
 

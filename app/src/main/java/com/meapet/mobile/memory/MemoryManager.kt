@@ -168,6 +168,17 @@ class MemoryManager(
     }
 
     /**
+     * 提交一个 turn 内工具产生的记忆变更（暂存后一次性落库）。
+     *
+     * 由 ChatService 在整个 turn 成功后调用；失败/取消直接丢弃，不调用本方法。
+     */
+    suspend fun applyToolChanges(changes: com.meapet.mobile.memory.tools.PendingMemoryChanges) {
+        if (changes.isEmpty) return
+        repository.applyChanges(changes.upserts, changes.deletes)
+        Log.i(TAG, "Applied tool memory changes: ${changes.upserts.size} upsert, ${changes.deletes.size} delete")
+    }
+
+    /**
      * 获取所有记忆（按重要性排序）。
      */
     suspend fun getAllMemories(): List<MemoryItem> = repository.getAll()

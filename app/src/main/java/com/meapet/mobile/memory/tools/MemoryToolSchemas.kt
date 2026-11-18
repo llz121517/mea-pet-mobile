@@ -35,9 +35,12 @@ object MemoryToolSchemas {
     /** 可写入的记忆类型（LONG_TERM 只由摘要产生，模型不可直接创建）。 */
     private val WRITABLE_TYPES = listOf("SHORT_TERM", "CORE_TRAIT", "FACTUAL")
 
-    /** 全部工具定义（固定顺序）。 */
+    /** 全部工具定义（固定顺序：search → create → update → delete）。 */
     val ALL: JsonArray = buildJsonArray {
         add(searchMemory())
+        add(createMemory())
+        add(updateMemory())
+        add(deleteMemory())
     }
 
     private fun searchMemory(): JsonObject = functionTool(
@@ -72,6 +75,93 @@ object MemoryToolSchemas {
                 }
             }
             putJsonArray("required") { add("query") }
+        }
+    )
+
+    private fun createMemory(): JsonObject = functionTool(
+        name = CREATE_MEMORY,
+        description = "记录一条以后还能用到的、用户自述或已确认的信息。禁止记录你自己的提议、猜测或推测。",
+        parameters = buildJsonObject {
+            put("type", "object")
+            putJsonObject("properties") {
+                putJsonObject("type") {
+                    put("type", "string")
+                    put("description", "记忆类型；长期记忆由系统摘要生成，不可直接创建")
+                    putJsonArray("enum") { WRITABLE_TYPES.forEach { add(it) } }
+                }
+                putJsonObject("content") {
+                    put("type", "string")
+                    put("description", "写清主语，如「主人说明天要面试」")
+                }
+                putJsonObject("importance") {
+                    put("type", "number")
+                    put("minimum", 0)
+                    put("maximum", 1)
+                }
+                putJsonObject("keywords") {
+                    put("type", "array")
+                    put("description", "3~8 个查找词：用户以后聊到相关话题时会说出口的词")
+                    putJsonObject("items") { put("type", "string") }
+                }
+            }
+            putJsonArray("required") { add("content"); add("keywords") }
+        }
+    )
+
+    private fun updateMemory(): JsonObject = functionTool(
+        name = UPDATE_MEMORY,
+        description = "更正或补充一条已有记忆（用 search_memory 拿到的 id）。目标不存在时返回错误，不要猜 id。",
+        parameters = buildJsonObject {
+            put("type", "object")
+            putJsonObject("properties") {
+                putJsonObject("id") {
+                    put("type", "string")
+                    put("description", "要更新的记忆 id，如 mem_a1b2c3d4")
+                }
+                putJsonObject("content") {
+                    put("type", "string")
+                    put("description", "更新后的完整内容")
+                }
+                putJsonObject("type") {
+                    put("type", "string")
+                    put("description", "可选，修改记忆类型")
+                    putJsonArray("enum") { WRITABLE_TYPES.forEach { add(it) } }
+                }
+                putJsonObject("importance") {
+                    put("type", "number")
+                    put("minimum", 0)
+                    put("maximum", 1)
+                }
+                putJsonObject("keywords") {
+                    put("type", "array")
+                    put("description", "可选，替换原关键词（3~8 个）")
+                    putJsonObject("items") { put("type", "string") }
+                }
+            }
+            putJsonArray("required") { add("id"); add("content") }
+        }
+    )
+
+    private fun deleteMemory(): JsonObject = functionTool(
+        name = DELETE_MEMORY,
+        description = "删除一条记忆。删除永久类记忆（事实/特质）必须显式确认并给出原因，仅在用户明确要求忘记或纠正时使用。",
+        parameters = buildJsonObject {
+            put("type", "object")
+            putJsonObject("properties") {
+                putJsonObject("id") {
+                    put("type", "string")
+                    put("description", "要删除的记忆 id")
+                }
+                putJsonObject("reason") {
+                    put("type", "string")
+                    put("description", "为什么删除（用户明确要求/信息错误）")
+                }
+                putJsonObject("confirm_permanent") {
+                    put("type", "boolean")
+                    put("description", "删除事实/特质类记忆时必须为 true")
+                }
+            }
+            putJsonArray("required") { add("id") }
         }
     )
 

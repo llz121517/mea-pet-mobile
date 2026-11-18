@@ -72,7 +72,9 @@ class ChatService(
      * 记忆工具循环（null = 未启用）。仅在 [AppConfig.enableMemoryTools] 为 true 时使用，
      * 否则走原来的单次请求 + 文本协议链路。
      */
-    private val toolLoop: com.meapet.mobile.chat.tools.ChatToolLoop? = null
+    private val toolLoop: com.meapet.mobile.chat.tools.ChatToolLoop? = null,
+    /** 工具执行器（与 [toolLoop] 共用同一实例：暂存写入需要从它身上取回）。 */
+    private val memoryTools: com.meapet.mobile.memory.tools.MemoryToolExecutor? = null
 ) {
     companion object {
         private const val TAG = "ChatService"
@@ -113,6 +115,9 @@ class ChatService(
             val content = userMessage.content
             try {
                 onBeforeSend()
+
+                // 工具模式的写类操作是「turn 内暂存、成功后提交」：每轮开始先清理上一轮的残留
+                if (config.enableMemoryTools) memoryTools?.discardPending()
 
                 // 1) 用户消息先入史：apiMessages 由历史构建，当前消息必须已在其中。
                 //    代价是任何失败路径都必须回滚，否则留下从未发出的"幽灵消息"
@@ -260,6 +265,14 @@ class ChatService(
                     memoryOpsBlock = parsed.rawBlock
                 )
                 conversationManager.addMessage(assistantMessage)
+
+                // 工具模式：整个 turn 成功后才提交暂存写入（失败/取消已在 catch/提前 return 中丢弃）
+                if (config.enableMemoryTools) {
+                    val pending = memoryTools?.drainPending()
+                    if (pending != null && !pending.isEmpty) {
+                        memoryManager?.applyToolChanges(pending)
+                    }
+                }
 
                 // 7) 事后处理：应用记忆操作/触发摘要转后台，不阻塞本次回复返回
                 //   （摘要是一次额外 LLM 请求，同步等它会让 UI 在拿到回复后仍长时间显示加载中）
