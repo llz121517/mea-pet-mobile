@@ -121,7 +121,7 @@ internal fun ModelParamsSection(
             .fillMaxWidth()
             .saveOnFocusChange { viewModel.saveModel(local.model) },
         singleLine = true,
-        placeholder = { Text("deepseek-v4-flash") }
+        placeholder = { Text("deepseek-flash") }
     )
 
     Spacer(Modifier.height(8.dp))

@@ -26,7 +26,7 @@ package com.meapet.mobile.config
  */
 data class AppConfig(
     val defaultApiUrl: String = "https://api.deepseek.com",
-    val defaultModel: String = "deepseek-v4-flash",
+    val defaultModel: String = "deepseek-flash",
     val maxHistoryMessages: Int = 35,
     val historyTrimBatch: Int = 8,
     val memorySummaryModel: String? = null,

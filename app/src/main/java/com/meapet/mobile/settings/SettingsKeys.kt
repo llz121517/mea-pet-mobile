@@ -58,7 +58,7 @@ object SettingsKeys {
     /** 合理的默认值。 */
     object Defaults {
         const val API_URL = "https://api.deepseek.com/v1"
-        const val MODEL = "deepseek-v4-flash"
+        const val MODEL = "deepseek-flash"
         const val TEMPERATURE = 0.7
         const val MAX_TOKENS = 4096
         const val ENABLE_MEMORY = true

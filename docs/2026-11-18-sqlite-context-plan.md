@@ -25,7 +25,7 @@
 ## 2. M0 探针结论（DeepSeek，真实请求）
 
 - `GET /models` 返回 `context_window`（1048576，输入输出合计）与 `max_output_tokens`（393216）。
-- 注意模型 id 不一致：`/models` 中为 `deepseek-flash`、`deepseek-v4-pro`，项目默认为 `deepseek-v4-flash`，请求可成功。容量查找需做 id 别名或前缀回退，找不到时走默认值。
+- 注意模型 id 不一致：`/models` 中为 `deepseek-flash`、`deepseek-v4-pro`，项目默认模型已改为 `deepseek-flash`，与 `/models` 一致；用户自填的旧 id（如 `deepseek-v4-flash`）容量查找仍需做别名或前缀回退，找不到时走默认值。
 - 响应 `usage` 含 `prompt_tokens`、`prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`；第二轮前缀命中 384/592，可用于校验缓存收益与 token 估算校准。
 - 当前 `ApiResponse` 尚未解析 `usage` 与容量字段，待 M4 补齐。
 
@@ -39,7 +39,7 @@
 
 ### M4 容量获取
 - `ApiResponse` 新增 `modelCapacity` 与 `usage` 解析，字段名顺序：context_window、context_length、max_context_length、max_context、max_input_tokens、context_size；值需为合理正整数。
-- 探测顺序：用户手动覆盖 → 缓存（TTL 24h，失败负缓存 10 分钟）→ `/models` 条目 → Ollama `/api/ps`、`/api/show` → LM Studio `/api/v0/models/{id}` → 静态表 → 默认 32768。
+- 探测顺序：用户手动覆盖 → 缓存（TTL 24h，失败负缓存 10 分钟）→ `/models` 条目 → Ollama `/api/ps`、`/api/show` → LM Studio `/api/v0/models/{id}` → 静态表 → 默认 98304（128K 的 3/4；2B 级小模型与 MNN 等移动推理框架通常都能达到，且可读取 context_length）。
 - 客户端需支持服务根路径请求；设置页增加手动覆盖并显示来源。
 - 有效预算 = 容量 − max_tokens − 5% 余量。
 
