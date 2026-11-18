@@ -15,7 +15,8 @@
   6. 私网地址与公网同样处理，不做特殊对待；仅回环地址有独立兜底 32768。
   7. 容量获取原则：尽量用通用逻辑，不为各服务单独写 if；不设内置表、不设白名单、不做运行时学习，探测失败直接降级到兜底值。
   8. 压缩摘要并入首条 system 末尾（见 M5）。
-  9. tail 只放每轮动态内容，不进历史（见 memory-tools-plan 第 9 节）。
+  9. tail 目前只含当前时间，并入最后一条 user，不进历史，不使用尾部 system（见 memory-tools-plan 第 9 节）。
+  10. 工具循环消息（role=tool）入历史并保留，同轮共用 turn_id，整轮回滚、重试、清除按 turn_id 处理（见 memory-tools-plan 第 10 节）。
 
 ## 1. 已落地（commit f2569a1）
 
@@ -38,7 +39,7 @@
 
 ### M3 UI 解耦收尾
 - 清除对话改为软删除（conversations.state = cleared + 新建活跃会话），撤销只携带 conversationId，到期或下次启动物理清除；当前仍是内存快照方案，大历史下需替换。
-- 失败回滚由「写后删」改为「成功后同事务写入」；retryMessage 按 turn 处理。
+- 失败回滚由「写后删」改为「成功后同事务写入」；retryMessage、清除按 turn_id 整轮处理（工具消息同轮入历史，见 memory-tools-plan 第 10 节）。
 - 真机验证：向上懒加载的滚动锚定、悬浮窗与主界面同步、WAL 行为。
 - 可选：压缩分隔条展示。
 
@@ -94,8 +95,9 @@
 ## 4. 与记忆工具化计划的接口约束
 
 - `MemoryStore` 接口已落地，工具执行体只依赖接口；`applyChanges` 必须原子；`getPersonaFacts` 保持 createdAt 升序（SQLite 实现已加 id 作次级键）。
-- 会话表不写入工具中间消息，只存 user/assistant（schema 预留的 tool 列暂不使用）。
-- 若需 FTS 或新列，走 `user_version = 2`，由两边协调迁移归属。
+- 会话表存储工具循环的中间消息（role=tool 及 assistant 的 tool_calls），使用 V1 已预留的 tool_* 与 extra_json 列，同轮共用 turn_id，在同一事务写入（见 memory-tools-plan 第 10 节）；无需新迁移。
+- 窗口裁剪与压缩切点按轮对齐，保证 tool_calls 与 tool 结果成对；压缩摘要输入中 tool 结果截断或概括。
+- 检索不依赖 FTS（见 memory-tools-plan 第 11 节）；若日后需 FTS 或新列，走 `user_version = 2`，由两边协调迁移归属。
 
 ## 5. 风险与未核实项
 

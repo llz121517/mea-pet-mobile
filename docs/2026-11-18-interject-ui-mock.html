@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>插队发送 UI 草图</title>
+<style>
+  :root { --bg:#f4f1ee; --card:#fff; --text:#222; --sub:#777; --accent:#6b5bd2; --user:#e7e1ff; --bot:#fff; --line:#e3ded9; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#17151a; --card:#211f26; --text:#eee; --sub:#9a97a3; --accent:#a99bff; --user:#3a3363; --bot:#2a2830; --line:#38353f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p.note { color:var(--sub); margin:0 0 20px; }
+  .row { display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start; }
+  .col { width:300px; }
+  .col h2 { font-size:13px; margin:0 0 8px; color:var(--sub); font-weight:600; }
+  .phone { height:520px; background:var(--card); border:1px solid var(--line); border-radius:22px; display:flex; flex-direction:column; overflow:hidden; }
+  .msgs { flex:1; padding:14px 12px; display:flex; flex-direction:column; justify-content:flex-end; gap:8px; overflow:hidden; }
+  .bubble { max-width:82%; padding:8px 12px; border-radius:14px; }
+  .bot { background:var(--bot); border:1px solid var(--line); align-self:flex-start; }
+  .user { background:var(--user); align-self:flex-end; }
+  .thinking { color:var(--sub); font-size:12px; align-self:flex-start; padding-left:4px; }
+  .stack { flex:none; }
+  .status { display:flex; align-items:center; gap:8px; padding:6px 14px; background:color-mix(in srgb, var(--accent) 10%, var(--card)); border-top:1px solid var(--line); font-size:12px; color:var(--sub); transition:opacity .4s; }
+  .status .spin { width:12px; height:12px; border-radius:50%; border:2px solid var(--accent); border-right-color:transparent; animation:r 1s linear infinite; }
+  .status .grow { flex:1; }
+  .status button { background:none; border:0; color:var(--accent); font-size:12px; padding:2px 4px; }
+  .status.fade { opacity:0; }
+  .input { display:flex; align-items:center; gap:8px; padding:10px 12px; border-top:1px solid var(--line); }
+  .field { flex:1; height:38px; border:1px solid var(--line); border-radius:19px; padding:0 14px; display:flex; align-items:center; color:var(--sub); }
+  .field.disabled { opacity:.55; }
+  .send { width:38px; height:38px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; color:#fff; }
+  .send.disabled { opacity:.45; }
+  .send .spin { width:16px; height:16px; border-radius:50%; border:2px solid #fff; border-right-color:transparent; animation:r 1s linear infinite; }
+  @keyframes r { to { transform:rotate(360deg); } }
+  .tag { display:inline-block; margin-top:8px; font-size:12px; color:var(--sub); }
+</style>
+</head>
+<body>
+<h1>插队发送：输入栏与状态条草图</h1>
+<p class="note">状态条固定在输入栏顶部，随输入栏一起移动，不是悬浮按钮，不遮挡消息列表。文案为「Mea 还在…」，右侧「停止」。</p>
+<div class="row">
+
+  <div class="col">
+    <h2>① 等待首条（模型还没吐出文字）</h2>
+    <div class="phone">
+      <div class="msgs">
+        <div class="bubble user">我上次说的论文怎么样了？</div>
+        <div class="thinking">Mea 正在思考...</div>
+      </div>
+      <div class="stack">
+        <div class="input">
+          <div class="field disabled">等待回复…</div>
+          <div class="send disabled"><span class="spin"></span></div>
+        </div>
+      </div>
+    </div>
+    <span class="tag">输入框禁用，发送键转圈（与现状一致）</span>
+  </div>
+
+  <div class="col">
+    <h2>② 已有首条，循环仍在继续</h2>
+    <div class="phone">
+      <div class="msgs">
+        <div class="bubble user">我上次说的论文怎么样了？</div>
+        <div class="bubble bot">我翻翻你之前说过的…</div>
+      </div>
+      <div class="stack">
+        <div class="status">
+          <span class="spin"></span><span class="grow">Mea 还在…</span><button>停止</button>
+        </div>
+        <div class="input">
+          <div class="field">输入消息可直接插队…</div>
+          <div class="send">➤</div>
+        </div>
+      </div>
+    </div>
+    <span class="tag">输入框恢复可用；发送即中断当前循环并开启新一轮，不弹提示；点「停止」仅终止循环</span>
+  </div>
+
+  <div class="col">
+    <h2>③ 循环结束</h2>
+    <div class="phone">
+      <div class="msgs">
+        <div class="bubble user">我上次说的论文怎么样了？</div>
+        <div class="bubble bot">我翻翻你之前说过的…</div>
+        <div class="bubble bot">找到了：你说初稿下周五截止。现在交了吗？</div>
+      </div>
+      <div class="stack">
+        <div class="status fade">
+          <span class="spin"></span><span class="grow">Mea 还在…</span><button>停止</button>
+        </div>
+        <div class="input">
+          <div class="field">输入消息…</div>
+          <div class="send">➤</div>
+        </div>
+      </div>
+    </div>
+    <span class="tag">状态条淡出并收起；气泡逐条出现，用户看来是助手连发多条</span>
+  </div>
+
+</div>
+</body>
+</html>
