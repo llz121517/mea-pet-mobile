@@ -62,4 +62,22 @@ class TailModeTest {
         val b = mgr().buildApiMessages("p", tailFragments = listOf("10:01"))
         assertEquals(a.dropLast(1).map { it.role to it.content }, b.dropLast(1).map { it.role to it.content })
     }
+
+    @Test
+    fun tailIsSkippedWhenLastMessageIsNotUser() {
+        // 工具循环的请求序列里 assistant(tool_calls) 与 tool 必须紧邻：
+        // 末条不是 user 时硬插 tail 会把 user 消息夹进工具调用与结果之间（服务端 400）。
+        // 这里用「末条是 assistant」的最小场景验证 applyTail 的守卫
+        val m = ConversationManager().also {
+            it.addMessage(ChatMessage(role = ChatRole.user, content = "你好"))
+            it.addMessage(ChatMessage(role = ChatRole.assistant, content = "嗨"))
+        }
+
+        val sent = m.buildApiMessages("p", tailFragments = listOf("T"))
+
+        assertEquals(3, sent.size, "不应新增/改写任何消息")
+        assertEquals(ChatRole.assistant, sent.last().role)
+        assertEquals("嗨", sent.last().content, "tail 不能贴到非 user 消息上")
+        assertTrue(m.getMessages().none { it.content.contains(TAIL_LABEL) })
+    }
 }

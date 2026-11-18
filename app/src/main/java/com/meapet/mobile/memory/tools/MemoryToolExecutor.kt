@@ -145,7 +145,30 @@ class MemoryToolExecutor(
             else -> MemorySort.RELEVANCE
         }
 
-        val items = search.search(MemoryQuery(text = query, types = types, limit = limit, sort = sort))
+        // 候选池 = 已落库记忆去掉本 turn 待删除项，再用本 turn 暂存 upsert 按 id 覆盖/新增。
+        // 这样同一 turn 内 create/update 之后紧跟的 search 也能看到这些尚未落库的条目。
+        val mergedView = store?.let { st ->
+            val merged = LinkedHashMap<String, MemoryItem>()
+            st.getAll().filter { it.id !in pendingDeletes }.forEach { merged[it.id] = it }
+            pendingUpserts.forEach { (id, item) -> merged[id] = item }
+            merged.values.toList()
+        }
+
+        val items = search.search(
+            MemoryQuery(
+                text = query,
+                types = types,
+                limit = limit,
+                sort = sort,
+                candidates = mergedView
+            )
+        )
+        // 隐私安全日志：只记录长度/条数，绝不打印 query 内容或记忆内容。
+        // candidates=-1 表示只读模式（store == null），候选池由检索实现自行决定。
+        Log.d(
+            TAG,
+            "search_memory: query.length=${query.length}, candidates=${mergedView?.size ?: -1}, returned=${items.size}"
+        )
         return successEnvelope(items)
     }
 

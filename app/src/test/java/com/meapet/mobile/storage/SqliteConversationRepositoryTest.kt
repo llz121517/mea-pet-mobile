@@ -94,4 +94,74 @@ class SqliteConversationRepositoryTest {
         db.close()
         assertEquals(1, repo.count())
     }
+
+    // ── 工具 turn 的整轮写入/读回 ──────────────────────
+
+    /** 一个 turn：user → assistant(tool_calls) → tool → assistant(最终)。 */
+    private fun toolTurn(turnId: String, start: Int): List<ChatMessage> {
+        val raw = """{"role":"assistant","content":"","tool_calls":[{"id":"call_$start",""" +
+            """"type":"function","function":{"name":"search_memory","arguments":"{}"}}]}"""
+        return listOf(
+            ChatMessage(ChatRole.user, "u$start", id = "u$start", timestamp = start.toLong(), turnId = turnId),
+            ChatMessage(
+                ChatRole.assistant, "", id = "a$start", timestamp = start + 1L,
+                turnId = turnId, rawAssistantJson = raw
+            ),
+            ChatMessage(
+                ChatRole.tool, """{"ok":true}""", id = "tr$start", timestamp = start + 2L,
+                turnId = turnId, toolCallId = "call_$start", toolName = "search_memory"
+            ),
+            ChatMessage(
+                ChatRole.assistant, "final$start", id = "f$start", timestamp = start + 3L,
+                turnId = turnId, rawAssistantJson = """{"role":"assistant","content":"final$start"}"""
+            )
+        )
+    }
+
+    @Test
+    fun appendAllRoundTripsWholeToolTurn() = runBlocking {
+        val turn = toolTurn("turn-1", start = 1)
+        repo.appendAll(turn)
+
+        // 顺序、角色、tool_call_id、rawAssistantJson、turnId 全部原样读回
+        val recent = repo.loadRecent(10)
+        assertEquals(listOf("u1", "a1", "tr1", "f1"), recent.map { it.id })
+        assertEquals(turn, recent, "appendAll 后应逐字段等价读回")
+
+        val assistantWithCalls = recent[1]
+        assertEquals(ChatRole.assistant, assistantWithCalls.role)
+        assertEquals("turn-1", assistantWithCalls.turnId)
+        assertTrue(assistantWithCalls.rawAssistantJson!!.contains("tool_calls"))
+        assertEquals("call_1", recent[2].toolCallId)
+        assertEquals("search_memory", recent[2].toolName)
+        assertEquals(turn[0].rawAssistantJson, null, "user 行不带原始助手 JSON（前置断言）")
+        assertEquals("""{"role":"assistant","content":"final1"}""", recent[3].rawAssistantJson)
+
+        // keyset 分页同样能读到 tool 行（不能被当成未知角色跳过）
+        val older = repo.pageBefore("tr1", 10)
+        assertEquals(listOf("u1", "a1"), older.map { it.id })
+        assertTrue(older[1].rawAssistantJson!!.contains("tool_calls"))
+    }
+
+    @Test
+    fun appendAllKeepsTurnIdsSeparated() = runBlocking {
+        repo.appendAll(toolTurn("turn-1", start = 1))
+        repo.appendAll(toolTurn("turn-2", start = 11))
+
+        val all = repo.loadRecent(10)
+        assertEquals(8, all.size)
+        assertEquals(
+            listOf("u1", "a1", "tr1", "f1"),
+            all.filter { it.turnId == "turn-1" }.map { it.id }
+        )
+        assertEquals(
+            listOf("u11", "a11", "tr11", "f11"),
+            all.filter { it.turnId == "turn-2" }.map { it.id }
+        )
+        // 两个 turn 的 tool_call_id 不串
+        assertEquals(
+            listOf("call_1", "call_11"),
+            all.filter { it.isTool }.map { it.toolCallId }
+        )
+    }
 }

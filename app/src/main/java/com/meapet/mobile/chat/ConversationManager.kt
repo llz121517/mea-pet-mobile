@@ -8,6 +8,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * 会话历史管理器。
@@ -50,12 +55,18 @@ class ConversationManager(
     private val lock = Any()
     private val messages = mutableListOf<ChatMessage>()
 
+    /** 解析 rawAssistantJson 里的 tool_calls 声明（只读、无并发写）用。 */
+    private val json = Json { ignoreUnknownKeys = true }
+
     companion object {
         private const val TAG = "ConversationManager"
     }
 
     private sealed interface PersistOp {
         class Append(val message: ChatMessage) : PersistOp
+
+        /** 一个 turn 的全部消息一次事务落库。 */
+        class AppendAll(val messages: List<ChatMessage>) : PersistOp
         class Remove(val id: String) : PersistOp
         object Clear : PersistOp
         class ReplaceAll(val messages: List<ChatMessage>) : PersistOp
@@ -72,6 +83,7 @@ class ConversationManager(
                     try {
                         when (op) {
                             is PersistOp.Append -> repository.append(op.message)
+                            is PersistOp.AppendAll -> repository.appendAll(op.messages)
                             is PersistOp.Remove -> repository.remove(op.id)
                             PersistOp.Clear -> repository.clear()
                             is PersistOp.ReplaceAll -> repository.replaceAll(op.messages)
@@ -102,13 +114,21 @@ class ConversationManager(
         Log.d(TAG, "Message added [${message.role}] (${message.content.length} chars, total: $size)")
     }
 
-    /** 批量添加。 */
+    /**
+     * 批量添加（一个 turn 的片段 + tool 消息 + 最终回复）。
+     *
+     * 内存里一次性并入，落库只入队**一次** [PersistOp.AppendAll]：
+     * 逐条 Append 会让一个 turn 拆成多个写事务，中途被杀就留下半轮。
+     */
     fun addMessages(newMessages: List<ChatMessage>) {
+        if (newMessages.isEmpty()) return
         synchronized(lock) {
             messages.addAll(newMessages)
             trimWindow()
-            newMessages.forEach { enqueue(PersistOp.Append(it)) }
+            enqueue(PersistOp.AppendAll(newMessages.toList()))
         }
+        // 只记角色与长度，对话内容不进 Logcat（隐私）
+        Log.d(TAG, "Messages added (${newMessages.size} msgs, total: $size)")
     }
 
     /**
@@ -182,6 +202,10 @@ class ConversationManager(
      * @param maxMessages 最大消息数（滑动窗口，从末尾取）
      * @param memoryOpsEchoTurns 最近多少条助手消息要把 [ChatMessage.memoryOpsBlock] 贴回正文
      *   （0 = 不贴）。仅影响发给模型的副本，不改动会话历史本身
+     * @param includeToolHistory 是否保留工具历史（`assistant.rawAssistantJson` 与 `role=tool`）。
+     *   工具模式（端点支持 tools）为 true：原样回传 `tool_calls` / `reasoning_content`；
+     *   文本协议或端点不支持 tools 时为 false：过滤 tool 消息、assistant 只留正文
+     *   （正文为空的纯 tool_calls 消息一并丢弃），保证请求序列合法。
      */
     fun buildApiMessages(
         systemPrompt: String,
@@ -191,7 +215,8 @@ class ConversationManager(
         maxMessages: Int = 30,
         memoryOpsEchoTurns: Int = 0,
         summary: String = "",
-        skipOldest: Int = 0
+        skipOldest: Int = 0,
+        includeToolHistory: Boolean = true
     ): List<ChatMessage> {
         val systemContent = buildString {
             append(systemPrompt)
@@ -212,16 +237,94 @@ class ConversationManager(
             afterSkip.takeLast(maxMessages)
         }
 
+        // 先按模式过滤，再清洗成模型能接受的消息序列。
+        // 窗口是从「最近 N 条」硬切的，边界可能落在 turn 中间（尤其 maxMessages 很小时），
+        // 清洗只做兜底，不重排消息。
+        val prepared = if (includeToolHistory) {
+            sanitizeToolWindow(recentMessages)
+        } else {
+            toTextOnlyWindow(recentMessages)
+        }
+
         return buildList {
             add(ChatMessage(role = ChatRole.system, content = systemContent))
             addAll(
                 applyTail(
-                    echoMemoryOps(recentMessages, memoryOpsEchoTurns),
+                    echoMemoryOps(prepared, memoryOpsEchoTurns),
                     composeTail(tailFragments),
                     tailMode
                 )
             )
         }
+    }
+
+    /**
+     * 工具历史清洗：丢弃找不到声明的 `role=tool` 消息。
+     *
+     * 合法序列要求每个 tool 结果都能对应到前面某条 assistant 的 `tool_calls[].id`：
+     * - 窗口从 turn 中间开始时，开头可能是一条孤立 tool 消息；
+     * - 历史里也可能残留失败/被打断轮次的半成品。
+     * 服务端遇到孤立 `tool_call_id` 会直接 400，所以宁可少发一条也不能发非法序列。
+     * 遇到新的 user 消息时清空已声明集合（工具调用只属于它前面最近的那一批 assistant）。
+     */
+    private fun sanitizeToolWindow(msgs: List<ChatMessage>): List<ChatMessage> {
+        if (msgs.none { it.isTool || it.rawAssistantJson != null }) return msgs
+        val declared = HashSet<String>()
+        val result = ArrayList<ChatMessage>(msgs.size)
+        for (msg in msgs) {
+            when (msg.role) {
+                ChatRole.system -> result.add(msg)
+                ChatRole.user -> {
+                    declared.clear()
+                    result.add(msg)
+                }
+                ChatRole.assistant -> {
+                    declared += declaredToolCallIds(msg.rawAssistantJson)
+                    result.add(msg)
+                }
+                ChatRole.tool -> {
+                    val id = msg.toolCallId
+                    if (id != null && id in declared) {
+                        result.add(msg)
+                    } else {
+                        Log.w(TAG, "Dropped orphan tool message (tool_call_id missing declaration)")
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    /**
+     * 文本协议窗口：去掉所有工具协议痕迹。
+     *
+     * TEXT 模式或端点不支持 tools 时，历史里既不能有 `role=tool`，也不能带 `tool_calls`
+     * 的 assistant 原始 JSON（端点会尝试解析不存在的能力）。纯 tool_calls 的 assistant
+     * 正文为空，没有可发送的内容，直接丢弃。
+     */
+    private fun toTextOnlyWindow(msgs: List<ChatMessage>): List<ChatMessage> = buildList {
+        for (msg in msgs) {
+            when (msg.role) {
+                ChatRole.tool -> Unit
+                ChatRole.assistant -> {
+                    if (msg.content.isNotBlank()) {
+                        add(msg.copy(rawAssistantJson = null))
+                    }
+                }
+                else -> add(msg)
+            }
+        }
+    }
+
+    /** 从 assistant 原始 JSON 里取出它声明的 `tool_calls[].id`（解析失败按无声明处理）。 */
+    private fun declaredToolCallIds(rawAssistantJson: String?): List<String> {
+        if (rawAssistantJson.isNullOrBlank()) return emptyList()
+        return runCatching {
+            json.parseToJsonElement(rawAssistantJson).jsonObject["tool_calls"]
+                ?.jsonArray
+                ?.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.contentOrNull }
+                .orEmpty()
+        }.getOrDefault(emptyList())
     }
 
     /** 清除所有消息（内存窗口与仓库中的完整历史）。 */
@@ -261,6 +364,26 @@ class ConversationManager(
         val removed = messages.removeAll { it.id == id }
         enqueue(PersistOp.Remove(id))
         removed
+    }
+
+    /**
+     * 一次从内存窗口移除多条消息，并逐个入队仓库删除（供整轮回滚/重试用）。
+     *
+     * 「一次移除」指的是内存视图一次性对齐：重试要删掉某条 user 及其之后的所有消息，
+     * 分多次调用期间若有新的发送插入，会删到不属于旧轮的消息。
+     *
+     * @return 实际从内存窗口移除的条数
+     */
+    fun removeMessages(ids: Collection<String>): Int {
+        if (ids.isEmpty()) return 0
+        val idSet = ids.toSet()
+        return synchronized(lock) {
+            val before = messages.size
+            messages.removeAll { it.id in idSet }
+            // 入队必须在持锁期间完成，保证与内存变更同序（见 enqueue 注释）
+            idSet.forEach { enqueue(PersistOp.Remove(it)) }
+            before - messages.size
+        }
     }
 
     /** 获取最后一条 user 消息（不含 assistant / system）。 */

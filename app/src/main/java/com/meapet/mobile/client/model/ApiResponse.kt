@@ -104,11 +104,26 @@ object ApiResponse {
      *
      * @return 提示 token 数；响应缺 `usage`、字段缺失或非正整数时返回 null
      */
-    fun usagePromptTokens(body: String): Int? = try {
+    fun usagePromptTokens(body: String): Int? = usageField(body, "prompt_tokens")
+        ?.takeIf { it > 0 }?.toInt()
+
+    /**
+     * 从响应中提取 `usage.prompt_cache_hit_tokens`（服务端前缀缓存命中的 token 数）。
+     *
+     * 观察期用：命中率 = 本值 / `usage.prompt_tokens`。DeepSeek 等端点提供；
+     * 缺字段（OpenAI 用 `prompt_tokens_details.cached_tokens`，不在此解析）返回 null，
+     * 调用方不得据此判断请求失败。
+     *
+     * @return 命中 token 数（0 是合法值：完全没命中）；字段缺失或非法时返回 null
+     */
+    fun usagePromptCacheHitTokens(body: String): Int? =
+        usageField(body, "prompt_cache_hit_tokens")?.takeIf { it >= 0 }?.toInt()
+
+    /** 读 `usage.<key>` 的 long 值；结构不对/解析失败一律 null（不抛异常）。 */
+    private fun usageField(body: String, key: String): Long? = try {
         val root = json.parseToJsonElement(body) as? JsonObject
-        val value = root?.get("usage")?.let { it as? JsonObject }
-            ?.get("prompt_tokens")?.jsonPrimitive?.longOrNull
-        value?.takeIf { it > 0 }?.toInt()
+        root?.get("usage")?.let { it as? JsonObject }
+            ?.get(key)?.jsonPrimitive?.longOrNull
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {

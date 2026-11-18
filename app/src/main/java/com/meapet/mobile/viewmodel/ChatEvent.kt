@@ -28,6 +28,9 @@ sealed interface ChatEvent {
     /** 重新发送上一条消息（失败后重试）。 */
     data object RetryLastMessage : ChatEvent
 
+    /** 停止当前在途 turn（状态条右侧「停止」）。保留已显示的气泡，不弹错误。 */
+    data object StopTurn : ChatEvent
+
     /** 清除错误。 */
     data object DismissError : ChatEvent
 

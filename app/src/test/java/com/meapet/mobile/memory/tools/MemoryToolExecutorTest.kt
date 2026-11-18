@@ -25,7 +25,7 @@ class MemoryToolExecutorTest {
     private suspend fun executorWith(items: List<MemoryItem>): MemoryToolExecutor {
         val repo = MemoryRepository(tmp.newFolder())
         repo.saveAll(items)
-        return MemoryToolExecutor(BigramMemorySearcher(repo))
+        return MemoryToolExecutor(BigramMemorySearcher(repo), store = repo)
     }
 
     private fun item(id: String, content: String, keywords: List<String>, type: MemoryType = MemoryType.SHORT_TERM) =
@@ -82,5 +82,46 @@ class MemoryToolExecutorTest {
         val results = obj["results"]!!.jsonArray
         assertTrue(results.size <= 2)
         assertEquals(results.size, obj["returned"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun `库中多条记忆时返回全部候选且命中项排最前`() = runTest {
+        val executor = executorWith(
+            listOf(
+                item("mem_a", "主人在准备毕业论文", listOf("论文", "毕业")),
+                item("mem_b", "主人喜欢炸鸡", listOf("炸鸡")),
+                item("mem_c", "主人周末去爬山", listOf("爬山"))
+            )
+        )
+
+        val obj = json.parseToJsonElement(
+            executor.execute("search_memory", """{"query":"论文","limit":5}""")
+        ).jsonObject
+        val results = obj["results"]!!.jsonArray
+
+        assertEquals(3, results.size, "命中不足 limit 时用未命中条目补足候选池")
+        assertEquals("mem_a", results[0].jsonObject["id"]!!.jsonPrimitive.content, "命中项排第一")
+        assertEquals("3", obj["total_matched"]!!.jsonPrimitive.content, "total_matched = 候选池条数")
+    }
+
+    @Test
+    fun `同一 turn 内新建的记忆可被检索到`() = runTest {
+        val executor = executorWith(emptyList())
+
+        val created = json.parseToJsonElement(
+            executor.execute("create_memory", """{"content":"主人养了一只叫团子的猫","keywords":["猫","团子"]}""")
+        ).jsonObject
+        assertEquals("true", created["ok"]!!.jsonPrimitive.content)
+        assertEquals("queued", created["status"]!!.jsonPrimitive.content)
+
+        // 该条目尚未落库（turn 成功后才 applyChanges），检索必须能看到暂存视图
+        val obj = json.parseToJsonElement(
+            executor.execute("search_memory", """{"query":"猫","limit":5}""")
+        ).jsonObject
+        val results = obj["results"]!!.jsonArray
+
+        assertEquals(1, results.size)
+        val content = results[0].jsonObject["content"]!!.jsonPrimitive.content
+        assertTrue(content.contains("团子"), "检索结果应包含本 turn 刚创建的暂存条目")
     }
 }

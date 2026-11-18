@@ -164,6 +164,98 @@ class ConversationManagerTest {
         assertEquals(listOf("漏了1", "漏了2"), assistants.map { it.content })
     }
 
+    // ── 工具历史窗口 ──────────────────────────────────
+
+    /** 一个完整的工具 turn：user → assistant(tool_calls) → tool → assistant(最终)。 */
+    private fun toolTurn(turnId: String = "turn-1"): List<ChatMessage> {
+        val raw = """{"role":"assistant","content":"","tool_calls":[""" +
+            """{"id":"call_1","type":"function","function":{"name":"search_memory","arguments":"{}"}}]}"""
+        return listOf(
+            ChatMessage(role = ChatRole.user, content = "问", turnId = turnId),
+            ChatMessage(
+                role = ChatRole.assistant, content = "", turnId = turnId,
+                rawAssistantJson = raw
+            ),
+            ChatMessage(
+                role = ChatRole.tool, content = """{"ok":true}""", turnId = turnId,
+                toolCallId = "call_1", toolName = "search_memory"
+            ),
+            ChatMessage(
+                role = ChatRole.assistant, content = "答", turnId = turnId,
+                rawAssistantJson = """{"role":"assistant","content":"答"}"""
+            )
+        )
+    }
+
+    @Test
+    fun includeToolHistoryKeepsToolMessagesAndRawJson() {
+        val mgr = ConversationManager()
+        mgr.addMessages(toolTurn())
+
+        val sent = mgr.buildApiMessages(systemPrompt = "p", includeToolHistory = true)
+
+        assertEquals(
+            listOf(ChatRole.system, ChatRole.user, ChatRole.assistant, ChatRole.tool, ChatRole.assistant),
+            sent.map { it.role }
+        )
+        assertTrue(sent[2].rawAssistantJson!!.contains("tool_calls"))
+        assertEquals("call_1", sent[3].toolCallId)
+    }
+
+    @Test
+    fun excludeToolHistoryFiltersToolMessagesAndRawJson() {
+        val mgr = ConversationManager()
+        mgr.addMessages(toolTurn())
+
+        val sent = mgr.buildApiMessages(systemPrompt = "p", includeToolHistory = false)
+
+        // 纯 tool_calls 的空 assistant 与 tool 消息都被丢弃，只留正文
+        assertEquals(listOf(ChatRole.system, ChatRole.user, ChatRole.assistant), sent.map { it.role })
+        assertEquals("答", sent[2].content)
+        assertEquals(null, sent[2].rawAssistantJson, "文本协议不能带 assistant 原始 JSON")
+    }
+
+    @Test
+    fun orphanToolMessageAtWindowStartIsDropped() {
+        val mgr = ConversationManager()
+        val raw = """{"role":"assistant","content":"","tool_calls":[""" +
+            """{"id":"call_1","type":"function","function":{"name":"search_memory","arguments":"{}"}}]}"""
+        // 窗口被裁到 turn 中间：开头是一条找不到声明的 tool 消息
+        mgr.addMessages(
+            listOf(
+                ChatMessage(role = ChatRole.tool, content = "{}", toolCallId = "call_orphan"),
+                ChatMessage(
+                    role = ChatRole.assistant, content = "",
+                    rawAssistantJson = raw
+                ),
+                ChatMessage(role = ChatRole.tool, content = """{"ok":true}""", toolCallId = "call_1"),
+                ChatMessage(role = ChatRole.user, content = "继续")
+            )
+        )
+
+        val sent = mgr.buildApiMessages(systemPrompt = "p", includeToolHistory = true)
+
+        // 孤立 tool 被清洗掉；有声明且 id 匹配的 tool 保留
+        assertEquals(listOf(ChatRole.system, ChatRole.assistant, ChatRole.tool, ChatRole.user), sent.map { it.role })
+        assertEquals("call_1", sent[2].toolCallId)
+    }
+
+    @Test
+    fun toolMessageWhoseDeclarationIsMissingIsDropped() {
+        val mgr = ConversationManager()
+        mgr.addMessages(
+            listOf(
+                ChatMessage(role = ChatRole.user, content = "问"),
+                ChatMessage(role = ChatRole.tool, content = "{}", toolCallId = "call_x"),
+                ChatMessage(role = ChatRole.user, content = "再问")
+            )
+        )
+
+        val sent = mgr.buildApiMessages(systemPrompt = "p", includeToolHistory = true)
+
+        assertEquals(listOf(ChatRole.system, ChatRole.user, ChatRole.user), sent.map { it.role })
+    }
+
     // ── 撤销：整体替换历史 ────────────────────────────
 
     @Test

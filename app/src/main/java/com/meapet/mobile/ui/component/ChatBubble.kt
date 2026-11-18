@@ -68,6 +68,10 @@ fun ChatBubble(
         ChatRole.user -> UserBubble(message, modifier, alpha)
         ChatRole.assistant -> AssistantBubble(message, modifier, alpha)
         ChatRole.system -> SystemBanner(message, modifier, alpha)
+        // tool 是请求协议的一部分，不属于对话内容。列表侧已过滤
+        // （ChatMessage.isVisibleInUi / forUi），这里显式分支代替 else：
+        // 将来再加角色时编译器会提醒「这里也要处理」，而不是静默不渲染
+        ChatRole.tool -> Unit
     }
 }
 

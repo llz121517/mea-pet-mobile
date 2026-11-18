@@ -47,6 +47,13 @@ data class AppConfig(
      * 保证聊天不中断。
      */
     val enableMemoryTools: Boolean = true,
+    /**
+     * 整个 turn（含工具循环的多轮请求）的超时时间（毫秒）。
+     *
+     * 工具循环最坏情况是 [maxRounds] 轮请求叠加；没有总超时的话，移动网络下可能一直转圈，
+     * 用户只能强杀。超时后按发送失败处理：回滚本轮、UI 提示重试。
+     */
+    val turnTimeoutMs: Long = 180_000,
     val appVersion: String = "1.0.0",
     /**
      * TTS 模型包（6 个文件）的下载基础地址，尾部不带文件名；远端以平铺文件名上传

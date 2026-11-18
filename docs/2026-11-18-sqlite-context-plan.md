@@ -1,6 +1,6 @@
 # 1.9 计划：SQLite 存储 + 上下文压缩 + 模型容量感知（修订版）
 
-> 状态：进行中（Dev 分支）。本版在 2026-11-18 调查报告基础上，按已落地代码、M0 探针与补充调研（容量字段、多 system 兼容性）及最新已确认决策修订。
+> 状态：**已实施（dev 分支，1.9.0）**，M0–M5 全部落地；M3 的「清除对话软删除」与真机验收留待 1.10 / 发布前（见 §3 M3）。本版在 2026-11-18 调查报告基础上，按已落地代码、M0 探针与补充调研（容量字段、多 system 兼容性）及最新已确认决策修订。
 > 已完成项标注 [已完成]，其余为待办。
 
 ## 0. 结论与已定决策
@@ -33,14 +33,14 @@
 - `GET /models` 返回 `context_window`（1048576，输入输出合计）与 `max_output_tokens`（393216）。官方文档声明这些元数据字段可能缺省，缺省时直接降级到兜底。
 - 模型 id：`/models` 中为 `deepseek-flash`、`deepseek-v4-pro`；项目默认模型已改为 `deepseek-flash`。找不到当前模型条目时同样降级到兜底（模型换代丢一次缓存即可，不处理别名漂移）。
 - 响应 `usage` 含 `prompt_tokens`、`prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`；第二轮前缀命中 384/592。
-- 当前 `ApiResponse` 尚未解析 `usage`，待 M4 补齐。
+- [已完成 2026-11-19] `ApiResponse` 已解析 `usage.prompt_tokens`（校准估算）与 `usage.prompt_cache_hit_tokens`（`TurnMetrics` 观察前缀缓存命中率），见 M4。
 
 ## 3. 待办里程碑
 
 ### M3 UI 解耦收尾
-- 清除对话改为软删除（conversations.state = cleared + 新建活跃会话），撤销只携带 conversationId，到期或下次启动物理清除；当前仍是内存快照方案，大历史下需替换。
-- 失败回滚由「写后删」改为「成功后同事务写入」；retryMessage、清除按 turn_id 整轮处理（工具消息同轮入历史，见 memory-tools-plan 第 10 节）。
-- 真机验证：向上懒加载的滚动锚定、悬浮窗与主界面同步、WAL 行为。
+- 清除对话改为软删除（conversations.state = cleared + 新建活跃会话），撤销只携带 conversationId，到期或下次启动物理清除；当前仍是内存快照方案，大历史下需替换。**[1.10 待做]**：单会话模型下要把 `conversationId` 变成可切换状态（仓库/压缩状态/当前会话指针），牵涉面大，1.9 保持现状（撤销快照已能工作）。
+- [已完成 2026-11-19] 失败回滚由「写后删」改为「成功后同事务写入」；retryMessage 按整轮处理：一个 turn 的 user + assistant 片段 + tool 消息收齐后经 `appendAll` **一个事务**落库，失败/超时不写，取消时按已完成部分提交；`retryMessage` 移除该 user 及其后全部消息（工具消息同轮入历史，见 memory-tools-plan 第 10 节）。
+- [待做] 真机验证：向上懒加载的滚动锚定、悬浮窗与主界面同步、WAL 行为、工具消息往返、插队/停止、压缩分隔条（本轮按要求暂不操作设备）。
 - [已完成] 压缩分隔条：样式 `──────── 早些时候 ────────`（淡色），显示在 `seq == active_summary.covered_to_seq` 之后，即已压缩进摘要的消息与仍逐字发送给模型的消息之间；点击可展开摘要全文（`compaction_summaries` 已有溯源，无需额外存储）。
   - 实现注记：为免迁移，压缩状态未写入 `compaction_summaries` 表，而是整份 JSON 存进 `meta` 表键 `context_compaction`（`MetaCompactionStore`）；分隔条按「已被覆盖的最后一条消息 id」定位（`ChatUiState.compactedUpToMessageId`），未做点击展开摘要（留作后续）。
 - [已完成] 按天轻时间分隔条：相邻两条可见消息跨自然日（设备本地时区）时插入，文案 `──────── 今天 ────────`、`昨天`、`M月D日`，跨年带年份。纯 UI 派生项，由消息 `timestamp` 在列表渲染时计算，不入库、不进模型上下文；与压缩分隔条复用同一个分隔条组件，仅文案不同；两者位置重合时先显示日期条再显示「早些时候」；判断相邻消息时跳过 tool 消息与空 assistant 消息，触摸系统气泡不参与；向上懒加载时在页与页交界处按相邻消息重新判断，避免重复或遗漏（首条无前驱时总给日期条）。
@@ -83,6 +83,8 @@
 - 旁边显示当前生效值与来源（手动 / 探测 / 兜底）。
 - 文案写明：手动值同样乘 0.85，实际使用约为填写值的 85%；本地推理服务请按实际加载的窗口填写。
 - `max_tokens` 保持现有独立设置，不与它合并。
+
+- [已完成 2026-11-19] **usage 解析与观察指标**：`ApiResponse` 解析 `prompt_tokens`（EMA 校准估算）与 `prompt_cache_hit_tokens`；`TurnMetrics` 每次 turn 记一行（模式/结果/轮数/调用数/耗时/缓存命中），累计命中率进 `snapshot()`，只含计数、不含内容。观察期用 `adb logcat -s TurnMetrics` 统计。
 
 ### M5 上下文压缩 [已完成]
 - [已完成] 取消批量裁剪：`ConversationManager(autoTrim = false)` —— 内存窗口**追加式增长**、不再批量裁剪；启动恢复时装入**完整历史**（否则「已压缩覆盖点」可能落在窗口外，导致摘要与原文重复）；发送侧在压缩启用时不再用 `maxHistoryMessages` 截断（`maxMessages = Int.MAX_VALUE`），改由「压缩摘要 + 发送预算」控制。纯窗口模式（压缩关闭）仍保留 `maxSize/trimBatch` 裁剪。

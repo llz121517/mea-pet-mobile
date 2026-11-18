@@ -50,6 +50,8 @@ data class SettingsUiState(
     val maxTokens: Int = SettingsKeys.Defaults.MAX_TOKENS,
     val systemPrompt: String = SettingsKeys.Defaults.SYSTEM_PROMPT,
     val enableMemory: Boolean = SettingsKeys.Defaults.ENABLE_MEMORY,
+    /** 记忆检索模式（AUTO/TOOLS/TEXT/OFF）。 */
+    val memoryMode: com.meapet.mobile.config.MemoryMode = com.meapet.mobile.config.MemoryMode.DEFAULT,
     val enableAutoSummary: Boolean = SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY,
     val summaryInterval: Int = SettingsKeys.Defaults.SUMMARY_INTERVAL,
     val themeMode: String = SettingsKeys.Defaults.THEME_MODE,
@@ -155,6 +157,7 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
             maxTokens = settingsManager.getMaxTokens(),
             systemPrompt = settingsManager.getSystemPrompt(),
             enableMemory = settingsManager.isMemoryEnabled(),
+            memoryMode = settingsManager.getMemoryMode(),
             enableAutoSummary = settingsManager.isAutoSummaryEnabled(),
             summaryInterval = settingsManager.getSummaryInterval(),
             privacyAgreed = isPrivacyAgreed(),
@@ -181,6 +184,7 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
         subscribe(settingsManager.maxTokensFlow) { s, t -> s.copy(maxTokens = t) }
         subscribe(settingsManager.systemPromptFlow) { s, p -> s.copy(systemPrompt = p) }
         subscribe(settingsManager.enableMemoryFlow) { s, e -> s.copy(enableMemory = e) }
+        subscribe(settingsManager.memoryModeFlow) { s, m -> s.copy(memoryMode = m) }
         subscribe(settingsManager.enableAutoSummaryFlow) { s, e -> s.copy(enableAutoSummary = e) }
         subscribe(settingsManager.summaryIntervalFlow) { s, i -> s.copy(summaryInterval = i) }
         subscribe(settingsManager.themeModeFlow) { s, m -> s.copy(themeMode = m) }
@@ -343,6 +347,11 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
 
     fun updateEnableMemory(enabled: Boolean) {
         viewModelScope.launch { settingsManager.setEnableMemory(enabled) }
+    }
+
+    /** 更新记忆检索模式（AUTO/TOOLS/TEXT/OFF），下一轮发送立即生效。 */
+    fun updateMemoryMode(mode: com.meapet.mobile.config.MemoryMode) {
+        viewModelScope.launch { settingsManager.setMemoryMode(mode) }
     }
 
     fun updateEnableAutoSummary(enabled: Boolean) {

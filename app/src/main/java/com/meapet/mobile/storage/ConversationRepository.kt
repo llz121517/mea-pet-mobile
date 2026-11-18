@@ -15,6 +15,15 @@ interface ConversationRepository {
     /** 追加一条消息（id 已存在则忽略）。 */
     suspend fun append(message: ChatMessage)
 
+    /**
+     * 在一个事务里批量追加多条消息（id 已存在则忽略，保持传入顺序）。
+     *
+     * 一个 turn 的 user + 中间 assistant(tool_calls) + tool 结果 + 最终回复必须**同生共死**：
+     * 逐条 append 中间崩溃会留下「有 tool_calls 没结果」的残轮，服务端下一次请求直接 400。
+     * 因此 ChatService 成功时只调用本方法一次。
+     */
+    suspend fun appendAll(messages: List<ChatMessage>)
+
     /** 按 id 删除消息。@return 是否有消息被删除 */
     suspend fun remove(id: String): Boolean
 
@@ -45,6 +54,12 @@ class InMemoryConversationRepository : ConversationRepository {
     override suspend fun append(message: ChatMessage) {
         synchronized(lock) {
             if (items.none { it.id == message.id }) items.add(message)
+        }
+    }
+
+    override suspend fun appendAll(messages: List<ChatMessage>) {
+        synchronized(lock) {
+            messages.forEach { m -> if (items.none { it.id == m.id }) items.add(m) }
         }
     }
 

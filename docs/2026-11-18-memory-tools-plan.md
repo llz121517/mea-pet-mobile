@@ -1,6 +1,26 @@
 # 1.9 计划：记忆工具化 + 记忆检索工具（修订版）
 
-> 状态：待实施（Dev 分支）。本版在 2026-11-18 调查报告基础上，按 M0 探针、已落地的存储层、多 system 兼容性调研及最新已确认决策修订。
+> 状态：**已实施（dev 分支，1.9.0）**。2026-11-19 完成 M1–M3 与 §10 全部改造，待真机验收与 M4 观察期数据。本版在 2026-11-18 调查报告基础上，按 M0 探针、已落地的存储层、多 system 兼容性调研及最新已确认决策修订。
+
+## 实施状态（2026-11-19）
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| M0 请求/响应层探针 | ✅ | tools/tool_choice/tool_calls/reasoning_content 均已按 M0 结论实现 |
+| 请求/响应层（tools、toolMessage、assistant 原样透传） | ✅ | `ApiRequest` / `ApiResponse.chatCompletionMessage` |
+| 工具循环 `ChatToolLoop` | ✅ | 轮数上限取 **12**（为后续 web 搜索预留，原计划 4），单轮 8 调用，末轮 `tool_choice=none`、tools 字段不变 |
+| 4 个工具 + 统一信封 + 护栏 | ✅ | 暂存提交、永久类删除护栏、写入上限；`LONG_TERM` 不可直接创建 |
+| search_memory 检索 | ✅ | 内存打分（权重为实测修订值，见 §11.1） |
+| 工具消息入历史 + `turn_id` | ✅ | 一 turn 一事务（`appendAll`）；失败整轮不写；被取消按已完成部分提交 |
+| 连发多条气泡 + TTS 逐气泡 | ✅ | `ChatToolLoop.onVisibleFragment` → `ChatService.sendMessage(onFragment)` → ViewModel 逐条插入并朗读 |
+| 插队发送 / 停止 | ✅ | `turnPhase` 驱动输入框与状态条；`ChatService.isTurnActive` / `cancelActiveTurn()` |
+| 记忆检索模式（AUTO/TOOLS/TEXT/OFF） | ✅ | 设置页「记忆系统 → 检索方式」；端点不支持 tools 时同 turn 降级文本协议 |
+| 整个 turn 的 `withTimeout` | ✅ | `AppConfig.turnTimeoutMs`（默认 180s），超时归类为失败并回滚 |
+| M4 观察指标 | ✅ | `TurnMetrics`：只记计数/轮数/耗时/结果，不落内容；观察期结束后据此决定文本兜底策略 |
+| 切点按轮对齐 | ✅ | 压缩/丢弃切点按 user 边界；`buildApiMessages` 还会清洗孤立 tool 消息 |
+| M4 清理决策（删文本协议） | ⏳ | 待观察期数据，1.10/1.11 再定 |
+| 被打断 turn 的 `interrupted` 落库标记 | ⏳ 未做 | 当前仅在 `TurnMetrics` 日志里记 `CANCELLED`，重试/清除用「该 user 之后全部移除」已覆盖语义；无消费方，等有分析需求再补列或 meta 记录 |
+| 读类工具并发执行 | ⏳ 未做 | 记忆检索是内存毫秒级，串行不会成为瓶颈；并发会与暂存写状态交织，收益低风险高，暂不引入 |
 
 ## 0. 结论
 
@@ -183,7 +203,8 @@ MERGE_USER 与 SEPARATE_USER 的消息构造、严格交替校验、tail 不进�
 ### 11.1 检索（search_memory，不引入 FTS 与向量）
 
 - 候选召回：对 content 与 keywords 同时做字符二元组（bigram）重叠，中文天然适用，英文按词切分；匹配双向（query 含 keyword，或 keyword/content 含 query 片段）。
-- 打分：`1.0·关键词命中 + 0.6·内容 bigram 重叠率 + 0.3·重要度 + 0.1·新近度（按 lastAccessedAt 衰减）`，权重放常量，起始值上线后按真实使用调整。
+- 打分：`0.3·关键词命中率 + 0.1·内容 bigram 重叠率 + 0.1·重要度 + 0.1·新近度（按 lastAccessedAt 衰减）`，权重放常量，起始值上线后按真实使用调整。**实施时已从 1.0/0.6/0.3/0.1 修订为上述值**：原权重让关键词命中一项就压过其余全部信号，实际检索几乎只回一条。
+- 相关度排序**不再丢弃零分候选**：按得分排序后取前 `limit` 条，命中不足时用未命中条目补齐（记忆库通常只有几条，严格过滤会导致「只返回一条」甚至空结果）；候选池 = 已落库 + 本 turn 暂存的合并视图，同一轮 create/update 之后立刻 search 也能看到。
 - 参数 `types`、`limit`、`sort`（relevance/recent/importance）；模型可多次换词检索。
 - bigram 集合按记忆 id 在内存缓存，写入时失效。
 - 本版不引入 FTS。记忆涨到几千条后再评估把候选召回换成 FTS4（须走 `user_version=2` 迁移并真机验证；JVM 的 sqlite-jdbc 带 FTS5 而 Android 框架 SQLite 没有），打分层不变。
@@ -191,7 +212,7 @@ MERGE_USER 与 SEPARATE_USER 的消息构造、严格交替校验、tail 不进�
 ### 11.2 多轮循环
 
 - 流程：请求（带 tools）→ 有 tool_calls 则全部执行并按 `tool_call_id` 一一回填 → 追加 assistant 原始 message 与各 tool 消息 → 再请求，直到无 tool_calls。
-- `maxToolRounds = 4`，最后一轮 `tool_choice:"none"` 且 tools 字段不变；单轮最多 8 个调用；读类可并发，写类按序并合并为一次 `applyChanges`；整个 turn 设 `withTimeout`。
+- `maxToolRounds = 12`（原计划 4，实测多步记忆操作常 5~6 轮，且要为后续 web 搜索工具预留），最后一轮 `tool_choice:"none"` 且 tools 字段不变；单轮最多 8 个调用；写类按序执行并合并为一次 `applyChanges`；整个 turn 设 `withTimeout`（`AppConfig.turnTimeoutMs`）。
 - assistant 消息原样透传（含 `reasoning_content`）。
 - 本轮 content 不当作最终回复；content 非空且只含写类调用时直接结束的「终结型写入」仅为可选优化，需先统计频率。
 

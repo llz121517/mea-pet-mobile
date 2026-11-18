@@ -47,13 +47,27 @@ internal fun composeTail(fragments: List<String>): String {
 /**
  * 把 [tail] 按 [mode] 应用到即将发送的消息列表（返回新列表，不改动入参与会话历史）。
  * [tail] 为空时原样返回。
+ *
+ * **只在最后一条消息是 user 时附加**：工具循环的消息序列里，assistant(tool_calls) 与
+ * tool 结果必须紧邻。若在末尾不是 user 时硬插 tail，会把一条 user 消息夹进工具调用与
+ * 结果之间，服务端直接 400。正常调用点（请求前才组装）最后一条一定是刚入史的 user；
+ * 万一不是（如被窗口裁到 turn 中间），宁可不发 tail 也不能破坏序列。
+ *
+ * 注意这里**不**去历史里找更早的 user 拼接：tail 是「本轮动态内容」，
+ * 贴到历史中间会永久改变那段前缀，破坏 prefix cache，也容易让模型误以为那是旧对话。
  */
 internal fun applyTail(messages: List<ChatMessage>, tail: String, mode: TailMode): List<ChatMessage> {
     if (tail.isBlank()) return messages
     val last = messages.lastOrNull()
-    return if (mode == TailMode.MERGE_USER && last != null && last.role == ChatRole.user) {
-        messages.dropLast(1) + last.copy(content = "${last.content}\n\n$tail")
-    } else {
-        messages + ChatMessage(role = ChatRole.user, content = tail)
+    if (last == null || last.role != ChatRole.user) {
+        android.util.Log.w(
+            "TailMode",
+            "tail skipped: last message role=${last?.role}, not user (would break tool-call sequence)"
+        )
+        return messages
+    }
+    return when (mode) {
+        TailMode.MERGE_USER -> messages.dropLast(1) + last.copy(content = "${last.content}\n\n$tail")
+        TailMode.SEPARATE_USER -> messages + ChatMessage(role = ChatRole.user, content = tail)
     }
 }

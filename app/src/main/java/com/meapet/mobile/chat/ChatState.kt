@@ -5,13 +5,26 @@ import com.meapet.mobile.memory.MemoryItem
 import com.meapet.mobile.memory.MemoryStats
 
 /**
+ * 一轮对话的进行阶段（驱动输入框可用性与「Mea 还在…」状态条）。
+ *
+ * - [IDLE]：没有在途 turn，输入框可正常发送；
+ * - [WAITING_FIRST_REPLY]：已发出、还没收到任何可见回复。输入框保持禁用/转圈，
+ *   此时插队没有意义（用户看不到任何东西，只会白白打断）；
+ * - [REPLYING]：已经收到过至少一条片段/最终回复。输入框恢复可用，再发送即插队
+ *   （取消当前 turn 的后续请求后立刻开始新一轮），并显示带「停止」的状态条。
+ */
+enum class TurnPhase { IDLE, WAITING_FIRST_REPLY, REPLYING }
+
+/**
  * 聊天 UI 状态。
  *
  * 不可变数据类，由 ChatViewModel 持有并通过 StateFlow 下发。
  * UI 层仅读取此状态驱动渲染，不直接修改。
  *
- * @property messages 消息列表
- * @property isLoading 是否正在等待 AI 响应
+ * @property messages 消息列表（UI 可见消息；tool 与空 assistant 不进来）
+ * @property turnPhase 当前 turn 阶段
+ * @property isLoading 是否正在等待 AI 响应（= [turnPhase] != [TurnPhase.IDLE]，
+ *   保留该字段是为了不破坏 UI 现有用法）
  * @property error 错误信息（非 null 时在对话流末尾显示错误卡片）
  * @property inputText 输入框当前文本
  * @property updateNotice 启动静默检测发现的新版本提示（Snackbar 用）
@@ -27,7 +40,7 @@ import com.meapet.mobile.memory.MemoryStats
  */
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
-    val isLoading: Boolean = false,
+    val turnPhase: TurnPhase = TurnPhase.IDLE,
     val error: String? = null,
     val inputText: String = "",
     val updateNotice: UpdateNoticeUi? = null,
@@ -42,7 +55,10 @@ data class ChatUiState(
     val initialLoadDone: Boolean = false,
     /** 压缩完成后的一次性提示（成功/失败文案），由 UI 弹完即清空。 */
     val compactionNotice: String? = null
-)
+) {
+    /** 是否正在等待 AI 响应（派生自 [turnPhase]，避免两处状态不一致）。 */
+    val isLoading: Boolean get() = turnPhase != TurnPhase.IDLE
+}
 
 /** UI 层展示的更新提示。 */
 data class UpdateNoticeUi(

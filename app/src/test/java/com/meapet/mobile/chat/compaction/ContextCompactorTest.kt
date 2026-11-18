@@ -50,6 +50,34 @@ class ContextCompactorTest {
     }
 
     @Test
+    fun `切点不会落在工具 turn 中间`() {
+        // 每轮：user → assistant(tool_calls) → tool → assistant(最终)。共 4 条/轮
+        fun toolTurn(i: Int): List<ChatMessage> = listOf(
+            ChatMessage(role = ChatRole.user, content = "问题$i", id = "u$i"),
+            ChatMessage(
+                role = ChatRole.assistant, content = "", id = "a$i",
+                rawAssistantJson = """{"role":"assistant","tool_calls":[{"id":"c$i"}]}"""
+            ),
+            ChatMessage(role = ChatRole.tool, content = """{"ok":true}""", id = "t$i", toolCallId = "c$i"),
+            ChatMessage(role = ChatRole.assistant, content = "回答$i", id = "f$i")
+        )
+        val msgs = (1..10).flatMap { toolTurn(it) }
+
+        // 保留最近 4 轮 → 折叠前 6 轮 = 24 条；切点必须落在 user 消息上
+        val fold = foldCountFor(msgs, minKeepTurns = 4)
+        assertEquals(24, fold)
+        assertEquals(ChatRole.user, msgs[fold].role, "切点（下一条保留消息）必须是 user")
+        assertEquals(ChatRole.assistant, msgs[fold - 1].role, "折叠末尾应是上一轮的最终 assistant")
+
+        // 按预算丢弃时同样只能丢整轮：预算刚好够最近 3 轮（12 条）
+        val estimator = TokenEstimator()
+        val budget = estimator.estimate(msgs.takeLast(12))
+        val drop = dropCountToFit(msgs, estimator, budget)
+        assertEquals(28, drop)
+        assertEquals(ChatRole.user, msgs[drop].role)
+    }
+
+    @Test
     fun `压缩成功返回摘要正文并带上旧摘要与新内容`() = runTest {
         var seenBody = ""
         val engine = FakeHttpClientEngine { req ->

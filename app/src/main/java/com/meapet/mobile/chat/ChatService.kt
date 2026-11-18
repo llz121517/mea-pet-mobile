@@ -8,18 +8,31 @@ import com.meapet.mobile.chat.compaction.ContextCompactor
 import com.meapet.mobile.chat.compaction.TokenEstimator
 import com.meapet.mobile.chat.compaction.dropCountToFit
 import com.meapet.mobile.chat.compaction.foldCountFor
+import com.meapet.mobile.chat.tools.ToolCallMarkup
 import com.meapet.mobile.client.OpenAiCompatibleClient
+import com.meapet.mobile.client.exception.ApiException
 import com.meapet.mobile.client.model.ApiRequest
 import com.meapet.mobile.client.model.ApiResponse
 import com.meapet.mobile.config.AppConfig
+import com.meapet.mobile.config.MemoryMode
 import com.meapet.mobile.memory.MemoryManager
 import com.meapet.mobile.memory.MemoryOpsProtocol
 import com.meapet.mobile.settings.SettingsManager
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 
 /**
  * 聊天业务服务。
@@ -30,6 +43,16 @@ import kotlinx.coroutines.withContext
  * - 将对话记录交给 [ConversationManager] 管理；
  * - 每次对话后触发记忆提取；
  * - 上下文压缩：把较早轮次折叠成滚动摘要，摘要并入首条 system 末尾。
+ *
+ * ## 一次 turn 的完整模型
+ * 一轮不再等于「一条 user + 一条 assistant」：工具模式下模型可能先给一段文字并调用工具，
+ * 执行后再说下一段，最后才给最终回复。因此一轮由若干消息组成：
+ * ```
+ * user(turnId) → assistant(turnId, 可能为空, rawAssistantJson) → tool(turnId) → … → assistant(最终)
+ * ```
+ * 所有消息共用同一个 [ChatMessage.turnId]，成功时由 [ConversationManager.addMessages]
+ * **一个事务**落库；失败/超时整轮回滚（只移除 user）；被插队/停止时按已完成部分提交
+ * （只提交正文非空的 assistant 片段，丢掉 tool_calls 与 tool 消息，避免留下无法配对的半轮）。
  *
  * ## 上下文压缩的两层触发
  * - **手动**（主路径）：上下文估算超过 [CompactionConfig.COMPACT_HINT_TOKENS] 时由 UI 提醒，
@@ -112,6 +135,32 @@ class ChatService(
     @Volatile
     private var lastContextTokens = 0
 
+    /** 是否有在途 turn（主界面与悬浮窗共用同一 ChatService，必须进程级可见）。 */
+    private val turnActive = AtomicBoolean(false)
+
+    /** 在途 turn 的协程 Job（[cancelActiveTurn] 的取消句柄）。 */
+    private val activeTurnJob = AtomicReference<Job?>(null)
+
+    /** 解析 rawAssistantJson 用（忽略未知字段，思考模式字段不丢）。 */
+    private val json = Json { ignoreUnknownKeys = true }
+
+    /**
+     * 当前是否有在途 turn。
+     *
+     * 插队发送 / 状态条「停止」都据此判断；悬浮窗等其他 UI 与主界面共享同一个实例。
+     */
+    val isTurnActive: Boolean get() = turnActive.get()
+
+    /**
+     * 取消当前在途 turn（用户点「停止」或插队发送时由调用方触发）。
+     *
+     * 取消会走 [sendMessage] 的取消分支：已展示的正文片段按「已完成部分」提交，
+     * 未完成的 tool_calls 与写类暂存丢弃。无在途 turn 时为 no-op。
+     */
+    fun cancelActiveTurn() {
+        activeTurnJob.get()?.cancel()
+    }
+
     /**
      * 发送消息并获取 AI 回复。
      *
@@ -128,260 +177,495 @@ class ChatService(
      * 若各建一条，同一句话就有两个 id，`ChatViewModel.mergeWithHistory` 无法把它们
      * 认作同一条，一次 `reloadHistory()` 就会并列成两条。
      *
+     * ## 回调与历史
+     * [onFragment] 在工具循环每轮「同时带正文和 tool_calls」时被调用，参数是**已带
+     * turnId/rawAssistantJson 的中间 assistant 记录**。UI 收到即插入气泡（连发多条），
+     * 但历史只在整轮成功时一次性写入，失败时同一条片段不会残留在历史里。
+     *
      * @param userMessage 用户消息（id 由调用方决定）
-     * @return 包含用户消息与 AI 回复的 Pair
+     * @param onFragment 可见的中间回复片段回调（默认空实现，方便测试/悬浮窗忽略）
+     * @return 包含用户消息与 AI 回复的 Pair（用户消息带本轮 turnId）
      */
-    suspend fun sendMessage(userMessage: ChatMessage): Result<Pair<ChatMessage, ChatMessage>> {
-        return withContext(Dispatchers.IO) {
-            val content = userMessage.content
-            try {
-                onBeforeSend()
+    suspend fun sendMessage(
+        userMessage: ChatMessage,
+        onFragment: (ChatMessage) -> Unit = {}
+    ): Result<Pair<ChatMessage, ChatMessage>> {
+        val startedAt = System.currentTimeMillis()
+        val turnId = UUID.randomUUID().toString()
+        val turnUser = userMessage.copy(turnId = turnId)
+        // 本轮记录：工具循环产生的中间 assistant / tool 消息。成功时一次性入史，
+        // 失败/超时从未入史，被取消时只挑已展示的正文提交（见下方 catch 分支）。
+        val transcript = mutableListOf<ChatMessage>()
 
-                // 工具模式的写类操作是「turn 内暂存、成功后提交」：每轮开始先清理上一轮的残留
-                if (config.enableMemoryTools) memoryTools?.discardPending()
+        // 模式解析放在最前：失败路径也要把本轮模式记进观察指标
+        val memoryMode = if (config.enableMemory) settingsManager.getMemoryMode() else MemoryMode.OFF
+        val wantsTools = config.enableMemoryTools && memoryMode.usesTools && !toolsUnsupported
 
-                // 1) 用户消息先入史：apiMessages 由历史构建，当前消息必须已在其中。
-                //    代价是任何失败路径都必须回滚，否则留下从未发出的"幽灵消息"
-                //    （污染后续请求上下文，且会被持久化）。
-                conversationManager.addMessage(userMessage)
-
-                // 2) 获取记忆上下文（拆成稳定段与每轮都变的尾部段，见 MemoryContext）。
-                //    工具模式下不再注入文本协议说明与关键词回忆：记忆通过 search_memory 工具检索，
-                //    两套协议同时存在会让模型在「输出围栏块」和「调用工具」之间摇摆。
-                val toolsOn = config.enableMemoryTools && !toolsUnsupported
-                val memoryContext = if (toolsOn) null else memoryManager?.buildContext(content)
-                val stableContext = if (toolsOn) MEMORY_TOOL_HINT else (memoryContext?.stable ?: "")
-
-                // 3) 获取设置
-                val systemPrompt = settingsManager.getSystemPrompt()
-                val model = settingsManager.getModel()
-                val temperature = settingsManager.getTemperature()
-                val maxTokens = settingsManager.getMaxTokens()
-
-                // 4) 构建 API 请求。时间与记忆回忆一起并入最后一条 user：都是每轮都变的内容，
-                //    放前面会让排在其后的全部历史都无法命中服务端 prefix cache
-                val tailFragments = listOfNotNull(
-                    TimeContext.describe(),
-                    memoryContext?.tail?.takeIf { it.isNotBlank() }
-                )
-
-                // 4b) 上下文压缩：先取状态与「已覆盖多少」，再判断是否需要硬触发兜底
-                var state = ensureCompactionLoaded()
-                val window = conversationManager.getMessages().filter { it.role != ChatRole.system }
-                val budget = budgetProvider()
-                var skipOldest = resolveSkip(window, state)
-                var usable = window.drop(skipOldest)
-                val overhead = estimator.estimate(systemPrompt) +
-                    estimator.estimate(memoryContext?.stable ?: "") +
-                    estimator.estimate(composeTail(tailFragments)) +
-                    estimator.estimate(state.summary)
-                var estimated = overhead + estimator.estimate(usable)
-
-                if (budget > 0 && estimated > budget * CompactionConfig.HARD_TRIGGER_RATIO) {
-                    // 自动压缩只做兜底：小窗口直接放弃摘要，只截断
-                    if (budget > CompactionConfig.SMALL_WINDOW_TOKENS) {
-                        val fold = foldCountFor(usable)
-                        val newSummary = if (fold > 0) compactor?.compact(usable, state.summary, fold) else null
-                        if (newSummary != null) {
-                            state = state.copy(
-                                summary = newSummary,
-                                coveredToMessageId = usable[fold - 1].id,
-                                coveredCount = skipOldest + fold,
-                                updatedAt = System.currentTimeMillis()
-                            )
-                            compactionState = state
-                            compactionStore?.save(state)
-                            skipOldest += fold
-                            usable = window.drop(skipOldest)
-                            estimated = overhead + estimator.estimate(usable)
-                            Log.i(TAG, "Auto compaction done (hard trigger), $fold message(s) folded")
-                        }
-                    }
-                    // 压缩失败或仍超预算：只在发给模型的窗口内按轮丢弃（库里一条不删）
-                    if (estimated > budget) {
-                        val drop = dropCountToFit(
-                            usable,
-                            estimator,
-                            (budget - overhead).coerceAtLeast(1)
+        turnActive.set(true)
+        activeTurnJob.set(coroutineContext[Job])
+        try {
+            return withContext(Dispatchers.IO) {
+                try {
+                    // 整个 turn（多轮工具请求 + tools 不支持降级 + 空回复兜底）共用一个总超时：
+                    // 移动网络下工具循环最坏是 maxRounds 次请求叠加，没有总超时用户只能强杀
+                    val execution = withTimeout(config.turnTimeoutMs) {
+                        runTurn(
+                            turnUser = turnUser,
+                            turnId = turnId,
+                            memoryMode = memoryMode,
+                            wantsTools = wantsTools,
+                            transcript = transcript,
+                            onVisibleFragment = onFragment
                         )
-                        if (drop > 0) {
-                            skipOldest += drop
-                            usable = window.drop(skipOldest)
-                            estimated = overhead + estimator.estimate(usable)
-                            Log.w(TAG, "Hard window trim: dropped $drop message(s) from send window")
-                        }
                     }
-                }
-                lastContextTokens = estimated
 
-                // 记忆关闭时 stable 为空（模型压根没收到协议说明），历史里也不该回贴协议块
-                val memoryOn = stableContext.isNotBlank() && !toolsOn
-                val compactionEnabled = compactionStore != null && compactor != null
-                val apiMessages = conversationManager.buildApiMessages(
-                    systemPrompt = systemPrompt,
-                    stableContext = stableContext,
-                    tailFragments = tailFragments,
-                    maxMessages = if (compactionEnabled) Int.MAX_VALUE else config.maxHistoryMessages,
-                    memoryOpsEchoTurns = if (memoryOn) config.memoryOpsEchoTurns else 0,
-                    summary = state.summary,
-                    skipOldest = skipOldest
-                )
-
-                val jsonMessages = apiMessages.map { msg ->
-                    ApiRequest.textMessage(msg.role.name, msg.content)
-                }
-
-                val requestBody = ApiRequest.chatCompletion(
-                    model = model,
-                    messages = jsonMessages,
-                    temperature = temperature,
-                    maxTokens = maxTokens,
-                    stream = false
-                )
-
-                Log.d(
-                    TAG,
-                    "Sending request to $model (${apiMessages.size} messages, " +
-                        "${apiMessages.sumOf { it.content.length }} chars, ~$estimated tokens)"
-                )
-                // 校准用的原始估算（未乘校准系数），与 usage.prompt_tokens 同口径比较
-                val rawEstimate = apiMessages.sumOf { estimator.rawTokens(it) }
-
-                // 5) 发送请求。工具模式下走工具循环（可能多轮）；端点明确不支持 tools 时
-                //    本次自动降级为单次请求，并记住「本会话不再尝试工具」，保证聊天不中断。
-                val loop = if (toolsOn) toolLoop else null
-                val assistantContent: String? = if (loop != null) {
-                    try {
-                        val loopResult = loop.run(model, jsonMessages, temperature, maxTokens)
-                        // 用第一轮的真实 prompt_tokens 校准本地估算
-                        loopResult.firstPromptTokens?.let { actual -> estimator.calibrate(rawEstimate, actual) }
-                        loopResult.finalContent
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        if (e is com.meapet.mobile.client.exception.ApiException &&
-                            e.statusCode in TOOLS_UNSUPPORTED_STATUS
-                        ) {
-                            Log.w(TAG, "Endpoint rejected tools (HTTP ${e.statusCode}), falling back to single request")
-                            toolsUnsupported = true
-                            val fallbackJson = clientProvider().chatCompletion(requestBody)
-                            ApiResponse.usagePromptTokens(fallbackJson)?.let { actual ->
-                                estimator.calibrate(rawEstimate, actual)
-                            }
-                            ApiResponse.chatCompletionContent(fallbackJson)?.takeIf { it.isNotBlank() }
-                        } else {
-                            Log.w(TAG, "Tool loop failed", e)
-                            conversationManager.removeMessage(userMessage.id)
-                            return@withContext Result.failure(e)
-                        }
-                    }
-                } else {
-                    val responseJson = clientProvider().chatCompletion(requestBody)
-                    // 5b) 用服务端真实 prompt_tokens 校准本地估算（缺 usage 时保持原比值）
-                    ApiResponse.usagePromptTokens(responseJson)?.let { actual ->
-                        estimator.calibrate(rawEstimate, actual)
-                    }
-                    ApiResponse.chatCompletionContent(responseJson)?.takeIf { it.isNotBlank() }
-                }
-
-                // 6) 解析响应（choices 为空或 content 缺失视为失败，不入史）。
-                //    先清洗模型可能以文本形式泄漏的工具调用标记（见 ToolCallMarkup）。
-                var content = assistantContent
-                    ?.let { com.meapet.mobile.chat.tools.ToolCallMarkup.strip(it) }
-                    .orEmpty()
-                if (content.isBlank()) {
-                    Log.w(TAG, "Unexpected API response: empty or markup-only content, retrying without tools")
-                    // 工具模式下最后一轮可能只剩标记：补一次不带 tools 的请求，尽量给用户一句正常回复
-                    if (toolsOn) {
-                        val fallbackJson = runCatching { clientProvider().chatCompletion(requestBody) }.getOrNull()
-                        content = fallbackJson
-                            ?.let { ApiResponse.chatCompletionContent(it) }
-                            ?.let { com.meapet.mobile.chat.tools.ToolCallMarkup.strip(it) }
-                            .orEmpty()
-                    }
-                }
-                if (content.isBlank()) {
-                    conversationManager.removeMessage(userMessage.id)
-                    return@withContext Result.failure(
-                        IllegalStateException("API 响应中没有有效的回复内容")
+                    // 1) 解析最终回复：先剥离可能以文本形式泄漏的工具调用标记，再剥离记忆协议块
+                    val parsed = MemoryOpsProtocol.extract(execution.content)
+                    val finalAssistant = ChatMessage(
+                        role = ChatRole.assistant,
+                        content = parsed.visibleReply,
+                        // 块留在消息上（不展示），下一轮贴回历史当格式范例，见 ConversationManager
+                        memoryOpsBlock = parsed.rawBlock,
+                        turnId = turnId,
+                        // 原始回包（含 reasoning_content 等）供下一轮原样透传
+                        rawAssistantJson = execution.finalRaw
                     )
-                }
-                // 6b) 剥离模型附在回复末尾的记忆协议块（对用户不可见，见 MemoryOpsProtocol）
-                val parsed = MemoryOpsProtocol.extract(content)
-                val memoryOps = parsed.ops
-                val assistantMessage = ChatMessage(
-                    role = ChatRole.assistant,
-                    content = parsed.visibleReply,
-                    // 块留在消息上（不展示），下一轮贴回历史当格式范例，见 ConversationManager
-                    memoryOpsBlock = parsed.rawBlock
-                )
-                conversationManager.addMessage(assistantMessage)
+                    // 2) 一个事务落库整轮：user 已在 runTurn 开头入史；这里补中间记录 + 最终回复。
+                    //    纯 tool_calls 的空 assistant 与 tool 消息也必须落库（下一轮请求需要）。
+                    conversationManager.addMessages(transcript + finalAssistant)
 
-                // 工具模式：整个 turn 成功后才提交暂存写入（失败/取消已在 catch/提前 return 中丢弃）
-                if (config.enableMemoryTools) {
-                    val pending = memoryTools?.drainPending()
-                    if (pending != null && !pending.isEmpty) {
-                        memoryManager?.applyToolChanges(pending)
-                    }
-                }
-
-                // 7) 事后处理：应用记忆操作/触发摘要转后台，不阻塞本次回复返回
-                //   （摘要是一次额外 LLM 请求，同步等它会让 UI 在拿到回复后仍长时间显示加载中）
-                memoryManager?.let { mm ->
-                    postProcessScope.launch {
-                        try {
-                            mm.onExchangeComplete(memoryOps)
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Memory post-processing failed", e)
+                    // 3) 工具模式：整个 turn 成功后才提交暂存写入（失败/取消已在各 catch 中丢弃）
+                    if (config.enableMemoryTools) {
+                        val pending = memoryTools?.drainPending()
+                        if (pending != null && !pending.isEmpty) {
+                            memoryManager?.applyToolChanges(pending)
                         }
                     }
+
+                    // 4) 事后处理：应用记忆操作/触发摘要转后台，不阻塞本次回复返回
+                    //   （摘要是一次额外 LLM 请求，同步等它会让 UI 在拿到回复后仍长时间显示加载中）
+                    memoryManager?.let { mm ->
+                        postProcessScope.launch {
+                            try {
+                                mm.onExchangeComplete(parsed.ops)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Memory post-processing failed", e)
+                            }
+                        }
+                    }
+
+                    TurnMetrics.record(
+                        mode = memoryMode,
+                        toolMode = execution.toolsUsed,
+                        rounds = execution.rounds,
+                        toolCalls = execution.toolCalls,
+                        durationMs = System.currentTimeMillis() - startedAt,
+                        outcome = TurnOutcome.SUCCESS,
+                        promptTokens = execution.promptTokens,
+                        cacheHitTokens = execution.cacheHitTokens
+                    )
+                    Log.d(TAG, "Response received (${parsed.visibleReply.length} chars)")
+                    Result.success(turnUser to finalAssistant)
+                } catch (e: TimeoutCancellationException) {
+                    // 单独先于 CancellationException 捕获：超时是失败，不是用户取消
+                    Log.w(TAG, "Turn timed out after ${config.turnTimeoutMs} ms")
+                    conversationManager.removeMessage(turnUser.id)
+                    memoryTools?.discardPending()
+                    TurnMetrics.record(
+                        mode = memoryMode,
+                        toolMode = wantsTools,
+                        rounds = estimateRounds(transcript, wantsTools),
+                        toolCalls = transcript.count { it.isTool },
+                        durationMs = System.currentTimeMillis() - startedAt,
+                        outcome = TurnOutcome.TIMEOUT
+                    )
+                    Result.failure(
+                        IllegalStateException(
+                            "请求超时（${config.turnTimeoutMs / 1000} 秒），请检查网络后重试"
+                        )
+                    )
+                } catch (e: CancellationException) {
+                    // 插队发送 / 点「停止」：已展示的气泡按「已完成部分」提交；没有任何回复则不留孤儿 user
+                    val visible = transcript
+                        .filter { it.role == ChatRole.assistant && it.content.isNotBlank() }
+                        .map { it.copy(rawAssistantJson = null) }
+                    if (visible.isNotEmpty()) {
+                        conversationManager.addMessages(visible)
+                        Log.i(TAG, "Turn cancelled, committed ${visible.size} visible fragment(s)")
+                    } else {
+                        conversationManager.removeMessage(turnUser.id)
+                    }
+                    memoryTools?.discardPending()
+                    TurnMetrics.record(
+                        mode = memoryMode,
+                        toolMode = wantsTools,
+                        rounds = estimateRounds(transcript, wantsTools),
+                        toolCalls = transcript.count { it.isTool },
+                        durationMs = System.currentTimeMillis() - startedAt,
+                        outcome = TurnOutcome.CANCELLED
+                    )
+                    throw e
+                } catch (e: Exception) {
+                    // 失败路径：transcript 从未入史，只需回滚开头的 user 消息
+                    Log.e(TAG, "Failed to send message", e)
+                    conversationManager.removeMessage(turnUser.id)
+                    memoryTools?.discardPending()
+                    TurnMetrics.record(
+                        mode = memoryMode,
+                        toolMode = wantsTools,
+                        rounds = estimateRounds(transcript, wantsTools),
+                        toolCalls = transcript.count { it.isTool },
+                        durationMs = System.currentTimeMillis() - startedAt,
+                        outcome = TurnOutcome.FAILURE
+                    )
+                    Result.failure(e)
                 }
-
-                Log.d(TAG, "Response received (${parsed.visibleReply.length} chars)")
-                Result.success(userMessage to assistantMessage)
-
-            } catch (e: CancellationException) {
-                // 取消同样要回滚：清空会话会取消在途请求，留下的消息既无回复也无人清理
-                conversationManager.removeMessage(userMessage.id)
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to send message", e)
-                conversationManager.removeMessage(userMessage.id)
-                Result.failure(e)
             }
+        } finally {
+            activeTurnJob.set(null)
+            turnActive.set(false)
         }
     }
 
+    // ── 单轮执行 ──────────────────────────────────────
+
+    /** 组装好的本地请求：既有领域副本（估算/日志用），也有最终 JSON 序列化结果。 */
+    private data class LocalRequest(
+        val messages: List<ChatMessage>,
+        val jsonMessages: List<JsonObject>,
+        val body: String,
+        val rawEstimate: Int
+    )
+
+    /** 一轮执行的结果（尚未解析记忆协议块）。 */
+    private data class TurnExecution(
+        val content: String,
+        val finalRaw: String?,
+        val rounds: Int,
+        val toolCalls: Int,
+        val toolsUsed: Boolean,
+        /** 服务端报告的首轮输入 token（缺 usage 时为 null，仅观察用）。 */
+        val promptTokens: Int? = null,
+        /** 服务端报告的前缀缓存命中 token（缺字段时为 null，仅观察用）。 */
+        val cacheHitTokens: Int? = null
+    )
+
+    /**
+     * 执行一轮请求并返回最终正文。
+     *
+     * 只做「拿到最终正文」这一件事；历史写入/回滚/指标都在 [sendMessage] 里统一处理，
+     * 保证成功、失败、取消、超时四条路径的收尾逻辑不会各写一遍而走偏。
+     */
+    private suspend fun runTurn(
+        turnUser: ChatMessage,
+        turnId: String,
+        memoryMode: MemoryMode,
+        wantsTools: Boolean,
+        transcript: MutableList<ChatMessage>,
+        onVisibleFragment: (ChatMessage) -> Unit
+    ): TurnExecution {
+        onBeforeSend()
+        if (config.enableMemoryTools) memoryTools?.discardPending()
+
+        // 用户消息先入史：apiMessages 由历史构建，当前消息必须已在其中。
+        // 代价是任何失败路径都必须回滚（见 sendMessage 的 fail/timeout 分支），
+        // 否则留下从未发出的「幽灵消息」污染后续上下文并被持久化
+        conversationManager.addMessage(turnUser)
+        val content = turnUser.content
+
+        // 模式解析（需求 §5.2）：
+        // - 工具模式：stable = 固定工具说明，不再注入文本协议说明与关键词回忆
+        //   （两套协议同时存在会让模型在「输出围栏块」和「调用工具」之间摇摆）
+        // - 非工具模式且记忆未关闭：走文本协议，stable + tail
+        // - OFF：stable 为空，也不注入
+        val textProtocol = !wantsTools && memoryMode != MemoryMode.OFF
+        val memoryContext = if (textProtocol) memoryManager?.buildContext(content) else null
+        var stableContext = if (wantsTools) MEMORY_TOOL_HINT else (memoryContext?.stable ?: "")
+        var tailFragments = listOfNotNull(
+            TimeContext.describe(),
+            memoryContext?.tail?.takeIf { it.isNotBlank() }
+        )
+        // 记忆关闭时 stable 为空（模型压根没收到协议说明），历史里也不该回贴协议块
+        var memoryOpsEchoTurns =
+            if (stableContext.isNotBlank() && !wantsTools) config.memoryOpsEchoTurns else 0
+
+        val systemPrompt = settingsManager.getSystemPrompt()
+        val model = settingsManager.getModel()
+        val temperature = settingsManager.getTemperature()
+        val maxTokens = settingsManager.getMaxTokens()
+
+        // 上下文压缩：先取状态与「已覆盖多少」，再判断是否需要硬触发兜底。
+        // 折叠/丢弃切点由 compaction 包按 user 消息边界对齐，不会切在 turn 中间
+        var state = ensureCompactionLoaded()
+        val window = conversationManager.getMessages().filter { it.role != ChatRole.system }
+        val budget = budgetProvider()
+        var skipOldest = resolveSkip(window, state)
+        var usable = window.drop(skipOldest)
+        val overhead = estimator.estimate(systemPrompt) +
+            estimator.estimate(stableContext) +
+            estimator.estimate(composeTail(tailFragments)) +
+            estimator.estimate(state.summary)
+        var estimated = overhead + estimator.estimate(usable)
+
+        if (budget > 0 && estimated > budget * CompactionConfig.HARD_TRIGGER_RATIO) {
+            // 自动压缩只做兜底：小窗口直接放弃摘要，只截断
+            if (budget > CompactionConfig.SMALL_WINDOW_TOKENS) {
+                val fold = foldCountFor(usable)
+                val newSummary = if (fold > 0) compactor?.compact(usable, state.summary, fold) else null
+                if (newSummary != null) {
+                    state = state.copy(
+                        summary = newSummary,
+                        coveredToMessageId = usable[fold - 1].id,
+                        coveredCount = skipOldest + fold,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    compactionState = state
+                    compactionStore?.save(state)
+                    skipOldest += fold
+                    usable = window.drop(skipOldest)
+                    estimated = overhead + estimator.estimate(usable)
+                    Log.i(TAG, "Auto compaction done (hard trigger), $fold message(s) folded")
+                }
+            }
+            // 压缩失败或仍超预算：只在发给模型的窗口内按轮丢弃（库里一条不删）
+            if (estimated > budget) {
+                val drop = dropCountToFit(
+                    usable,
+                    estimator,
+                    (budget - overhead).coerceAtLeast(1)
+                )
+                if (drop > 0) {
+                    skipOldest += drop
+                    usable = window.drop(skipOldest)
+                    estimated = overhead + estimator.estimate(usable)
+                    Log.w(TAG, "Hard window trim: dropped $drop message(s) from send window")
+                }
+            }
+        }
+        lastContextTokens = estimated
+
+        val compactionEnabled = compactionStore != null && compactor != null
+        val maxMessages = if (compactionEnabled) Int.MAX_VALUE else config.maxHistoryMessages
+
+        // 局部组装函数：tools 不支持降级 / 空回复兜底都要换参数重建请求
+        fun buildLocalRequest(
+            includeToolHistory: Boolean,
+            stable: String,
+            tail: List<String>,
+            echo: Int
+        ): LocalRequest {
+            val apiMessages = conversationManager.buildApiMessages(
+                systemPrompt = systemPrompt,
+                stableContext = stable,
+                tailFragments = tail,
+                maxMessages = maxMessages,
+                memoryOpsEchoTurns = echo,
+                summary = state.summary,
+                skipOldest = skipOldest,
+                includeToolHistory = includeToolHistory
+            )
+            val jsonMessages = apiMessages.map { toApiJson(it, includeRaw = includeToolHistory) }
+            val body = ApiRequest.chatCompletion(
+                model = model,
+                messages = jsonMessages,
+                temperature = temperature,
+                maxTokens = maxTokens,
+                stream = false
+            )
+            return LocalRequest(
+                messages = apiMessages,
+                jsonMessages = jsonMessages,
+                body = body,
+                rawEstimate = apiMessages.sumOf { estimator.rawTokens(it) }
+            )
+        }
+
+        // 最近一次响应的服务端 usage（观察期指标：输入 token 与 prefix cache 命中数）
+        var usagePromptTokens: Int? = null
+        var usageCacheHitTokens: Int? = null
+
+        suspend fun requestOnce(request: LocalRequest): String {
+            val responseJson = clientProvider().chatCompletion(request.body)
+            // 用服务端真实 prompt_tokens 校准本地估算（缺 usage 时保持原比值）
+            ApiResponse.usagePromptTokens(responseJson)?.let { actual ->
+                estimator.calibrate(request.rawEstimate, actual)
+                usagePromptTokens = actual
+                usageCacheHitTokens = ApiResponse.usagePromptCacheHitTokens(responseJson)
+            }
+            return ApiResponse.chatCompletionContent(responseJson)
+                ?.let { ToolCallMarkup.strip(it) }
+                .orEmpty()
+        }
+
+        var local = buildLocalRequest(
+            includeToolHistory = wantsTools,
+            stable = stableContext,
+            tail = tailFragments,
+            echo = memoryOpsEchoTurns
+        )
+        Log.d(
+            TAG,
+            "Sending request to $model (${local.messages.size} messages, " +
+                "${local.messages.sumOf { it.content.length }} chars, ~$estimated tokens)"
+        )
+
+        val loop = if (wantsTools) toolLoop else null
+        var toolsUsed = false
+        var rounds = 1
+        var toolCalls = 0
+        var finalContent: String
+        var finalRaw: String? = null
+
+        if (loop != null) {
+            try {
+                val loopResult = loop.run(
+                    model = model,
+                    messages = local.jsonMessages,
+                    temperature = temperature,
+                    maxTokens = maxTokens,
+                    turnId = turnId,
+                    onVisibleFragment = onVisibleFragment,
+                    onTranscript = { record -> transcript += record }
+                )
+                // 用第一轮的真实 prompt_tokens 校准本地估算；cache hit 只进观察指标
+                loopResult.firstPromptTokens?.let { estimator.calibrate(local.rawEstimate, it) }
+                usagePromptTokens = loopResult.firstPromptTokens ?: usagePromptTokens
+                usageCacheHitTokens = loopResult.firstPromptCacheHit ?: usageCacheHitTokens
+                toolsUsed = true
+                rounds = loopResult.rounds
+                toolCalls = loopResult.toolCalls
+                finalContent = loopResult.finalContent
+                finalRaw = loopResult.finalRaw
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val status = (e as? ApiException)?.statusCode
+                if (status == null || status !in TOOLS_UNSUPPORTED_STATUS) throw e
+                // 端点明确不支持 tools：本 turn 立即降级为文本协议重发，聊天不中断；
+                // 之后本会话不再尝试 tools（toolsUnsupported 已置位）
+                Log.w(TAG, "Endpoint rejected tools (HTTP $status), falling back to text protocol")
+                toolsUnsupported = true
+                val fallbackContext =
+                    if (memoryMode != MemoryMode.OFF) memoryManager?.buildContext(content) else null
+                stableContext = fallbackContext?.stable ?: ""
+                tailFragments = listOfNotNull(
+                    TimeContext.describe(),
+                    fallbackContext?.tail?.takeIf { it.isNotBlank() }
+                )
+                memoryOpsEchoTurns =
+                    if (stableContext.isNotBlank()) config.memoryOpsEchoTurns else 0
+                local = buildLocalRequest(
+                    // 文本协议不能带工具历史：端点连 tools 都不支持，tool_calls 更解析不了
+                    includeToolHistory = false,
+                    stable = stableContext,
+                    tail = tailFragments,
+                    echo = memoryOpsEchoTurns
+                )
+                finalContent = requestOnce(local)
+                finalRaw = null
+            }
+        } else {
+            finalContent = requestOnce(local)
+        }
+
+        // 清洗模型可能以文本形式泄漏的工具调用标记；工具模式下最后一轮可能只剩标记，
+        // 补一次不带 tools 的请求，尽量给用户一句正常回复（不丢整轮）
+        var cleaned = ToolCallMarkup.strip(finalContent)
+        if (cleaned.isBlank() && toolsUsed) {
+            Log.w(TAG, "Unexpected API response: empty or markup-only content, retrying without tools")
+            val fallback = buildLocalRequest(
+                includeToolHistory = false,
+                stable = stableContext,
+                tail = tailFragments,
+                echo = 0
+            )
+            cleaned = ToolCallMarkup.strip(requestOnce(fallback))
+            finalRaw = null
+        }
+        if (cleaned.isBlank()) {
+            throw IllegalStateException("API 响应中没有有效的回复内容")
+        }
+        return TurnExecution(
+            content = cleaned,
+            finalRaw = finalRaw,
+            rounds = rounds,
+            toolCalls = toolCalls,
+            toolsUsed = toolsUsed,
+            promptTokens = usagePromptTokens,
+            cacheHitTokens = usageCacheHitTokens
+        )
+    }
+
+    /**
+     * 把领域消息映射成请求 JSON。
+     *
+     * - `role=tool`：必须带 `tool_call_id`（正常路径下 ConversationManager 已清洗掉非法项）；
+     * - assistant 且有原始回包且当前请求保留工具历史：原样透传原始 message
+     *   （raw 里已包含 content，不能再拼一次）；解析失败退回纯文本；
+     * - 其余按纯文本发送（含 tail 已并入的最后一条 user）。
+     */
+    private fun toApiJson(msg: ChatMessage, includeRaw: Boolean): JsonObject {
+        if (msg.role == ChatRole.tool) {
+            val toolCallId = msg.toolCallId
+            if (toolCallId != null) return ApiRequest.toolMessage(toolCallId, msg.content)
+            // 兜底：无 id 的 tool 行无法组成合法请求，当普通文本发（正常不会走到这里）
+            Log.w(TAG, "Tool message without tool_call_id, sent as plain text")
+            return ApiRequest.textMessage("user", msg.content)
+        }
+        if (includeRaw) {
+            val raw = msg.rawAssistantJson
+            if (raw != null) {
+                val parsed = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull()
+                if (parsed != null) return parsed
+                Log.w(TAG, "Failed to parse raw assistant json, falling back to text message")
+            }
+        }
+        return ApiRequest.textMessage(msg.role.name, msg.content)
+    }
+
+    /** 失败/取消/超时时的轮数下限估算（指标用，不参与业务逻辑）。 */
+    private fun estimateRounds(transcript: List<ChatMessage>, toolMode: Boolean): Int =
+        if (toolMode && transcript.isNotEmpty()) {
+            transcript.count { it.role == ChatRole.assistant } + 1
+        } else {
+            1
+        }
+
     /**
      * 重新发送指定的用户消息（用于失败重试）。
+     *
+     * **整轮语义**：在内存历史里找到该 user 消息下标，连同它之后的所有消息一起移除
+     * （后续只可能是同一轮的 assistant/tool 片段），然后交给 [sendMessage] 重新生成
+     * 新 turnId 发送。不这样清的话，重试会留下旧轮的片段/工具记录，导致同一轮被拆成
+     * 两段、或出现无法配对的 tool_calls。
      *
      * **重试目标必须由调用方给出**，不能在这里"取历史里最后一条 user"——发送失败时
      * 该消息已被回滚出历史，那样取到的是**上一条早已成功的消息**，会把它重发一遍，
      * 并在 UI 列表里造出同一个 id 的两份副本（LazyColumn 重复 key 直接崩溃）。
      *
      * @param userMessage 要重发的用户消息（沿用原 id 与 timestamp）
+     * @param onFragment 可见中间片段回调（与 [sendMessage] 相同，重试时也要能连发多条）
      */
-    suspend fun retryMessage(userMessage: ChatMessage): Result<Pair<ChatMessage, ChatMessage>> {
+    suspend fun retryMessage(
+        userMessage: ChatMessage,
+        onFragment: (ChatMessage) -> Unit = {}
+    ): Result<Pair<ChatMessage, ChatMessage>> {
         val history = conversationManager.getMessages()
         val userIdx = history.indexOfLast { it.id == userMessage.id }
         if (userIdx >= 0) {
-            // 把该条 user 之后的 assistant 回复（若有）连同 user 本身一并移除，
-            // 重发时由 sendMessage 统一重新入史，避免消息重复。
-            // drop 只在 userIdx >= 0 时执行：userIdx == -1 时 drop(0) 等于「整个历史」，
-            // 会把历史里所有 assistant 回复一并误删。
-            history.drop(userIdx + 1)
-                .filter { it.role == ChatRole.assistant }
-                .forEach { conversationManager.removeMessage(it.id) }
-            conversationManager.removeMessage(userMessage.id)
+            // 一次移除「该 user + 它之后的全部消息」：分多次 remove 期间若有新消息插入，
+            // 会删到不属于这一轮的内容
+            val removed = history.drop(userIdx).map { it.id }
+            conversationManager.removeMessages(removed)
+            Log.i(TAG, "Retry: removed ${removed.size} message(s) from turn start")
         } else {
             // 正常情况：发送失败已把它回滚出历史。也可能是历史被裁剪或清空。
             // 直接按新消息重发即可。
             Log.d(TAG, "Retry target not in history, sending as a new message")
         }
-
-        return sendMessage(userMessage)
+        return sendMessage(userMessage, onFragment)
     }
 
     // ── 上下文压缩 ────────────────────────────────────
@@ -472,15 +756,23 @@ class ChatService(
     /** 获取当前会话历史（仅内存窗口，即发给模型的那部分）。 */
     fun getHistory(): List<ChatMessage> = conversationManager.getMessages()
 
-    /** 完整历史（撤销「清除对话」的快照用，不受内存窗口裁剪影响）。 */
+    /**
+     * 完整历史（撤销「清除对话」的快照用，不受内存窗口裁剪影响）。
+     *
+     * **不过滤** tool/空 assistant：撤销要恢复成清除前的精确状态。
+     */
     suspend fun loadFullHistory(): List<ChatMessage> = conversationManager.loadFullHistory()
 
-    /** UI 首屏：完整历史里最近 [limit] 条。 */
-    suspend fun loadRecentForUi(limit: Int): List<ChatMessage> = conversationManager.loadRecentForUi(limit)
+    /**
+     * UI 首屏：完整历史里最近 [limit] 条，**过滤掉 UI 不可见消息**
+     * （tool 与纯 tool_calls 的空 assistant，见 [forUi]）。
+     */
+    suspend fun loadRecentForUi(limit: Int): List<ChatMessage> =
+        conversationManager.loadRecentForUi(limit).forUi()
 
-    /** UI 懒加载：[beforeId] 之前的 [limit] 条完整历史（按时间正序）。 */
+    /** UI 懒加载：[beforeId] 之前的 [limit] 条完整历史（按时间正序，同样过滤不可见消息）。 */
     suspend fun loadOlder(beforeId: String, limit: Int): List<ChatMessage> =
-        conversationManager.pageBefore(beforeId, limit)
+        conversationManager.pageBefore(beforeId, limit).forUi()
 
     /** 清除历史（同时清除压缩状态：摘要已不对应任何现存历史）。 */
     fun clearHistory() {

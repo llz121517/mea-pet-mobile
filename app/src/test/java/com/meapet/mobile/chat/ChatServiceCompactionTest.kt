@@ -28,6 +28,9 @@ class ChatServiceCompactionTest {
         whenever(it.getModel()).thenReturn("m")
         whenever(it.getTemperature()).thenReturn(0.7)
         whenever(it.getMaxTokens()).thenReturn(4096)
+        // 记忆模式是枚举，mock 默认返回 null 会在 ChatService 解析模式时 NPE。
+        // 这些用例只关心压缩链路，固定走文本协议，避免工具分支干扰
+        whenever(it.getMemoryMode()).thenReturn(com.meapet.mobile.config.MemoryMode.TEXT)
     }
 
     /** 摘要请求返回固定摘要，聊天请求返回普通回复。 */

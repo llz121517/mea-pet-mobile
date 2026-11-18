@@ -8,6 +8,24 @@ import kotlin.test.assertTrue
 class ApiResponseTest {
 
     @Test
+    fun usagePromptTokensExtractsPositiveValue() {
+        val body = """{"choices":[],"usage":{"prompt_tokens":1234,"completion_tokens":56}}"""
+        assertEquals(1234, ApiResponse.usagePromptTokens(body))
+        // 缺 usage / 0 值都返回 null（0 表示服务端没给，不是「输入 0 token」）
+        assertNull(ApiResponse.usagePromptTokens("""{"choices":[]}"""))
+        assertNull(ApiResponse.usagePromptTokens("""{"usage":{"prompt_tokens":0}}"""))
+    }
+
+    @Test
+    fun usagePromptCacheHitTokensAllowsZeroAndNullOnMissing() {
+        val hit = """{"usage":{"prompt_tokens":1000,"prompt_cache_hit_tokens":768}}"""
+        assertEquals(768, ApiResponse.usagePromptCacheHitTokens(hit))
+        // 0 是合法值：命中 0 与「端点没提供该字段」语义不同，前者返回 0
+        assertEquals(0, ApiResponse.usagePromptCacheHitTokens("""{"usage":{"prompt_cache_hit_tokens":0}}"""))
+        assertNull(ApiResponse.usagePromptCacheHitTokens("""{"usage":{"prompt_tokens":10}}"""))
+    }
+
+    @Test
     fun modelIdsFromOpenAiDataArray() {
         val body = """
             {

@@ -1,6 +1,8 @@
 package com.meapet.mobile.chat.tools
 
 import android.util.Log
+import com.meapet.mobile.chat.ChatMessage
+import com.meapet.mobile.chat.ChatRole
 import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.client.model.ApiRequest
 import com.meapet.mobile.client.model.ApiResponse
@@ -17,12 +19,17 @@ import kotlinx.serialization.json.put
  * @property rounds 实际请求轮数（含最后一次出文本的请求）
  * @property toolCalls 实际执行的工具调用总数
  * @property firstPromptTokens 第一轮响应的 `usage.prompt_tokens`（用于校准本地估算，可能为 null）
+ * @property firstPromptCacheHit 第一轮响应的 `usage.prompt_cache_hit_tokens`（观察期指标，可能为 null）
+ * @property finalRaw 最终回合 assistant 的**原始 message JSON**（可能含 `reasoning_content` 等）。
+ *   由 ChatService 存进 [ChatMessage.rawAssistantJson] 并原样透传给下一次请求。
  */
 data class ToolLoopResult(
     val finalContent: String,
     val rounds: Int,
     val toolCalls: Int,
-    val firstPromptTokens: Int? = null
+    val firstPromptTokens: Int? = null,
+    val firstPromptCacheHit: Int? = null,
+    val finalRaw: String? = null
 )
 
 /**
@@ -45,9 +52,16 @@ data class ToolLoopResult(
  *   （而不是静默丢弃），保证 `tool_call_id` 一一对应，避免服务端 400；
  * - 工具执行错误一律作为 tool 消息返回给模型，不使整个 turn 失败。
  *
- * ## 本阶段范围
- * 工具执行结果（`role=tool`）与中间 assistant 消息**只在本次 turn 内存在**，
- * 不入历史（入历史与 `turn_id` 整轮回滚留到下一阶段）。
+ * ## 入历史（由调用方决定）
+ * 本类只通过回调把「需要进历史的记录」交出去，不直接改历史：
+ * - 每轮带 tool_calls 的 assistant（含纯 tool_calls、正文为空）走 [onTranscript]；
+ *   其中正文非空的还会走 [onVisibleFragment]，让 UI 在工具执行前就把这句话显示出来；
+ * - 每个 tool 结果走 [onTranscript]；
+ * - 最终正文通过 [ToolLoopResult.finalContent] 返回，由 ChatService 建最终消息。
+ *
+ * 同一 turn 的所有记录由 ChatService 收集后**一个事务**落库；失败/取消时整轮丢弃，
+ * 因此不会留下「有 tool_calls 没结果」的半轮（服务端会 400）。所有记录共用 [run] 的
+ * `turnId`，供整轮回滚/重试。
  */
 class ChatToolLoop(
     private val clientProvider: () -> OpenAiCompatibleClient,
@@ -79,17 +93,25 @@ class ChatToolLoop(
      * 执行一次完整的工具循环。
      *
      * @param messages 初始消息（首条 system + 历史 + 并入 tail 的最后一条 user）
+     * @param turnId 本轮 turn 的 id，写进所有交给 [onTranscript] 的消息
+     * @param onVisibleFragment 某一轮**同时给了文本片段和工具调用**时，把该 assistant 记录回调出去。
+     *   调用方据此立即显示一条助手消息（用户看到「连发多条」），而不是等整个循环结束。
+     * @param onTranscript 需要进历史的每条记录（assistant 片段 + tool 结果），按发生顺序回调。
      * @throws IllegalStateException 响应无法解析 / 达到最大轮数仍只给工具调用 / 最终无文本
      */
     suspend fun run(
         model: String,
         messages: List<JsonObject>,
         temperature: Double,
-        maxTokens: Int
+        maxTokens: Int,
+        turnId: String,
+        onVisibleFragment: (ChatMessage) -> Unit = {},
+        onTranscript: (ChatMessage) -> Unit = {}
     ): ToolLoopResult {
         val conversation = messages.toMutableList()
         var totalCalls = 0
         var firstPromptTokens: Int? = null
+        var firstPromptCacheHit: Int? = null
 
         for (round in 1..maxRounds) {
             val isLastRound = round == maxRounds
@@ -105,6 +127,7 @@ class ChatToolLoop(
             val rawResponse = clientProvider().chatCompletion(requestBody)
             if (firstPromptTokens == null) {
                 firstPromptTokens = ApiResponse.usagePromptTokens(rawResponse)
+                firstPromptCacheHit = ApiResponse.usagePromptCacheHitTokens(rawResponse)
             }
             val parsed = ApiResponse.chatCompletionMessage(rawResponse)
                 ?: throw IllegalStateException("API 响应中没有有效的消息")
@@ -116,10 +139,23 @@ class ChatToolLoop(
                 val content = ToolCallMarkup.strip(rawContent)
                 if (content.isBlank()) {
                     Log.w(TAG, "Round $round: content was only tool-call markup, treated as empty")
-                    return ToolLoopResult("", round, totalCalls, firstPromptTokens)
+                    return ToolLoopResult(
+                        finalContent = "",
+                        rounds = round,
+                        toolCalls = totalCalls,
+                        firstPromptTokens = firstPromptTokens,
+                        firstPromptCacheHit = firstPromptCacheHit,
+                        finalRaw = parsed.raw.toString()
+                    )
                 }
                 Log.d(TAG, "Tool loop finished in $round round(s), $totalCalls tool call(s)")
-                return ToolLoopResult(content, round, totalCalls, firstPromptTokens)
+                return ToolLoopResult(
+                    finalContent = content,
+                    rounds = round,
+                    toolCalls = totalCalls,
+                    firstPromptTokens = firstPromptTokens,
+                    finalRaw = parsed.raw.toString()
+                )
             }
 
             if (isLastRound) {
@@ -129,6 +165,18 @@ class ChatToolLoop(
 
             // 原样回传 assistant 消息（含 tool_calls / reasoning_content 等全部字段）
             conversation += ApiRequest.assistantRawMessage(parsed.raw)
+
+            // 该轮同时给了文本片段：先交给历史（正文为空也要进历史），再立即上抛给 UI
+            // 让用户看到「连发多条」，同时它也已随 assistant 原始消息进入本轮上下文
+            val fragment = parsed.content?.let { ToolCallMarkup.strip(it) }.orEmpty()
+            val assistantRecord = ChatMessage(
+                role = ChatRole.assistant,
+                content = fragment,
+                turnId = turnId,
+                rawAssistantJson = parsed.raw.toString()
+            )
+            onTranscript(assistantRecord)
+            if (fragment.isNotBlank()) onVisibleFragment(assistantRecord)
 
             var executed = 0
             for (call in parsed.toolCalls) {
@@ -140,6 +188,15 @@ class ChatToolLoop(
                     executor.execute(call.name, call.arguments)
                 }
                 conversation += ApiRequest.toolMessage(call.id, content)
+                onTranscript(
+                    ChatMessage(
+                        role = ChatRole.tool,
+                        content = content,
+                        toolCallId = call.id,
+                        toolName = call.name,
+                        turnId = turnId
+                    )
+                )
             }
             Log.d(TAG, "Round $round: executed $executed/${parsed.toolCalls.size} tool call(s)")
         }

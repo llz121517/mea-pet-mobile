@@ -1,6 +1,8 @@
 package com.meapet.mobile.ui.screen.settings
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -13,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.meapet.mobile.config.MemoryMode
 import com.meapet.mobile.settings.SettingsKeys
 import com.meapet.mobile.viewmodel.SettingsUiState
 import com.meapet.mobile.viewmodel.SettingsViewModel
@@ -87,6 +90,30 @@ internal fun MemorySection(
         darkTheme = darkTheme,
         onCheckedChange = { viewModel.updateEnableMemory(it) }
     )
+
+    // 记忆检索方式：只影响「模型怎么找到记忆」，与是否记忆无关
+    if (state.enableMemory) {
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            MemoryMode.entries.forEach { mode ->
+                FilterChipLike(
+                    label = memoryModeLabel(mode),
+                    selected = state.memoryMode == mode,
+                    enabled = true,
+                    onClick = { viewModel.updateMemoryMode(mode) }
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = memoryModeHint(state.memoryMode),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        )
+    }
     SettingsSwitchRow(
         label = "自动摘要",
         description = "定期总结对话为长期记忆",
@@ -118,4 +145,20 @@ internal fun MemorySection(
             inactiveTrackColor = sliderTrackColor(darkTheme)
         )
     )
+}
+
+/** 记忆检索方式的短标签（四个选项同一行，保持简短）。 */
+private fun memoryModeLabel(mode: MemoryMode): String = when (mode) {
+    MemoryMode.AUTO -> "自动"
+    MemoryMode.TOOLS -> "工具"
+    MemoryMode.TEXT -> "文本"
+    MemoryMode.OFF -> "关闭"
+}
+
+/** 记忆检索方式的一句话说明。 */
+private fun memoryModeHint(mode: MemoryMode): String = when (mode) {
+    MemoryMode.AUTO -> "自动：优先让模型自己调用检索工具，端点不支持时回退关键词注入"
+    MemoryMode.TOOLS -> "工具：模型主动检索/写入记忆（需要端点支持 function calling）"
+    MemoryMode.TEXT -> "文本：按关键词注入相关记忆，写入走文本协议（旧版行为）"
+    MemoryMode.OFF -> "关闭检索：不注入也不检索，记忆仍会保存"
 }

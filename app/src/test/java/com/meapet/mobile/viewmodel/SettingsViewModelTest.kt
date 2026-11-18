@@ -3,6 +3,7 @@ package com.meapet.mobile.viewmodel
 import com.meapet.mobile.app.AppContainer
 import com.meapet.mobile.app.MeaPetApplication
 import com.meapet.mobile.config.AppConfig
+import com.meapet.mobile.config.MemoryMode
 import com.meapet.mobile.core.UNDO_WINDOW_MS
 import com.meapet.mobile.core.WallpaperStore
 import com.meapet.mobile.settings.SettingsKeys
@@ -84,6 +85,7 @@ class SettingsViewModelTest {
         whenever(settingsManager.getMaxTokens()).thenReturn(1024)
         whenever(settingsManager.getSystemPrompt()).thenReturn("")
         whenever(settingsManager.isMemoryEnabled()).thenReturn(true)
+        whenever(settingsManager.getMemoryMode()).thenReturn(MemoryMode.DEFAULT)
         whenever(settingsManager.isAutoSummaryEnabled()).thenReturn(true)
         whenever(settingsManager.getSummaryInterval()).thenReturn(10)
         whenever(settingsManager.isTtsMainEnabled()).thenReturn(false)
@@ -105,6 +107,7 @@ class SettingsViewModelTest {
         whenever(settingsManager.maxTokensFlow).thenReturn(MutableStateFlow(1024))
         whenever(settingsManager.systemPromptFlow).thenReturn(MutableStateFlow(""))
         whenever(settingsManager.enableMemoryFlow).thenReturn(MutableStateFlow(true))
+        whenever(settingsManager.memoryModeFlow).thenReturn(MutableStateFlow(MemoryMode.DEFAULT))
         whenever(settingsManager.enableAutoSummaryFlow).thenReturn(MutableStateFlow(true))
         whenever(settingsManager.summaryIntervalFlow).thenReturn(MutableStateFlow(10))
         whenever(settingsManager.themeModeFlow).thenReturn(MutableStateFlow("system"))

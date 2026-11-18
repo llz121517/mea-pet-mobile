@@ -118,15 +118,18 @@ class ChatViewModelTest {
 
     @Test
     fun `发送消息会调用 ChatService`() = runTest(dispatcher.scheduler) {
-        // ViewModel 传入自己的乐观消息（同 id 入史），因此 stub/verify 的是 ChatMessage 重载
-        wheneverBlocking { chatService.sendMessage(any<ChatMessage>()) }
+        // ViewModel 传入自己的乐观消息（同 id 入史），并带片段回调，因此 stub/verify 2 参重载
+        wheneverBlocking { chatService.sendMessage(any<ChatMessage>(), any<(ChatMessage) -> Unit>()) }
             .thenReturn(Result.success(ChatMessage(ChatRole.user, "hi") to reply(ChatMessage(ChatRole.user, "hi"))))
 
         val vm = ChatViewModel(application)
         vm.onEvent(ChatEvent.SendMessage("hi"))
         vm.advance()
 
-        verify(chatService).sendMessage(argThat<ChatMessage> { content == "hi" && role == ChatRole.user })
+        verify(chatService).sendMessage(
+            argThat<ChatMessage> { content == "hi" && role == ChatRole.user },
+            any()
+        )
     }
 
     @Test
@@ -196,7 +199,7 @@ class ChatViewModelTest {
     fun `有用户消息时重试调用服务`() = runTest(dispatcher.scheduler) {
         val user = ChatMessage(role = ChatRole.user, content = "hi")
         whenever(chatService.getHistory()).thenReturn(listOf(user))
-        wheneverBlocking { chatService.retryMessage(any<ChatMessage>()) }
+        wheneverBlocking { chatService.retryMessage(any<ChatMessage>(), any<(ChatMessage) -> Unit>()) }
             .thenReturn(Result.success(user to reply(user)))
 
         val vm = ChatViewModel(application)
@@ -205,7 +208,7 @@ class ChatViewModelTest {
         vm.onEvent(ChatEvent.RetryLastMessage)
         vm.advance()
 
-        verify(chatService).retryMessage(argThat<ChatMessage> { id == user.id })
+        verify(chatService).retryMessage(argThat<ChatMessage> { id == user.id }, any())
     }
 
     /**
@@ -223,7 +226,7 @@ class ChatViewModelTest {
         val vm = ChatViewModel(application)
         vm.advance()
 
-        wheneverBlocking { chatService.sendMessage(any<ChatMessage>()) }
+        wheneverBlocking { chatService.sendMessage(any<ChatMessage>(), any<(ChatMessage) -> Unit>()) }
             .thenReturn(Result.failure(RuntimeException("请求过于频繁")))
         vm.onEvent(ChatEvent.SendMessage("新消息"))
         vm.advance()
@@ -231,12 +234,12 @@ class ChatViewModelTest {
         val newUser = vm.state.value.messages.last { it.isUser }
         assertEquals("新消息", newUser.content)
 
-        wheneverBlocking { chatService.retryMessage(any<ChatMessage>()) }
+        wheneverBlocking { chatService.retryMessage(any<ChatMessage>(), any<(ChatMessage) -> Unit>()) }
             .thenReturn(Result.success(newUser to ChatMessage(ChatRole.assistant, "新回复")))
         vm.onEvent(ChatEvent.RetryLastMessage)
         vm.advance()
 
-        verify(chatService).retryMessage(argThat<ChatMessage> { id == newUser.id })
+        verify(chatService).retryMessage(argThat<ChatMessage> { id == newUser.id }, any())
 
         val ids = vm.state.value.messages.map { it.id }
         assertEquals(
@@ -276,7 +279,7 @@ class ChatViewModelTest {
         val vm = ChatViewModel(application)
         vm.advance()
 
-        wheneverBlocking { chatService.sendMessage(any<ChatMessage>()) }
+        wheneverBlocking { chatService.sendMessage(any<ChatMessage>(), any<(ChatMessage) -> Unit>()) }
             .thenReturn(Result.failure(RuntimeException("请求过于频繁")))
         vm.onEvent(ChatEvent.SendMessage("hello"))
         vm.advance()
@@ -307,7 +310,7 @@ class ChatViewModelTest {
         vm.advance()
 
         org.mockito.kotlin.verify(chatService, org.mockito.kotlin.never())
-            .retryMessage(any<ChatMessage>())
+            .retryMessage(any<ChatMessage>(), any<(ChatMessage) -> Unit>())
     }
 
     // ── 撤销窗口 ──────────────────────────────────────
@@ -389,7 +392,7 @@ class ChatViewModelTest {
     fun `发送新消息会作废清除对话的撤销窗口`() = runTest(dispatcher.scheduler) {
         whenever(chatService.getHistory())
             .thenReturn(listOf(ChatMessage(role = ChatRole.user, content = "旧消息", timestamp = 1_000L)))
-        wheneverBlocking { chatService.sendMessage(any<ChatMessage>()) }
+        wheneverBlocking { chatService.sendMessage(any<ChatMessage>(), any<(ChatMessage) -> Unit>()) }
             .thenReturn(Result.failure(RuntimeException("network")))
         val vm = ChatViewModel(application)
         vm.advance()

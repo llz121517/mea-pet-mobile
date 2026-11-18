@@ -49,6 +49,19 @@
 
 ---
 
+## 📌 待办 E · 1.9 收尾（dev 分支）
+
+1.9.0 的功能开发已完成（记忆工具化、工具消息入历史、连发多条、插队发送、`memoryMode`、turn 超时、检索修复、压缩与 SQLite 存储，详见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) §实施状态与 [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md)）。剩余：
+
+- [ ] **1.9 真机验收**（本轮按用户要求暂不操作设备）— 清单：连发多条气泡顺序与 TTS 逐条朗读、插队发送/「停止」、工具消息落库后重启续聊、记忆检索方式四档、检索返回多条、turn 超时提示、压缩分隔条与手动压缩、向上懒加载锚定。
+- [ ] **M4 观察期数据收集** — `adb logcat -s TurnMetrics` 攒 1~2 周：工具调用率、平均轮数、失败/取消/超时占比、`cacheHitRatio`；据此决定 1.10 是否删除文本围栏协议（`MemoryOpsProtocol`）与默认模式取舍。
+- [ ] **1.10：清除对话改软删除**（M3 遗留）— `conversations.state=cleared` + 新活跃会话 + 撤销只带 conversationId；单会话模型下需先让 `conversationId` 可切换（仓库/压缩状态/会话指针）。
+- [ ] **1.10：清理备胎代码** — `MemoryRepository`（JSON 实现）、`ConversationStore`、旧 JSON 内存仓库与相关单测；legacy 导入保留到 1.11（见 `legacy-compat.md`）。
+- [ ] **被打断 turn 的 `interrupted` 落库标记** — 当前仅 `TurnMetrics` 日志记录，无消费方；等有「中断轮次分析」需求再补（`extra_json` 或 meta 记录，不改 schema）。
+- [ ] **设备残留数据清理**（可选，下次接设备时）— 测试注入的长消息、重复记忆 `mem_ln3glfhc` / `mem_39ypzmxj`。
+
+---
+
 ## 📌 待办 A · 稳定性 / ANR(优先于架构)
 
 - [ ] **#15 + 新-8** 隐私授权双存储 + 主线程 runBlocking + 2s 超时(PrivacyConsentManager.kt:51-69) — 统一为单一存储源(推荐 SharedPreferences,需 `Application.onCreate` 同步读);`agreedFlow` 从同一份 SP 派生(`OnSharedPreferenceChangeListener` → `callbackFlow`),消除双源不一致;`setAgreed` 改 `suspend`,写盘挪 IO,`killProcess` 放在写完后。**注意**:关于页授权开关(`SettingsViewModel`)有真实消费者,改动后必须真机验证开关仍响应。

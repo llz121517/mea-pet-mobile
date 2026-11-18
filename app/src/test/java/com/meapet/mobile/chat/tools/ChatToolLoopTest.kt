@@ -1,5 +1,7 @@
 package com.meapet.mobile.chat.tools
 
+import com.meapet.mobile.chat.ChatMessage
+import com.meapet.mobile.chat.ChatRole
 import com.meapet.mobile.client.HttpResponse
 import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.client.RequestBody
@@ -21,6 +23,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class ChatToolLoopTest {
@@ -42,13 +45,17 @@ class ChatToolLoopTest {
             })
         }
 
-    private fun toolCallResponse(vararg calls: JsonObject): HttpResponse {
+    private fun toolCallResponse(vararg calls: JsonObject): HttpResponse =
+        toolCallResponseWithText("", *calls)
+
+    /** 某一轮「同时给正文与工具调用」：正文应立刻回传给 UI，同时进历史。 */
+    private fun toolCallResponseWithText(text: String, vararg calls: JsonObject): HttpResponse {
         val content = buildJsonObject {
             put("choices", buildJsonArray {
                 add(buildJsonObject {
                     put("message", buildJsonObject {
                         put("role", "assistant")
-                        put("content", "")
+                        put("content", text)
                         put("tool_calls", buildJsonArray { calls.forEach { add(it) } })
                     })
                     put("finish_reason", "tool_calls")
@@ -86,7 +93,7 @@ class ChatToolLoopTest {
             executor = MemoryToolExecutor(fakeSearch)
         )
 
-        val result = loop.run("m", listOf(buildJsonObject { put("role", "user"); put("content", "hi") }), 0.7, 512)
+        val result = loop.run("m", listOf(buildJsonObject { put("role", "user"); put("content", "hi") }), 0.7, 512, turnId = "t1")
 
         assertEquals("记得喵", result.finalContent)
         assertEquals(2, result.rounds)
@@ -118,7 +125,7 @@ class ChatToolLoopTest {
         )
 
         assertFailsWith<IllegalStateException> {
-            loop.run("m", listOf(buildJsonObject { put("role", "user") }), 0.7, 512)
+            loop.run("m", listOf(buildJsonObject { put("role", "user") }), 0.7, 512, turnId = "t1")
         }
         assertEquals(3, engine.requests.size, "最多请求 maxRounds 次")
         val last = bodyOf(engine, 2)
@@ -137,7 +144,7 @@ class ChatToolLoopTest {
             maxCallsPerRound = 8
         )
 
-        val result = loop.run("m", listOf(buildJsonObject { put("role", "user") }), 0.7, 512)
+        val result = loop.run("m", listOf(buildJsonObject { put("role", "user") }), 0.7, 512, turnId = "t1")
 
         assertEquals(8, result.toolCalls, "只执行前 8 个")
         val second = bodyOf(engine, 1)
@@ -151,6 +158,62 @@ class ChatToolLoopTest {
     }
 
     @Test
+    fun `两轮工具调用时片段进回调、transcript 记录 assistant 与 tool、finalRaw 非空`() = runTest {
+        val responses = ArrayDeque(
+            listOf(
+                toolCallResponseWithText("我先查一下喵", toolCall("call_1")),
+                textResponse("记得喵")
+            )
+        )
+        val engine = FakeHttpClientEngine { responses.removeFirst() }
+        val loop = ChatToolLoop(
+            clientProvider = { OpenAiCompatibleClient("k", "https://x/v1", engine) },
+            executor = MemoryToolExecutor(fakeSearch)
+        )
+        val visible = mutableListOf<ChatMessage>()
+        val transcript = mutableListOf<ChatMessage>()
+
+        val result = loop.run(
+            model = "m",
+            messages = listOf(buildJsonObject {
+                put("role", "user")
+                put("content", "hi")
+            }),
+            temperature = 0.7,
+            maxTokens = 512,
+            turnId = "turn-1",
+            onVisibleFragment = { visible += it },
+            onTranscript = { transcript += it }
+        )
+
+        // 片段：只回调有正文的中间 assistant，且带 turnId
+        assertEquals(1, visible.size)
+        assertEquals("我先查一下喵", visible.single().content)
+        assertEquals("turn-1", visible.single().turnId)
+
+        // transcript：中间 assistant（含原始 JSON）+ tool 结果，顺序固定
+        assertEquals(2, transcript.size, "应依次记录 assistant 片段与 tool 结果")
+        val assistant = transcript[0]
+        assertEquals(ChatRole.assistant, assistant.role)
+        assertEquals("turn-1", assistant.turnId)
+        assertNotNull(assistant.rawAssistantJson, "中间 assistant 必须带原始 JSON 供下次透传")
+        assertTrue(
+            assistant.rawAssistantJson!!.contains("tool_calls"),
+            "原始 JSON 应包含 tool_calls: ${assistant.rawAssistantJson}"
+        )
+        val tool = transcript[1]
+        assertEquals(ChatRole.tool, tool.role)
+        assertEquals("call_1", tool.toolCallId)
+        assertEquals("search_memory", tool.toolName)
+        assertEquals("turn-1", tool.turnId)
+
+        // 最终回复：正文正确，finalRaw 非空（下一轮原样透传）
+        assertEquals("记得喵", result.finalContent)
+        assertNotNull(result.finalRaw)
+        assertTrue(result.finalRaw!!.contains("记得喵"))
+    }
+
+    @Test
     fun `响应解析失败时抛异常`() = runTest {
         val engine = FakeHttpClientEngine {
             HttpResponse(200, "{}".encodeToByteArray(), "application/json")
@@ -161,7 +224,7 @@ class ChatToolLoopTest {
         )
 
         assertFailsWith<IllegalStateException> {
-            loop.run("m", listOf(buildJsonObject { put("role", "user") }), 0.7, 512)
+            loop.run("m", listOf(buildJsonObject { put("role", "user") }), 0.7, 512, turnId = "t1")
         }
     }
 }

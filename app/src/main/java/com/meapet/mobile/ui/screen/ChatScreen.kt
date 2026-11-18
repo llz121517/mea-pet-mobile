@@ -60,6 +60,7 @@ import com.meapet.mobile.app.MeaPetApplication
 import com.meapet.mobile.viewmodel.ChatEvent
 import com.meapet.mobile.chat.ChatUiState
 import com.meapet.mobile.chat.MemoryDialogUi
+import com.meapet.mobile.chat.TurnPhase
 import com.meapet.mobile.memory.MemoryType
 import com.meapet.mobile.settings.SettingsKeys
 import com.meapet.mobile.ui.component.AppSnackbarHost
@@ -297,16 +298,32 @@ private fun ChatPage(
             modifier = Modifier.align(Alignment.TopEnd)
         )
 
-        // ── Layer 3: 底部输入栏（压缩中上方多一条「Mea 还在…」状态条）──
+        // ── Layer 3: 底部输入栏（turn 状态条 / 压缩中状态条，turn 优先）──
         Column(modifier = Modifier.align(Alignment.BottomCenter)) {
-            if (state.isCompacting) {
+            if (state.turnPhase != TurnPhase.IDLE) {
+                // turn 进行中：文案随阶段变化，右侧「停止」直接取消本轮（保留已显示气泡）
+                val text = when (state.turnPhase) {
+                    TurnPhase.WAITING_FIRST_REPLY -> "Mea 还在想…"
+                    TurnPhase.REPLYING -> "Mea 还在说…（可以直接发新消息打断）"
+                    TurnPhase.IDLE -> ""
+                }
+                MeaBusyBar(
+                    text = text,
+                    actionLabel = "停止",
+                    onAction = { chatViewModel.onEvent(ChatEvent.StopTurn) }
+                )
+            } else if (state.isCompacting) {
+                // 压缩状态条保持原样；与 turn 同时存在时以 turn 优先（避免两条叠在一起）
                 MeaBusyBar(text = "Mea 还在整理前面的内容…")
             }
+            // 等待首条回复期间保持原禁用/转圈表现；已出第一条气泡后恢复输入，发送即插队
+            val waitingFirstReply = state.turnPhase == TurnPhase.WAITING_FIRST_REPLY
             ChatInputBar(
                 inputText = state.inputText,
                 onInputChange = { chatViewModel.onEvent(ChatEvent.UpdateInput(it)) },
                 onSend = { chatViewModel.onEvent(ChatEvent.SendMessage(state.inputText)) },
-                isLoading = state.isLoading,
+                isLoading = waitingFirstReply,
+                enabled = !waitingFirstReply,
                 modifier = Modifier
             )
         }
@@ -351,7 +368,11 @@ private fun MessageList(
     // 兜底去重：消息列表出现重复 id 一定是上游 bug，但 LazyColumn 撞到重复 key 是
     // 直接抛 IllegalArgumentException 崩掉整个应用（不是渲染错乱），代价过高，
     // 所以在唯一的消费点加一道保险。真正的修复始终在产生 state 的地方。
-    val uniqueMessages = remember(state.messages) { state.messages.distinctBy { it.id } }
+    // 同时兜底过滤 UI 不可见消息（tool / 纯 tool_calls 的空 assistant）：读取历史与
+    // ViewModel 合并处都已经过滤过，这里再挡一层，避免任何一条漏进来就渲染成空气泡/崩溃。
+    val uniqueMessages = remember(state.messages) {
+        state.messages.filter { it.isVisibleInUi }.distinctBy { it.id }
+    }
 
     LazyColumn(
         state = listState,
@@ -363,7 +384,7 @@ private fun MessageList(
         contentPadding = PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.Bottom
     ) {
-        if (state.initialLoadDone && state.messages.isEmpty()) {
+        if (state.initialLoadDone && uniqueMessages.isEmpty()) {
             item {
                 Box(
                     modifier = Modifier
@@ -384,6 +405,8 @@ private fun MessageList(
             items = uniqueMessages,
             key = { _, message -> message.id }
         ) { index, message ->
+            // 双保险：即便过滤逻辑将来被改坏，也不让 tool 消息走到 ChatBubble（它没有分支）
+            if (!message.isVisibleInUi) return@itemsIndexed
             // 按天轻时间分隔条：相邻消息跨自然日时插一条（纯 UI 派生，不入库）
             val previousTs = if (index > 0) uniqueMessages[index - 1].timestamp else null
             dayDividerLabel(previousTs, message.timestamp)?.let { DividerLabel(it) }
@@ -394,7 +417,8 @@ private fun MessageList(
             }
         }
 
-        if (state.isLoading) {
+        // 「思考中」只在还没出任何气泡时显示；已经连发片段后由输入栏上方的状态条表达进度
+        if (state.turnPhase == TurnPhase.WAITING_FIRST_REPLY) {
             item {
                 Box(
                     modifier = Modifier

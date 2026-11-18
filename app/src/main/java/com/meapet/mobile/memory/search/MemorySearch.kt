@@ -15,12 +15,16 @@ enum class MemorySort { RELEVANCE, RECENT, IMPORTANCE }
  * @param types 限定类型；null = 短期 + 长期（人设类默认不参与检索，它们每轮全量注入）
  * @param limit 最多返回条数（1..10）
  * @param sort 排序方式，默认相关度
+ * @param candidates 显式指定候选池；非 null 时实现必须用它代替 `store.getAll()`。
+ *   调用方（如 `MemoryToolExecutor`）可借此传入「已落库 + 本 turn 暂存」的合并视图，
+ *   使同一 turn 内刚创建/更新的记忆也能被检索到。null 时回退到 `store.getAll()`。
  */
 data class MemoryQuery(
     val text: String,
     val types: Set<MemoryType>? = null,
     val limit: Int = 5,
-    val sort: MemorySort = MemorySort.RELEVANCE
+    val sort: MemorySort = MemorySort.RELEVANCE,
+    val candidates: List<MemoryItem>? = null
 )
 
 /** 记忆检索抽象。对外契约固定，底层实现可替换（内存打分 / 未来的 FTS）。 */
@@ -42,7 +46,9 @@ interface MemorySearch {
  * - 新近度 0.1：按 lastAccessedAt 衰减（越久未用越低）
  * - 双向命中加权：query 含某词、或某词含 query 片段都算命中（解决「那个论文」vs「毕业论文」）
  *
- * 相关度排序时只保留得分 > 0 的候选；按 RECENT / IMPORTANCE 排序时返回全部候选的前 limit 条。
+ * 相关度排序时对候选池**全部**条目打分：得分高的在前，命中不足 limit 时用低分
+ * （未命中）条目补齐，因此调用方总会拿到候选池的前 limit 条。按 RECENT / IMPORTANCE
+ * 排序时返回全部候选的前 limit 条。
  */
 class BigramMemorySearcher(
     private val store: MemoryStore,
@@ -60,20 +66,38 @@ class BigramMemorySearcher(
         private const val RECENCY_HALF_LIFE_DAYS = 30.0
     }
 
+    /**
+     * 检索记忆。
+     *
+     * 候选池优先取 [MemoryQuery.candidates]（调用方传入的合并视图），为 null 时取
+     * [store] 的全量数据；随后按 [MemoryQuery.types] 过滤。
+     *
+     * RELEVANCE：对候选池全部条目打分，按
+     * `(得分降序, importance 降序, lastAccessedAt 降序, createdAt 降序, id 升序)`
+     * 排序后取前 limit 条——**不过滤零分条目**，命中不足时由未命中条目补齐；
+     * tokenize 结果为空（空/空白 query）时直接返回空列表。
+     * RECENT / IMPORTANCE：保持原有排序语义。
+     */
     override suspend fun search(query: MemoryQuery): List<MemoryItem> {
         val wantedTypes = query.types ?: DEFAULT_TYPES
-        val candidates = store.getAll().filter { it.type in wantedTypes }
-        if (candidates.isEmpty()) return emptyList()
+        val pool = (query.candidates ?: store.getAll()).filter { it.type in wantedTypes }
+        if (pool.isEmpty()) return emptyList()
         val limit = query.limit.coerceIn(1, 10)
         val queryTokens = tokenize(query.text)
         if (queryTokens.isEmpty() && query.sort == MemorySort.RELEVANCE) return emptyList()
 
         val ranked = when (query.sort) {
-            MemorySort.RECENT -> candidates.sortedByDescending { it.lastAccessedAt }
-            MemorySort.IMPORTANCE -> candidates.sortedByDescending { it.importance }
-            MemorySort.RELEVANCE -> candidates
-                .mapNotNull { item -> score(item, query.text, queryTokens).takeIf { it > 0 }?.let { item to it } }
-                .sortedByDescending { it.second }
+            MemorySort.RECENT -> pool.sortedByDescending { it.lastAccessedAt }
+            MemorySort.IMPORTANCE -> pool.sortedByDescending { it.importance }
+            MemorySort.RELEVANCE -> pool
+                .map { item -> item to score(item, query.text, queryTokens) }
+                .sortedWith(
+                    compareByDescending<Pair<MemoryItem, Double>> { it.second }
+                        .thenByDescending { it.first.importance }
+                        .thenByDescending { it.first.lastAccessedAt }
+                        .thenByDescending { it.first.createdAt }
+                        .thenBy { it.first.id }
+                )
                 .map { it.first }
         }
         return ranked.take(limit)

@@ -73,6 +73,7 @@ class SettingsManager(context: Context) {
     private val KEY_MAX_TOKENS = intPreferencesKey(SettingsKeys.MAX_TOKENS)
     private val KEY_CONTEXT_WINDOW = intPreferencesKey(SettingsKeys.CONTEXT_WINDOW)
     private val KEY_ENABLE_MEMORY = booleanPreferencesKey(SettingsKeys.ENABLE_MEMORY)
+    private val KEY_MEMORY_MODE = stringPreferencesKey(SettingsKeys.MEMORY_MODE)
     private val KEY_ENABLE_AUTO_SUMMARY = booleanPreferencesKey(SettingsKeys.ENABLE_AUTO_SUMMARY)
     private val KEY_SUMMARY_INTERVAL = intPreferencesKey(SettingsKeys.SUMMARY_INTERVAL)
     private val KEY_EXCHANGE_COUNT = intPreferencesKey(SettingsKeys.EXCHANGE_COUNT)
@@ -123,6 +124,11 @@ class SettingsManager(context: Context) {
     /** 记忆开关流。 */
     val enableMemoryFlow: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[KEY_ENABLE_MEMORY] ?: SettingsKeys.Defaults.ENABLE_MEMORY
+    }
+
+    /** 记忆检索模式流（见 [com.meapet.mobile.config.MemoryMode]）。 */
+    val memoryModeFlow: Flow<com.meapet.mobile.config.MemoryMode> = dataStore.data.map { prefs ->
+        com.meapet.mobile.config.MemoryMode.parse(prefs[KEY_MEMORY_MODE])
     }
 
     /** 自动摘要开关流。 */
@@ -226,6 +232,10 @@ class SettingsManager(context: Context) {
     fun getContextWindow(): Int? = currentPrefs()[KEY_CONTEXT_WINDOW]
     fun getSystemPrompt(): String = currentPrefs()[KEY_SYSTEM_PROMPT] ?: SettingsKeys.Defaults.SYSTEM_PROMPT
     fun isMemoryEnabled(): Boolean = currentPrefs()[KEY_ENABLE_MEMORY] ?: SettingsKeys.Defaults.ENABLE_MEMORY
+
+    /** 记忆检索模式（同步 getter，读内存快照）。 */
+    fun getMemoryMode(): com.meapet.mobile.config.MemoryMode =
+        com.meapet.mobile.config.MemoryMode.parse(currentPrefs()[KEY_MEMORY_MODE])
     fun isAutoSummaryEnabled(): Boolean = currentPrefs()[KEY_ENABLE_AUTO_SUMMARY] ?: SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY
     fun getSummaryInterval(): Int = currentPrefs()[KEY_SUMMARY_INTERVAL] ?: SettingsKeys.Defaults.SUMMARY_INTERVAL
 
@@ -319,6 +329,10 @@ class SettingsManager(context: Context) {
 
     suspend fun setEnableMemory(enabled: Boolean) {
         cachedPrefs = dataStore.edit { prefs -> prefs[KEY_ENABLE_MEMORY] = enabled }
+    }
+
+    suspend fun setMemoryMode(mode: com.meapet.mobile.config.MemoryMode) {
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_MEMORY_MODE] = mode.name }
     }
 
     suspend fun setEnableAutoSummary(enabled: Boolean) {

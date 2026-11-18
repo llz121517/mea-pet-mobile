@@ -15,6 +15,12 @@ object SettingsKeys {
     /** 用户手动填写的上下文窗口（原始容量，token）。无此键 = 自动；有值则优先于探测缓存。 */
     const val CONTEXT_WINDOW = "context_window"
     const val ENABLE_MEMORY = "enable_memory"
+
+    /**
+     * 记忆检索模式：`AUTO` / `TOOLS` / `TEXT` / `OFF`（见 [com.meapet.mobile.config.MemoryMode]）。
+     * 只影响检索/写入方式，「是否记忆」仍由 [ENABLE_MEMORY] 控制。
+     */
+    const val MEMORY_MODE = "memory_mode"
     const val ENABLE_AUTO_SUMMARY = "enable_auto_summary"
     const val SUMMARY_INTERVAL = "summary_interval"
 
@@ -73,6 +79,8 @@ object SettingsKeys {
         const val TEMPERATURE = 0.7
         const val MAX_TOKENS = 4096
         const val ENABLE_MEMORY = true
+        /** 默认自动：优先工具调用，端点不支持时本会话降级文本协议。 */
+        const val MEMORY_MODE = "AUTO"
         const val ENABLE_AUTO_SUMMARY = true
         const val SUMMARY_INTERVAL = 10
         const val SYSTEM_PROMPT =
