@@ -108,6 +108,12 @@ internal val FALLBACK_TAIL_MODE: TailMode = TailMode.SEPARATE_USER
 internal const val TAIL_LABEL: String = "[系统提示]"
 ```
 
+### 9.1b tail 的内容与结构（已确认）
+
+- 目前确定放入 tail 的内容只有一项：**当前时间**（沿用 `TimeContext.describe()`，格式 `【当前时间】yyyy-MM-dd HH:mm EEEE(zone,UTC±hh:mm)`，精度到分钟）。相关回忆改由 `search_memory` 检索，收尾提醒删除，因此不再进入 tail。
+- tail 设计为**有序字符串片段列表**，按固定顺序拼接后并入最后一条 user，前缀为 `TAIL_LABEL`。新增动态内容只需追加片段，不改 `ConversationManager`，符合「尽量找通用逻辑」原则。
+- 时间精度保持到分钟：tail 不进历史，每轮该条 user 本就重新生成，对缓存没有额外影响。
+
 ### 9.2 策略
 
 | 场景 | 方式 | 说明 |

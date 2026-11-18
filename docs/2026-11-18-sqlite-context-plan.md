@@ -1,6 +1,6 @@
 # 1.9 计划：SQLite 存储 + 上下文压缩 + 模型容量感知（修订版）
 
-> 状态：进行中（Dev 分支）。本版在 2026-11-18 调查报告基础上，按已落地代码、M0 探针与两轮补充调研（容量字段、多 system 兼容性）修订。
+> 状态：进行中（Dev 分支）。本版在 2026-11-18 调查报告基础上，按已落地代码、M0 探针与补充调研（容量字段、多 system 兼容性）及最新已确认决策修订。
 > 已完成项标注 [已完成]，其余为待办。
 
 ## 0. 结论与已定决策
@@ -11,9 +11,9 @@
   2. legacy 导入允许侵入启动流程：`LegacyJsonImporter` 在 `AppContainer.warmUp` 中同步前置，不挂入 `LegacyMigration.STEPS`。
   3. 导入成功后旧 JSON 原样保留（不删除、不移动、不改名），清理策略另行决定。
   4. 悬浮窗服务未声明 `android:process`，与主界面同进程，无需处理多进程 WAL。
-  5. 有效预算系数固定为 0.85（见 M4）。
-  6. 私网地址与公网同样处理，不做特殊对待；仅回环地址有独立兜底。
-  7. 探测逻辑在所有模式下共用，全量探测（见 M4）。
+  5. 有效预算系数固定为 0.85（见 M4），手动值同样适用。
+  6. 私网地址与公网同样处理，不做特殊对待；仅回环地址有独立兜底 32768。
+  7. 容量获取原则：尽量用通用逻辑，不为各服务单独写 if；不设内置表、不设白名单、不做运行时学习，探测失败直接降级到兜底值。
   8. 压缩摘要并入首条 system 末尾（见 M5）。
   9. tail 只放每轮动态内容，不进历史（见 memory-tools-plan 第 9 节）。
 
@@ -29,10 +29,10 @@
 
 ## 2. M0 探针结论（DeepSeek，真实请求）
 
-- `GET /models` 返回 `context_window`（1048576，输入输出合计）与 `max_output_tokens`（393216）。官方文档声明这些元数据字段可能缺省，故保留内置表作回退。
-- 模型 id：`/models` 中为 `deepseek-flash`、`deepseek-v4-pro`；项目默认模型已改为 `deepseek-flash`。用户自填的旧 id（如 `deepseek-v4-flash`）容量查找需做别名或前缀回退。
+- `GET /models` 返回 `context_window`（1048576，输入输出合计）与 `max_output_tokens`（393216）。官方文档声明这些元数据字段可能缺省，缺省时直接降级到兜底。
+- 模型 id：`/models` 中为 `deepseek-flash`、`deepseek-v4-pro`；项目默认模型已改为 `deepseek-flash`。找不到当前模型条目时同样降级到兜底（模型换代丢一次缓存即可，不处理别名漂移）。
 - 响应 `usage` 含 `prompt_tokens`、`prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`；第二轮前缀命中 384/592。
-- 当前 `ApiResponse` 尚未解析 `usage` 与容量字段，待 M4 补齐。
+- 当前 `ApiResponse` 尚未解析 `usage`，待 M4 补齐。
 
 ## 3. 待办里程碑
 
@@ -45,42 +45,40 @@
 ### M4 容量获取
 
 **有效预算**
-- `有效预算 = 容量 × 0.85 − max_tokens`，下限不低于容量的 25%。系数固定 0.85，对 API 读到的值、手动覆盖值、兜底值统一生效。
-- `max_tokens` 是请求参数（本轮输出上限，默认 4096），不是容量字段；上下文窗口是输入输出合计（DeepSeek 报错证实 `max_tokens` 计入窗口），所以要减去。`max_tokens` 应夹到模型 `max_output_tokens` 与容量约 25% 之内。
+- `有效预算 = 容量 × 0.85 − max_tokens`，下限不低于容量的 25%。系数固定 0.85，对探测值、手动值、兜底值统一生效。
+- `max_tokens` 是请求参数（本轮输出上限，默认 4096），不是容量字段；上下文窗口是输入输出合计，所以要减去。`max_tokens` 应夹到容量约 25% 之内。
 - 推理 token 也可能占用窗口，余量需保留。
 
-**兜底容量（统一写原始容量，再乘系数）**
+**兜底容量（原始容量，再乘系数）**
 - 云端与私网（与公网同样处理）：原始容量 131072，乘 0.85 约 111411。
 - 回环地址（`localhost`、`127.0.0.0/8`、`::1`）：原始容量 32768，乘 0.85 约 27853。
-- 兜底只在探测与学习都无结果时使用。
+- 兜底只在探测无结果时使用。
 
-**字段解析**
-- `ApiResponse` 新增 `modelCapacity` 与 `usage` 解析。字段白名单：`context_window`、`context_length`、`max_context_length`、`max_model_len`、`top_provider.context_length`、`meta.n_ctx`、`meta.n_ctx_train`、`inputTokenLimit`、`max_input_tokens`（0 或 null 视为未知）、`contextLength`。值需为 1024 到 10,000,000 的正整数。
-- 同一条目有多个值时取生效值，并取较小者。响应可能是 `{data:[...]}`，也可能是顶层数组（Together）。
+**单一适配器（`ContextCapacityProbe`，独立抽出）**
+- 只发 `GET {baseUrl}/models`，不做各服务原生接口分支，不设字段白名单，不设内置表。
+- 通用解析：在响应里找到 id 等于当前模型的条目（忽略大小写；响应可能是 `{data:[...]}` 或顶层数组），在该条目内递归查找名字含 `context` 且值为 1024 到 10,000,000 之间正整数的字段（如 `context_window`、`context_length`、`max_context_length`、`max_model_len`）；多个命中取较小者。
+- 找不到条目、找不到字段、请求失败、406 等一律降级到兜底值，不报错、不重试风暴。
+- 读不到的服务（OpenAI、Ollama、LM Studio 等）直接降级；本地推理服务的实际加载窗口请用户手动填写。
+- 备选：若实测降级命中率太低，再引入 models.dev 的表。
 
-**探测逻辑（与云端模式共用，全量探测）**
-1. 超限报错学到的值（最高）。
-2. 用户手动覆盖。
-3. 缓存（TTL 24h，失败负缓存 10 分钟）。
-4. `GET {base}/models` 条目（白名单字段）。
-5. 原生接口，全部尝试，失败即跳过：Ollama `/api/ps`（运行时值）与 `/api/show`；LM Studio `/api/v1/models` 的 `loaded_instances[].config.context_length`，否则 `max_context_length`；llama.cpp `/props` 的 `default_generation_settings.n_ctx`（每 slot，多 slot 时为总量除以 slot 数）；LiteLLM `/v1/model/info`。
-6. 内置表（DeepSeek、Kimi 等）。
-7. 兜底默认值。
-- 客户端需支持服务根路径请求；设置页增加手动覆盖并显示来源。
+**获取契机（统一入口，云端与本地共用同一套逻辑与频率）**
+1. 保存或切换服务商设置（baseUrl、API Key、模型）时。
+2. 应用首次启动时。
+3. 首次发送且内存没有缓存时（本次用兜底值，探测完成后下一轮生效，不阻塞）。
+4. 缓存过期时：每 5 分钟检查一次，过期则后台刷新；失败做短期负缓存，避免重复请求。
+- 设置页拉取模型列表时，从同一次 `/models` 响应顺带解析，不多发请求。
 
-**运行时学习逻辑**
-- 触发：HTTP 400 或 413，且响应体匹配“超出上下文”特征。不能只看状态码（Anthropic 的欠费与超长都是 400）。
-- 解析：取 maximum 一侧的数，不取 requested 的数；同一正文既有 requested 又有 maximum 时取 maximum；忽略小于 1024 或大于 1000 万的值。
-- 宽松正则（忽略大小写）：
-  - `(maximum|max(imum)?)\s+context\s+length\s+(is|of)\s+(\d{3,8})`
-  - `exceeds?\s+the\s+available\s+context\s+size\s*\((\d{3,8})`
-  - `n_ctx"?\s*[:=]\s*(\d{3,8})`
-  - `prompt\s+is\s+too\s+long:\s*(\d+)\s*tokens\s*>\s*(\d{3,8})`
-  - `exceeded\s+model\s+token\s+limit:\s*(\d{3,8})`
-  - `Range of input length should be \[1,\s*(\d{3,8})\]`
-  - `maximum number of tokens allowed\s+(\d{3,8})`
-- 学到后：立即触发强制压缩并重试一次；写入缓存（`source=learned`，按 baseUrl+model 持久化），优先级最高；服务重启或设置变更后允许重新学习。
-- Ollama 超长时静默截断、不报错：能发送时带上 `options.num_ctx`，或在设置中提示用户。
+**优先级与存储**
+- 应用先检查 DataStore 里的手动值：有值就直接使用，不再使用缓存值。
+- 缓存值仅内存态，不落盘；换模型、换服务商或进程重启即失效。
+- 最终来源标记：手动 / 探测 / 兜底。
+
+**设置页**
+- 新增「上下文窗口（token）」，使用 `OutlinedTextField`，右侧 `trailingIcon` 用于重置（清除 DataStore 值，回到自动）。
+- 值写入 DataStore；留空或重置表示自动。
+- 旁边显示当前生效值与来源（手动 / 探测 / 兜底）。
+- 文案写明：手动值同样乘 0.85，实际使用约为填写值的 85%；本地推理服务请按实际加载的窗口填写。
+- `max_tokens` 保持现有独立设置，不与它合并。
 
 ### M5 上下文压缩
 - 取消批量裁剪，窗口追加式增长，达到阈值才压缩（起始值 软触发 70%、硬触发 90%、压缩后约 35%，均需实测）。
@@ -104,5 +102,5 @@
 - 压缩质量、阈值与估算系数均为起始假设。
 - Android 框架 SQLite 的 FTS5 不可用（FTS4 可用），中文检索 v1 不依赖 FTS。
 - 真机行为（WAL、并发写、滚动）尚未验证。
-- 容量字段未核实：国内各云（硅基、百炼、智谱、方舟、MiniMax）、one-api、new-api、MNN、MLC、KoboldCpp、LM Studio OpenAI 兼容 `/v1/models`。
-- OpenAI 的超限报错真实文案未取得。
+- 通用解析对读不到容量字段的服务（OpenAI、Ollama、LM Studio 等）全部降级到兜底，命中率需上线后观察；本地推理服务的实际窗口可能小于兜底值，依赖用户手动填写。
+- 未做超限报错学习：窗口估大时请求可能被服务端拒绝，1.9 不处理，待有真实报错样本后再评估。
