@@ -119,8 +119,10 @@ class ChatService(
                 //    （污染后续请求上下文，且会被持久化）。
                 conversationManager.addMessage(userMessage)
 
-                // 2) 获取记忆上下文（拆成稳定段与每轮都变的尾部段，见 MemoryContext）
-                val memoryContext = memoryManager?.buildContext(content)
+                // 2) 获取记忆上下文（拆成稳定段与每轮都变的尾部段，见 MemoryContext）。
+                //    工具模式下不再注入文本协议说明与关键词回忆：记忆通过 search_memory 工具检索，
+                //    两套协议同时存在会让模型在「输出围栏块」和「调用工具」之间摇摆。
+                val memoryContext = if (config.enableMemoryTools) null else memoryManager?.buildContext(content)
 
                 // 3) 获取设置
                 val systemPrompt = settingsManager.getSystemPrompt()
