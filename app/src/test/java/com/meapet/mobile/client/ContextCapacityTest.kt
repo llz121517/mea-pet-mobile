@@ -53,6 +53,6 @@ class ContextCapacityTest {
         assertFalse(isLoopbackUrl("http://192.168.1.5:11434/v1"))
         assertFalse(isLoopbackUrl("https://api.deepseek.com/v1"))
         assertEquals(32768, fallbackCapacity("http://localhost:11434/v1"))
-        assertEquals(131072, fallbackCapacity("http://192.168.1.5/v1"))
+        assertEquals(32768, fallbackCapacity("http://192.168.1.5/v1"))
     }
 }

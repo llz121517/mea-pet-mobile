@@ -3,68 +3,140 @@ package com.meapet.mobile.storage
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.SQLiteDriver
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 
 /**
- * 会话 + 记忆共用的 SQLite 数据库。
+ * 会话 + 记忆 + 压缩状态共用的 SQLite 数据库。
  *
- * - 单连接，所有访问经 [mutex] 串行（数据量小，避免多连接与 WAL 并发的复杂度）；
- * - 首次访问时惰性打开、配置 PRAGMA 并执行 [Migrations]；
- * - 驱动由外部注入：生产用 AndroidSQLiteDriver，JVM 单测用 sqlite-jdbc 适配器。
+ * ## 连接模型：一写多读
+ * WAL 允许「一个写者 + 多个读者」并发。本类据此拆成：
+ * - **写连接单例**：所有写事务串行（`BEGIN IMMEDIATE`），用 [writeMutex] 保护；
+ * - **读连接池**（默认 [readerCount] = 2 个）：`withConnection` 从池里取一条，
+ *   与写连接互不阻塞，读快照不受写事务影响。
+ *
+ * 这样首屏读 50 条、向上 keyset 懒加载、后台压缩写入不会互相排队；
+ * 某个事务稍长时，滚动也不会顿（代价只是读到的是提交前的一致快照，符合预期）。
+ *
+ * ## 铁律：事务内绝不 await 网络或 LLM
+ * 写事务持锁期间所有读直接排队。**禁止在事务里发 HTTP / 调 LLM / 等待信号量等任何挂起操作**——
+ * 一次 LLM 往返可能数秒，会把整个读路径堵死。
+ * 类型上也做了兜底：[transaction] 的 block 是**非挂起**函数，编译器不允许在事务里 `await`；
+ * 需要网络的数据应在事务外取好，再传入事务写入（摘要 / 导入 / applyChanges 都遵此约定）。
+ *
+ * ## 迁移
+ * 首次访问时初始化写连接并执行 [Migrations]；读连接在拿到后各自设置 PRAGMA
+ * （`foreign_keys` 是连接级开关，必须每条连接都设）。
  *
  * 只使用保守 SQL 语法（无 UPSERT / 窗口函数 / RETURNING），兼容 minSdk 26 的框架 SQLite。
  */
 class SqliteDatabase(
     private val driver: SQLiteDriver,
-    private val path: String
+    private val path: String,
+    /** 读连接数量。默认 2：够覆盖「列表分页 + 后台读」两类并发，再多收益有限。 */
+    private val readerCount: Int = 2
 ) {
-    private val mutex = Mutex()
-    private var conn: SQLiteConnection? = null
+    private val initMutex = Mutex()
+    private val writeMutex = Mutex()
+    private val readersMutex = Mutex()
+    private val readerSlots = Semaphore(readerCount)
+    private val idleReaders = ArrayDeque<SQLiteConnection>()
 
-    /** 在锁内执行一段读（或无需事务的写）。block 不得挂起。 */
-    suspend fun <T> withConnection(block: (SQLiteConnection) -> T): T =
-        mutex.withLock { block(openLocked()) }
+    @Volatile
+    private var writer: SQLiteConnection? = null
 
-    /** 在一个 BEGIN IMMEDIATE 事务内执行 block；抛异常则整体回滚。 */
-    suspend fun <T> transaction(block: (SQLiteConnection) -> T): T = mutex.withLock {
-        val c = openLocked()
-        c.exec("BEGIN IMMEDIATE")
-        try {
-            val result = block(c)
-            c.exec("COMMIT")
-            result
-        } catch (t: Throwable) {
-            runCatching { c.exec("ROLLBACK") }
-            throw t
+    @Volatile
+    private var initialized = false
+
+    /** 在**读连接**上执行一段只读（或无需事务保证的）代码。block 不得挂起。 */
+    suspend fun <T> withConnection(block: (SQLiteConnection) -> T): T {
+        ensureInitialized()
+        return readerSlots.withPermit {
+            val conn = acquireReader()
+            try {
+                block(conn)
+            } finally {
+                releaseReader(conn)
+            }
         }
     }
 
-    /** 关闭连接（测试与应用退出用）。之后再访问会重新打开。 */
-    suspend fun close() = mutex.withLock {
-        runCatching { conn?.close() }
-        conn = null
+    /**
+     * 在**写连接**上的 `BEGIN IMMEDIATE` 事务内执行 [block]；抛异常则整体回滚。
+     *
+     * block 是非挂起函数：**不要在事务里发网络请求或调用 LLM**（见类注释铁律）。
+     */
+    suspend fun <T> transaction(block: (SQLiteConnection) -> T): T {
+        ensureInitialized()
+        return writeMutex.withLock {
+            val c = checkNotNull(writer) { "write connection not initialized" }
+            c.exec("BEGIN IMMEDIATE")
+            try {
+                val result = block(c)
+                c.exec("COMMIT")
+                result
+            } catch (t: Throwable) {
+                runCatching { c.exec("ROLLBACK") }
+                throw t
+            }
+        }
     }
 
-    private fun openLocked(): SQLiteConnection {
-        conn?.let { return it }
+    /** 关闭所有连接（测试与应用退出用）。之后访问会重新初始化。 */
+    suspend fun close() {
+        initMutex.withLock {
+            runCatching { writer?.close() }
+            writer = null
+            initialized = false
+        }
+        readersMutex.withLock {
+            idleReaders.forEach { runCatching { it.close() } }
+            idleReaders.clear()
+        }
+    }
+
+    private suspend fun ensureInitialized() {
+        if (initialized) return
+        initMutex.withLock {
+            if (initialized) return@withLock
+            val w = openConfigured()
+            try {
+                Migrations.migrate(w)
+            } catch (t: Throwable) {
+                runCatching { w.close() }
+                throw t
+            }
+            writer = w
+            initialized = true
+        }
+    }
+
+    private suspend fun acquireReader(): SQLiteConnection = readersMutex.withLock {
+        idleReaders.removeLastOrNull() ?: openConfigured()
+    }
+
+    private suspend fun releaseReader(conn: SQLiteConnection) {
+        readersMutex.withLock { idleReaders.addLast(conn) }
+    }
+
+    private fun openConfigured(): SQLiteConnection {
         val c = driver.open(path)
         try {
-            // 外键必须每个连接都开
+            // foreign_keys 是连接级开关，每条连接都必须单独开启
             c.exec("PRAGMA foreign_keys=ON")
             c.exec("PRAGMA journal_mode=WAL")
             c.exec("PRAGMA synchronous=NORMAL")
             c.exec("PRAGMA busy_timeout=5000")
-            Migrations.migrate(c)
         } catch (t: Throwable) {
             runCatching { c.close() }
             throw t
         }
-        conn = c
         return c
     }
 }
 
-/** 执行一条无参语句（读出全部结果行前不需要的场景，如 DDL / PRAGMA / BEGIN）。 */
+/** 执行一条无参语句（DDL / PRAGMA / BEGIN / COMMIT）。 */
 internal fun SQLiteConnection.exec(sql: String) {
     prepare(sql).use { it.step() }
 }

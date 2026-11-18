@@ -37,7 +37,7 @@ class ContextCapacityProviderTest {
     fun fallbackWhenNothingProbed() {
         val c = provider(settings()).current()
         assertEquals(CapacitySource.FALLBACK, c.source)
-        assertEquals(131072, c.tokens)
+        assertEquals(32768, c.tokens)
     }
 
     @Test

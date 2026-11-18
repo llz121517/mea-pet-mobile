@@ -15,10 +15,20 @@ enum class CapacitySource { MANUAL, PROBED, FALLBACK }
 /** 容量及其来源。 */
 data class ContextCapacity(val tokens: Int, val source: CapacitySource)
 
-/** 云端与私网（与公网同样处理）的兜底原始容量。 */
-internal const val FALLBACK_CAPACITY_TOKENS: Int = 131072
+/**
+ * 云端与私网的兜底原始容量。
+ *
+ * 取 32K 而非更高的值：**估大的代价是请求被服务端以 400 拒绝**（还可能白等一次往返），
+ * 而估小的代价只是提前一点压缩/截断。两害相权取其小，所以默认按较小的窗口假设。
+ * 探测或用户手动填写可覆盖此值。
+ */
+internal const val FALLBACK_CAPACITY_TOKENS: Int = 32768
 
-/** 回环地址（localhost、127.0.0.0/8、::1）的兜底原始容量：本机小模型常见窗口较小。 */
+/**
+ * 回环地址（localhost、127.0.0.0/8、::1）的兜底原始容量。
+ *
+ * 与云端同值（本机小模型常见窗口也不大），保留独立常量是为了将来两者需要分叉时改一处即可。
+ */
 internal const val LOOPBACK_FALLBACK_CAPACITY_TOKENS: Int = 32768
 
 /**
