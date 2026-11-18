@@ -7,9 +7,11 @@ import com.meapet.mobile.BuildConfig
 import com.meapet.mobile.client.KtorHttpClientEngine
 import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.chat.ChatService
+import com.meapet.mobile.chat.compaction.ContextCompactor
 import com.meapet.mobile.chat.ConversationManager
 import com.meapet.mobile.chat.ConversationStore
 import com.meapet.mobile.storage.ConversationRepository
+import com.meapet.mobile.storage.MetaCompactionStore
 import com.meapet.mobile.storage.SqliteConversationRepository
 import com.meapet.mobile.storage.SqliteDatabase
 import androidx.sqlite.driver.AndroidSQLiteDriver
@@ -146,6 +148,19 @@ class AppContainer(
         )
     }
 
+    /** 上下文压缩状态存储（与会话/记忆同库，`meta` 表一行 JSON）。 */
+    private val compactionStore: MetaCompactionStore by lazy {
+        MetaCompactionStore(database)
+    }
+
+    /** 上下文压缩器：用当前模型把较早轮次折叠成滚动摘要。 */
+    private val contextCompactor: ContextCompactor by lazy {
+        ContextCompactor(
+            clientProvider = { apiClient },
+            modelProvider = { settingsManager.getModel() }
+        )
+    }
+
     /** 聊天服务（核心业务逻辑）。 */
     val chatService: ChatService by lazy {
         ChatService(
@@ -155,7 +170,10 @@ class AppContainer(
             memoryManager = memoryManager,
             settingsManager = settingsManager,
             postProcessScope = applicationScope,
-            config = config
+            config = config,
+            compactionStore = compactionStore,
+            compactor = contextCompactor,
+            budgetProvider = { contextCapacity.budget() }
         )
     }
 

@@ -54,6 +54,11 @@ fun OverlayMenu(
     onClearConversation: () -> Unit = {},
     onShowMemories: () -> Unit = {},
     onToggleOverlay: () -> Unit = {},
+    /** 上下文是否已长到值得显示「压缩上下文」入口（平时不占菜单位置）。 */
+    showCompactContext: Boolean = false,
+    /** 是否正在压缩（菜单项显示进行中文案）。 */
+    isCompacting: Boolean = false,
+    onCompactContext: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -135,6 +140,19 @@ fun OverlayMenu(
                             MenuEntry("查看记忆", R.drawable.ic_menu_memory) { menuExpanded = false; onShowMemories() }
                             HorizontalDivider()
                             MenuEntry("悬浮窗", R.drawable.ic_menu_overlay) { menuExpanded = false; onToggleOverlay() }
+                            // 上下文较长时才出现：平时不占菜单位置，避免误导用户频繁整理
+                            if (showCompactContext) {
+                                HorizontalDivider()
+                                MenuEntry(
+                                    if (isCompacting) "整理中…" else "压缩上下文",
+                                    R.drawable.ic_menu_compact
+                                ) {
+                                    if (!isCompacting) {
+                                        menuExpanded = false
+                                        onCompactContext()
+                                    }
+                                }
+                            }
                         }
                     }
                 }

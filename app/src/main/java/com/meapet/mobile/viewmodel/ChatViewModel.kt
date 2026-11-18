@@ -82,6 +82,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** 本机撤销窗口时长（无障碍开启时由系统建议值延长）。 */
     private val undoWindow: Long by lazy { undoWindowMs(getApplication()) }
 
+    /** 压缩提醒是否已在本次会话弹过（用户忽略后不重复打扰；压缩或清除对话后可再次提醒）。 */
+    private var compactHintShown = false
+
     init {
         // 初始化时从 ConversationManager 加载已有消息
         val existingMessages = chatService.getHistory()
@@ -103,6 +106,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
+            // 冷启动恢复长会话后也要判断一次压缩提醒/入口
+            refreshCompactionUi()
         }
 
         // 监听 Live2D 触摸分区事件→添加系统消息气泡
@@ -292,6 +297,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             is ChatEvent.RetryLastMessage -> retryLastMessage()
             is ChatEvent.DismissError -> dismissError()
             is ChatEvent.DismissUpdateNotice -> dismissUpdateNotice()
+            is ChatEvent.CompactContext -> compactContext()
+            is ChatEvent.DismissCompactHint -> dismissCompactHint()
         }
     }
 
@@ -330,6 +337,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     // 主界面语音（模型就绪且开关开启时才真正发声，否则静默跳过）
                     container.ttsManager.speak(assistantMsg, com.meapet.mobile.tts.TtsManager.Source.MAIN)
+                    refreshCompactionUi()
                 },
                 onFailure = { error ->
                     _state.update {
@@ -409,13 +417,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // 取仓库里的完整历史（不是内存窗口），否则撤销会丢掉窗口之前的消息
         val snapshot = chatService.loadFullHistory()
         chatService.clearHistory()
+        // 清除后摘要已不对应任何现存历史：提醒与入口一并复位，下次再长到阈值才重新提醒
+        compactHintShown = false
         _state.update {
             // 只清对话相关字段，保留 updateNotice / memoryDialog 等无关状态
             it.copy(
                 messages = emptyList(),
                 isLoading = false,
                 error = null,
-                inputText = ""
+                inputText = "",
+                compactHint = false,
+                canCompactContext = false,
+                compactedUpToMessageId = null
             )
         }
         if (snapshot.isNotEmpty()) {
@@ -526,6 +539,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         pendingUndo = null
                     )
                 }
+                refreshCompactionUi()
             }
             is ChatUndo.ClearMemory -> {
                 viewModelScope.launch {
@@ -572,6 +586,53 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun dismissUpdateNotice() {
         _state.update { it.copy(updateNotice = null) }
+    }
+
+    // ── 上下文压缩 ────────────────────────────────────
+
+    /**
+     * 刷新压缩相关的 UI 状态。
+     *
+     * 提醒只在越过阈值后弹一次（[compactHintShown]）；入口 [ChatUiState.canCompactContext]
+     * 则随上下文回落自动隐藏（压缩完成、清除对话后自然消失）。
+     */
+    private fun refreshCompactionUi() {
+        viewModelScope.launch {
+            val tokens = chatService.refreshContextTokens()
+            val compaction = chatService.compaction()
+            val canCompact = tokens >= com.meapet.mobile.chat.compaction.CompactionConfig.COMPACT_HINT_TOKENS
+            val showHint = canCompact && !compactHintShown
+            if (showHint) compactHintShown = true
+            _state.update {
+                it.copy(
+                    compactHint = showHint,
+                    canCompactContext = canCompact,
+                    compactedUpToMessageId = compaction.coveredToMessageId
+                )
+            }
+        }
+    }
+
+    /** 手动压缩上下文（Snackbar 动作与菜单项共用）。 */
+    private fun compactContext() {
+        if (_state.value.isCompacting) return
+        _state.update { it.copy(isCompacting = true, compactHint = false) }
+        viewModelScope.launch {
+            val result = chatService.compactContext()
+            _state.update {
+                it.copy(
+                    isCompacting = false,
+                    error = result.exceptionOrNull()?.message ?: it.error
+                )
+            }
+            compactHintShown = false
+            refreshCompactionUi()
+        }
+    }
+
+    /** 用户忽略本次压缩提醒：同一会话不再重复弹。 */
+    private fun dismissCompactHint() {
+        _state.update { it.copy(compactHint = false) }
     }
 
     /**

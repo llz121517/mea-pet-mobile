@@ -33,4 +33,10 @@ sealed interface ChatEvent {
 
     /** 启动静默检测更新提示已展示。 */
     data object DismissUpdateNotice : ChatEvent
+
+    /** 手动压缩上下文（用户点「整理一下」/菜单项）。 */
+    data object CompactContext : ChatEvent
+
+    /** 压缩提醒已展示（同一会话不重复弹）。 */
+    data object DismissCompactHint : ChatEvent
 }

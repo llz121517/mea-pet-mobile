@@ -178,17 +178,27 @@ class ConversationManager(
         tailFragments: List<String> = emptyList(),
         tailMode: TailMode = DEFAULT_TAIL_MODE,
         maxMessages: Int = 30,
-        memoryOpsEchoTurns: Int = 0
+        memoryOpsEchoTurns: Int = 0,
+        summary: String = "",
+        skipOldest: Int = 0
     ): List<ChatMessage> {
         val systemContent = buildString {
             append(systemPrompt)
             if (stableContext.isNotBlank()) {
                 append("\n\n$stableContext")
             }
+            if (summary.isNotBlank()) {
+                // 摘要并入首条 system 末尾（不做独立 system/user 消息，兼容严格模板）
+                append("\n\n【对话摘要】（较早内容的压缩，供参考）\n")
+                append(summary)
+            }
         }
 
         val recentMessages = synchronized(lock) {
-            messages.filter { it.role != ChatRole.system }.takeLast(maxMessages)
+            val all = messages.filter { it.role != ChatRole.system }
+            // 已被摘要覆盖的旧消息不再逐字发送，只留摘要
+            val afterSkip = if (skipOldest > 0) all.drop(skipOldest.coerceIn(0, all.size)) else all
+            afterSkip.takeLast(maxMessages)
         }
 
         return buildList {

@@ -19,6 +19,10 @@ import com.meapet.mobile.memory.MemoryStats
  * @property pendingUndo 刚执行、仍在撤销窗口内的破坏性操作（null = 无可撤销项）
  * @property hasMoreHistory 仓库里是否还有更早的历史可向上加载
  * @property isLoadingOlder 是否正在加载更早的一页
+ * @property compactHint 是否应弹出「上下文较长，要不要整理」的提醒（同一会话只弹一次）
+ * @property canCompactContext 上下文是否已长到值得显示手动压缩入口
+ * @property isCompacting 是否正在压缩
+ * @property compactedUpToMessageId 已被摘要覆盖的最后一条消息 id（UI 在此后画「早些时候」分隔条）
  */
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
@@ -29,7 +33,11 @@ data class ChatUiState(
     val memoryDialog: MemoryDialogUi? = null,
     val pendingUndo: ChatUndo? = null,
     val hasMoreHistory: Boolean = false,
-    val isLoadingOlder: Boolean = false
+    val isLoadingOlder: Boolean = false,
+    val compactHint: Boolean = false,
+    val canCompactContext: Boolean = false,
+    val isCompacting: Boolean = false,
+    val compactedUpToMessageId: String? = null
 )
 
 /** UI 层展示的更新提示。 */

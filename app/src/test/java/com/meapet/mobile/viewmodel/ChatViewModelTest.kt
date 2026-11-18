@@ -3,6 +3,7 @@ package com.meapet.mobile.viewmodel
 import com.meapet.mobile.chat.ChatMessage
 import com.meapet.mobile.chat.ChatRole
 import com.meapet.mobile.chat.ChatService
+import com.meapet.mobile.chat.compaction.CompactionState
 import com.meapet.mobile.chat.ChatUndo
 import com.meapet.mobile.app.AppContainer
 import com.meapet.mobile.core.UNDO_WINDOW_MS
@@ -83,6 +84,9 @@ class ChatViewModelTest {
         // UI 首屏与撤销快照改读「完整历史」接口；测试里沿用各用例对 getHistory() 的 stub 作为完整历史
         wheneverBlocking { chatService.loadRecentForUi(any()) }.thenAnswer { chatService.getHistory() }
         wheneverBlocking { chatService.loadFullHistory() }.thenAnswer { chatService.getHistory() }
+        // 压缩状态与上下文估算：ViewModel 在发送成功后会刷新，mock 需显式给默认值（否则拆箱 NPE）
+        wheneverBlocking { chatService.refreshContextTokens() }.thenReturn(0)
+        wheneverBlocking { chatService.compaction() }.thenReturn(CompactionState())
 
         // from(application) 真实执行：application 是 MeaPetApplication 的 mock，container 经 doReturn 注入
         Mockito.doReturn(container).`when`(application).container

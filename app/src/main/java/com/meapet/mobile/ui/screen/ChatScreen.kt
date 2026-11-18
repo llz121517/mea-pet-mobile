@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Card
@@ -67,6 +68,9 @@ import com.meapet.mobile.ui.component.OverlayMenu
 import com.meapet.mobile.ui.component.UndoSnackbarEffect
 import com.meapet.mobile.ui.screen.settings.SettingsScreen
 import com.meapet.mobile.viewmodel.ChatViewModel
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** 内部页面导航。 */
@@ -216,6 +220,22 @@ private fun ChatPage(
         chatViewModel.onEvent(ChatEvent.DismissUpdateNotice)
     }
 
+    // 上下文过长提醒：越过阈值后只弹一次（ViewModel 保证），动作直接触发整理。
+    // 文案刻意口语化，与主界面「开始和 Mea 对话吧」保持同一种语气。
+    LaunchedEffect(state.compactHint) {
+        if (!state.compactHint) return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = "我们聊了好久啦，要不要让 Mea 把前面的内容整理一下喵？",
+            actionLabel = "整理一下",
+            duration = SnackbarDuration.Long,
+            withDismissAction = true
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            chatViewModel.onEvent(ChatEvent.CompactContext)
+        }
+        chatViewModel.onEvent(ChatEvent.DismissCompactHint)
+    }
+
     // 整页躲开软键盘：输入栏、撤销条、消息列表都随键盘收窄（窗口不再替我们
     // resize/pan，见 MainActivity 的 edge-to-edge 说明）
     Box(modifier = Modifier.fillMaxSize().imePadding()) {
@@ -239,6 +259,9 @@ private fun ChatPage(
                 chatViewModel.onEvent(ChatEvent.ShowMemories)
             },
             onSettings = onOpenSettings,
+            showCompactContext = state.canCompactContext || state.isCompacting,
+            isCompacting = state.isCompacting,
+            onCompactContext = { chatViewModel.onEvent(ChatEvent.CompactContext) },
             modifier = Modifier.align(Alignment.TopEnd)
         )
 
@@ -317,11 +340,18 @@ private fun MessageList(
         }
 
         // 兜底去重见函数开头 uniqueMessages
-        items(
+        itemsIndexed(
             items = uniqueMessages,
-            key = { it.id }
-        ) { message ->
+            key = { _, message -> message.id }
+        ) { index, message ->
+            // 按天轻时间分隔条：相邻消息跨自然日时插一条（纯 UI 派生，不入库）
+            val previousTs = if (index > 0) uniqueMessages[index - 1].timestamp else null
+            dayDividerLabel(previousTs, message.timestamp)?.let { DividerLabel(it) }
             ChatBubble(message = message, alpha = bubbleAlpha)
+            // 压缩分隔条：已折叠进摘要的内容与仍逐字发送的内容之间
+            if (message.id == state.compactedUpToMessageId) {
+                DividerLabel("早些时候")
+            }
         }
 
         if (state.isLoading) {
@@ -482,8 +512,57 @@ private fun MemoryDialog(
     }
 }
 
-/** 记忆类型的中文标签。 */
-private fun memoryTypeLabel(type: MemoryType): String = when (type) {
+/**
+ * 分隔条：`──────── 今天 ────────` 样式的淡色横线 + 居中文案。
+ *
+ * 用于「按天时间」与「早些时候（已压缩）」两种分隔，两者共用同一组件，仅文案不同。
+ */
+@Composable
+private fun DividerLabel(text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val lineColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        HorizontalDivider(modifier = Modifier.weight(1f), color = lineColor)
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            modifier = Modifier.padding(horizontal = 10.dp)
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = lineColor)
+    }
+}
+
+/**
+ * 按天分隔条文案：相邻两条消息跨自然日（设备本地时区）时返回文案，同一天返回 null。
+ *
+ * @param previousTs 上一条可见消息时间戳；null（列表首条）时总是给出当天文案
+ * @param currentTs 当前消息时间戳
+ */
+private fun dayDividerLabel(
+    previousTs: Long?,
+    currentTs: Long,
+    zone: ZoneId = ZoneId.systemDefault()
+): String? {
+    val current = Instant.ofEpochMilli(currentTs).atZone(zone).toLocalDate()
+    if (previousTs != null) {
+        val previous = Instant.ofEpochMilli(previousTs).atZone(zone).toLocalDate()
+        if (previous == current) return null
+    }
+    val today = LocalDate.now(zone)
+    return when {
+        current == today -> "今天"
+        current == today.minusDays(1) -> "昨天"
+        current.year == today.year -> "${current.monthValue}月${current.dayOfMonth}日"
+        else -> "${current.year}年${current.monthValue}月${current.dayOfMonth}日"
+    }
+}
+
+/** 记忆类型的中文标签。 */private fun memoryTypeLabel(type: MemoryType): String = when (type) {
     MemoryType.SHORT_TERM -> "短期"
     MemoryType.LONG_TERM -> "长期"
     MemoryType.CORE_TRAIT -> "特质"

@@ -11,6 +11,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 /**
  * OpenAI 兼容 API 响应解析辅助函数。
@@ -35,6 +36,25 @@ object ApiResponse {
             ?.jsonObject?.get("message")
             ?.jsonObject?.get("content")
             ?.jsonPrimitive?.contentOrNull
+    }
+
+    /**
+     * 从 `/chat/completions` 响应中提取 `usage.prompt_tokens`（本轮输入的真实 token 数）。
+     *
+     * 用于校准本地 token 估算（见 `TokenEstimator`）：不同服务商的分词器差异很大，
+     * 只有服务端给的数字是权威值。
+     *
+     * @return 提示 token 数；响应缺 `usage`、字段缺失或非正整数时返回 null
+     */
+    fun usagePromptTokens(body: String): Int? = try {
+        val root = json.parseToJsonElement(body) as? JsonObject
+        val value = root?.get("usage")?.let { it as? JsonObject }
+            ?.get("prompt_tokens")?.jsonPrimitive?.longOrNull
+        value?.takeIf { it > 0 }?.toInt()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
     }
 
     /**
