@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
@@ -183,19 +184,23 @@ private fun ChatPage(
     // 新消息或错误卡片出现时自动滚动到底部。
     // 错误卡片是列表末尾的额外 item，所以它出现时也要滚一次，否则用户看不到重试按钮。
     // 自动滚动到底部。
-    // - 启动首屏：等 initialLoadDone 后用「无动画」定位到底部。否则会先滚到 35 条窗口的底部，
-    //   随后首屏 50 条在头部插入 15 条旧消息，LazyColumn 按 key 锚定原位置 → 停留在半途
-    //   （表现为打开 App 停在中间某条消息，且看到一段从上面滚下来的动画）。
+    // - 启动首屏：等 initialLoadDone 后**无动画**定位到底部（scrollToItem）。
+    //   否则会先滚到 35 条内存窗口的底部，随后首屏 50 条在头部插入 15 条旧消息，
+    //   LazyColumn 按 key 锚定原位置 → 停留在半途，并露出滚动动画。
+    // - 首屏定位完成前列表保持透明（contentReady=false）：避免先闪一下空态/顶部内容。
     // - 之后：新消息或错误卡片出现才带动画滚动。
     // 触发键仍是「最后一条消息 id」而非条数：向上懒加载会在头部插消息，条数变化不能把用户拽回底部。
-    var pendingInitialScroll by remember { mutableStateOf(true) }
+    var initialScrollApplied by remember { mutableStateOf(false) }
     LaunchedEffect(state.initialLoadDone, state.messages.lastOrNull()?.id, state.error) {
         if (!state.initialLoadDone) return@LaunchedEffect
         val lastIndex = state.messages.size - 1 + if (state.error != null) 1 else 0
-        if (lastIndex < 0) return@LaunchedEffect
-        if (pendingInitialScroll) {
+        if (lastIndex < 0) {
+            initialScrollApplied = true
+            return@LaunchedEffect
+        }
+        if (!initialScrollApplied) {
             listState.scrollToItem(lastIndex)
-            pendingInitialScroll = false
+            initialScrollApplied = true
         } else {
             listState.animateScrollToItem(lastIndex)
         }
@@ -255,6 +260,7 @@ private fun ChatPage(
             state = state,
             listState = listState,
             bubbleAlpha = bubbleAlpha,
+            contentReady = initialScrollApplied || (state.initialLoadDone && state.messages.isEmpty()),
             onDismissError = { chatViewModel.onEvent(ChatEvent.DismissError) },
             onRetry = { chatViewModel.onEvent(ChatEvent.RetryLastMessage) }
         )
@@ -317,6 +323,8 @@ private fun MessageList(
     state: ChatUiState,
     listState: LazyListState,
     bubbleAlpha: Float,
+    /** 首屏定位是否已完成；未完成时列表透明，避免闪一下空态或顶部内容 */
+    contentReady: Boolean,
     onDismissError: () -> Unit,
     onRetry: () -> Unit
 ) {
@@ -330,11 +338,12 @@ private fun MessageList(
         modifier = Modifier
             .fillMaxSize()
             .padding(bottom = 88.dp)
-            .padding(horizontal = 4.dp, vertical = 8.dp),
+            .padding(horizontal = 4.dp, vertical = 8.dp)
+            .alpha(if (contentReady) 1f else 0f),
         contentPadding = PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.Bottom
     ) {
-        if (state.messages.isEmpty()) {
+        if (state.initialLoadDone && state.messages.isEmpty()) {
             item {
                 Box(
                     modifier = Modifier

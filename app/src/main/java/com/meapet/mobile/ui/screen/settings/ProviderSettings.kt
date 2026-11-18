@@ -38,6 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.res.painterResource
+import com.meapet.mobile.R
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meapet.mobile.viewmodel.SettingsUiState
@@ -250,6 +252,23 @@ internal fun ModelParamsSection(
             Text("当前生效 ${state.effectiveCapacity}（$src）；实际使用约为其 85%。本地推理服务请按实际加载的窗口填写")
         }
     )
+
+    Spacer(Modifier.height(4.dp))
+
+    // 重新检测：清除手动值并强制重新探测（探测失败会回退兜底，不报错）
+    TextButton(
+        onClick = { viewModel.redetectContextWindow() },
+        modifier = Modifier.saveOnFocusChange { }
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_refresh),
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.width(6.dp))
+        Text("重新检测", style = MaterialTheme.typography.labelMedium)
+    }
 
     Spacer(Modifier.height(8.dp))
 
