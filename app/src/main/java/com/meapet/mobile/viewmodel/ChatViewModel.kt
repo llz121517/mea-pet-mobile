@@ -86,11 +86,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var compactHintShown = false
 
     init {
-        // 初始化时从 ConversationManager 加载已有消息
-        val existingMessages = chatService.getHistory()
-        if (existingMessages.isNotEmpty()) {
-            _state.update { it.copy(messages = existingMessages) }
-        }
+        // 首屏消息统一在 warmUp 完成后按页加载（UI 只拿最近一页），
+        // 不再直接读 ConversationManager 的内存窗口：压缩模式下窗口是完整历史，直接塞进 UI 会很重。
 
         // 等启动预热（磁盘加载会话历史/记忆）完成后刷新消息列表：
         // ViewModel 往往先于异步加载完成而创建，此时 getHistory() 还是空的
@@ -204,13 +201,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun reloadHistory() {
         if (_state.value.isLoading) return
-        val history = chatService.getHistory()
-        if (history.isEmpty()) return
-        _state.update { cur ->
-            // 已向上加载的更早页要保留：history 只是内存窗口，合并会丢掉它之前的内容
-            val firstIdx = cur.messages.indexOfFirst { it.id == history.first().id }
-            val olderPrefix = if (firstIdx > 0) cur.messages.take(firstIdx) else emptyList()
-            cur.copy(messages = olderPrefix + mergeWithHistory(history, cur.messages.drop(olderPrefix.size)))
+        viewModelScope.launch {
+            // 按页取最近 UI_PAGE_SIZE 条（不是完整内存窗口），避免长会话下合并超大列表
+            val history = chatService.loadRecentForUi(UI_PAGE_SIZE)
+            if (history.isEmpty()) return@launch
+            _state.update { cur ->
+                // 已向上加载的更早页要保留：history 只是最近一页，合并会丢掉它之前的内容
+                val firstIdx = cur.messages.indexOfFirst { it.id == history.first().id }
+                val olderPrefix = if (firstIdx > 0) cur.messages.take(firstIdx) else emptyList()
+                cur.copy(messages = olderPrefix + mergeWithHistory(history, cur.messages.drop(olderPrefix.size)))
+            }
         }
     }
 

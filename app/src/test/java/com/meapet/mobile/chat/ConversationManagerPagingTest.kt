@@ -66,4 +66,38 @@ class ConversationManagerPagingTest {
 
         assertEquals(29, mgr.loadFullHistory().size)
     }
+
+    @Test
+    fun `关闭批量裁剪时窗口保留完整历史`() = runTest {
+        val repo = InMemoryConversationRepository()
+        val mgr = ConversationManager(
+            maxSize = 10,
+            trimBatch = 4,
+            repository = repo,
+            persistScope = backgroundScope,
+            autoTrim = false
+        )
+
+        (1..30).forEach { mgr.addMessage(msg(it)) }
+
+        assertEquals(30, mgr.size, "压缩模式下窗口追加式增长，不批量裁剪")
+        assertEquals(30, mgr.loadFullHistory().size)
+    }
+
+    @Test
+    fun `关闭批量裁剪时启动恢复完整历史`() = runTest {
+        val repo = InMemoryConversationRepository()
+        (1..30).forEach { repo.append(msg(it)) }
+
+        val mgr = ConversationManager(
+            maxSize = 10,
+            trimBatch = 4,
+            repository = repo,
+            persistScope = backgroundScope,
+            autoTrim = false
+        )
+        mgr.restoreFromRepository()
+
+        assertEquals(30, mgr.size, "应恢复全部历史，否则已压缩覆盖点会落在窗口外")
+    }
 }

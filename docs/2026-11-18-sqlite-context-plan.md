@@ -84,8 +84,8 @@
 - 文案写明：手动值同样乘 0.85，实际使用约为填写值的 85%；本地推理服务请按实际加载的窗口填写。
 - `max_tokens` 保持现有独立设置，不与它合并。
 
-### M5 上下文压缩 [已完成首版]
-- [已完成] 取消批量裁剪（内存窗口仍保留 `maxTrim` 上限作最小保护，压缩后由 `skipOldest` 控制实际发送范围）。
+### M5 上下文压缩 [已完成]
+- [已完成] 取消批量裁剪：`ConversationManager(autoTrim = false)` —— 内存窗口**追加式增长**、不再批量裁剪；启动恢复时装入**完整历史**（否则「已压缩覆盖点」可能落在窗口外，导致摘要与原文重复）；发送侧在压缩启用时不再用 `maxHistoryMessages` 截断（`maxMessages = Int.MAX_VALUE`），改由「压缩摘要 + 发送预算」控制。纯窗口模式（压缩关闭）仍保留 `maxSize/trimBatch` 裁剪。
 - [已完成] **手动压缩为主路径**：下一次请求预计发送的上下文 token（本地估算，有 usage.prompt_tokens 后用校准值）超过文件级常量 `COMPACT_HINT_TOKENS = 65536` 时，弹一次 Snackbar，带「整理一下」动作；同一会话只弹一次，忽略后不重复，压缩完成或清除对话后重置。顶部菜单平时不显示「压缩上下文」，越过阈值后才出现，回落到阈值以下隐藏；Snackbar 动作与菜单项走同一个压缩入口（`ChatService.compactContext`），压缩期间显示「整理中…」并禁用，不阻塞输入。
 - [已完成] Snackbar 文案口语化：`我们聊了好久啦，要不要让 Mea 把前面的内容整理一下喵？` / 动作 `整理一下`。
 - [已完成] **自动压缩只做兜底**：仅保留硬触发（上下文逼近有效预算 90% 时同步压缩），不弹任何提示；失败退化为仅在发给模型的窗口内按轮丢弃。小窗口（预算 < 6000）跳过 LLM 摘要直接截断。
@@ -94,7 +94,10 @@
 - [已完成] token 估算：CJK 1.0/字、拉丁 0.25/字符、其他 0.5、每条 +4；用 `usage.prompt_tokens` 做 EMA（0.3）校准，比值夹在 0.5~2.0。
 - [已完成] 存储：压缩状态整体 JSON 存 `meta` 表键 `context_compaction`（`MetaCompactionStore`），无需 schema 迁移；清除对话时一并清除。
 - [已完成] 单测：`TokenEstimatorTest`、`ContextCompactorTest`（切点/丢弃/摘要请求/失败）、`MetaCompactionStoreTest`、`ChatServiceCompactionTest`（摘要注入首条 system、已覆盖消息不再发送、手动压缩、硬触发兜底、清除复位）。
-- 待办：点击「早些时候」展开摘要全文；`compaction_summaries` 表未启用（当前用 meta JSON），若后续需要按区间溯源再迁移；真机验证压缩质量与阈值调参。
+- 待办：
+  - ~~点击「早些时候」展开摘要全文~~ —— **已否决（不做）**：分隔条只作模型视角提示，摘要正文无需暴露给用户；
+  - `compaction_summaries` 表未启用（当前用 `meta` 表 JSON 存储整份状态），若后续需要按区间溯源再迁移；
+  - 阈值与系数（64K 提醒、90% 硬触发、0.85 预算系数、token 估算权重）尚为起始值，需按真实使用调参。
 
 ### M6 收尾
 - 文档、发布说明、备胎代码（JsonMemoryRepository、ConversationStore）的 1.10 清理登记。

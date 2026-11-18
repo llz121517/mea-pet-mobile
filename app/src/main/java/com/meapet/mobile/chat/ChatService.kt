@@ -193,11 +193,12 @@ class ChatService(
 
                 // 记忆关闭时 stable 为空（模型压根没收到协议说明），历史里也不该回贴协议块
                 val memoryOn = !memoryContext?.stable.isNullOrBlank()
+                val compactionEnabled = compactionStore != null && compactor != null
                 val apiMessages = conversationManager.buildApiMessages(
                     systemPrompt = systemPrompt,
                     stableContext = memoryContext?.stable ?: "",
                     tailFragments = tailFragments,
-                    maxMessages = config.maxHistoryMessages,
+                    maxMessages = if (compactionEnabled) Int.MAX_VALUE else config.maxHistoryMessages,
                     memoryOpsEchoTurns = if (memoryOn) config.memoryOpsEchoTurns else 0,
                     summary = state.summary,
                     skipOldest = skipOldest

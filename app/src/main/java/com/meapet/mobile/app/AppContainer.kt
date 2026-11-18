@@ -113,7 +113,9 @@ class AppContainer(
             maxSize = config.maxHistoryMessages,
             trimBatch = config.historyTrimBatch,
             repository = conversationRepository,
-            persistScope = applicationScope
+            persistScope = applicationScope,
+            // 1.9 起启用上下文压缩：窗口追加式增长，不批量裁剪（避免「裁掉但没进摘要」的静默丢失）
+            autoTrim = false
         )
     }
 

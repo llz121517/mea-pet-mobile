@@ -37,7 +37,15 @@ class ConversationManager(
     private val maxSize: Int = 50,
     private val trimBatch: Int = 1,
     private val repository: ConversationRepository? = null,
-    persistScope: CoroutineScope? = null
+    persistScope: CoroutineScope? = null,
+    /**
+     * 是否启用内存窗口批量裁剪。
+     *
+     * 开启上下文压缩时置 **false**：窗口追加式增长，由「压缩摘要 + 发送预算」控制发给模型的内容。
+     * 否则会出现「消息被裁掉、但还没进摘要」的静默上下文丢失（库里和 UI 还在，模型却完全看不到）。
+     * 纯窗口模式（压缩关闭/不可用）仍用 true，按 [maxSize]/[trimBatch] 批量裁剪。
+     */
+    private val autoTrim: Boolean = true
 ) {
     private val lock = Any()
     private val messages = mutableListOf<ChatMessage>()
@@ -119,10 +127,13 @@ class ConversationManager(
         Log.i(TAG, "Restored ${persisted.size} messages from storage (window: $size)")
     }
 
-    /** 从仓库取最近 [maxSize] 条恢复进内存窗口（启动预热用）。无仓库时为 no-op。 */
+    /** 从仓库恢复内存窗口（启动预热用）。无仓库时为 no-op。 */
     suspend fun restoreFromRepository() {
         val repo = repository ?: return
-        restore(repo.loadRecent(maxSize))
+        // 关闭批量裁剪时把完整历史装进窗口：否则「已压缩覆盖点」可能落在窗口之外，
+        // 导致摘要与原文重复发送（或重复裁剪）
+        val limit = if (autoTrim) maxSize else Int.MAX_VALUE
+        restore(repo.loadRecent(limit))
     }
 
     /**
@@ -311,6 +322,8 @@ class ConversationManager(
      * 之后的 [trimBatch] 轮前缀完全相同。代价是有效窗口在 maxSize-trimBatch..maxSize 间浮动。
      */
     private fun trimWindow() {
+        // 压缩模式：窗口追加式增长，不再批量裁剪（由压缩/预算控制发送量）
+        if (!autoTrim) return
         if (messages.size <= maxSize) return
         val systemCount = messages.count { it.role == ChatRole.system }
         val nonSystemCount = messages.size - systemCount
