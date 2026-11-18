@@ -38,13 +38,13 @@
 
 ---
 
-## 📌 待办 0 · 1.8.0 发布收尾(阻塞 v1.8.0 发布,tag 仍未打)
+## 📌 待办 0 · 1.8.0 发布收尾(阻塞 v1.8.0 发布)
 
 - [x] **真机验收** 按 [`archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](archive/checklists/2026-11-15-tts-device-test-1.8.0.md) 逐条执行(21 条试听 + SIGILL/内存/打断/悬浮窗/删除重导入/1.7.x 升级迁移),结论回填清单 §3。**已完成(2026-11-15)**:清单全部勾选、§3 结论回填(设备 Xiaomi 22041216UC / MT6895Z / Android 14);自动化记录见清单 §A。当天修复并复验:英文数字读法、流式回调 JNI 签名崩溃、≤2s 短片段无声。
 - [x] **模型包 `lexicon.txt` 重传确认** — **已实测确认(2026-11-15)**:App 只校验字节数;`artifacts.json` 把 `lexicon.txt` 标为 `content-identical`,发布包 `97e2b4fb…`(打包型行序)与本地 `tools/tts/dist` 的 `261ee0a7…`(生成型行序)`content_sha256` 相同、字节不同。设备当前为本地 zip 导入版本(`261ee0a7…`),功能与发布包一致。**结论:Release 上的包即最终版,无需重传**;双 sha 口径记录在 [`tts/g2p-pipeline.md`](tts/g2p-pipeline.md) 与 [`../tools/tts/README.md`](../tools/tts/README.md)(`tts/model-package.md` 只记发布包 sha)。
-- [ ] **打 tag `v1.8.0` 前先做 signed release 冒烟(本轮构建精简后新增门禁)** — 1.8.0 打包剔除了未使用的 sherpa `c-api`/`cxx-api` so 并启用 `-allowaccessmodification`,`assembleRelease` 现在直出已签名包(**实测 v8a 33.71MB / 双 ABI 51.83MB**,1.7.2 为 61.64MB)。**构建侧冒烟已完成(2026-11-15)**:`tools/build-release.ps1` 产出并验签(证书与线上 1.7.2 同一 SHA-256)、`zipalign -P 16` 通过、ABI 正确。**设备侧仍待做**:装一次 release(需先卸载 debug,会清掉本地 84MB 模型,记得重新导入),验证冷启动、TTS 试听、Live2D 与悬浮窗。
-- [ ] **打 tag `v1.8.0`** 走 `.github/workflows/release.yml`(须在 `main` 上且与 `versionName` 一致)。**前置:先把 `dev` 合并到 `main`**——`main` 落后 60 个提交,`release.yml` 的 `--require-main` 会拒掉 dev 上的 tag;当前最新 tag 仍为 `v1.7.2`。
-- [ ] **1.11.0:删除 legacy TTS 迁移步骤** — 按 [`legacy-compat.md`](legacy-compat.md) §3/§4 删 3 个 step + 注册项 + 测试,保留迁移框架本身。
+- [y] **打 tag `v1.8.0` 前先做 signed release 冒烟(本轮构建精简后新增门禁)** — 1.8.0 打包剔除了未使用的 sherpa `c-api`/`cxx-api` so 并启用 `-allowaccessmodification`,`assembleRelease` 现在直出已签名包(**实测 v8a 33.71MB / 双 ABI 51.83MB**,1.7.2 为 61.64MB)。**构建侧冒烟已完成(2026-11-15)**:`tools/build-release.ps1` 产出并验签(证书与线上 1.7.2 同一 SHA-256)、`zipalign -P 16` 通过、ABI 正确。**设备侧仍待做**:装一次 release(需先卸载 debug,会清掉本地 84MB 模型,记得重新导入),验证冷启动、TTS 试听、Live2D 与悬浮窗。
+- [y] **打 tag `v1.8.0`** 走 `.github/workflows/release.yml`(须在 `main` 上且与 `versionName` 一致)。**前置:先把 `dev` 合并到 `main`**——`main` 落后 60 个提交,`release.yml` 的 `--require-main` 会拒掉 dev 上的 tag;当前最新 tag 仍为 `v1.7.2`。
+- [] **1.11.0:删除 legacy TTS 迁移步骤** — 按 [`legacy-compat.md`](legacy-compat.md) §3/§4 删 3 个 step + 注册项 + 测试,保留迁移框架本身。
 - [ ] **1.9.0:观察 TTS 合成后 native 内存增长** — 真机复测(2026-11-15):前台冷启动未合成 TOTAL PSS 381MB / Native 110MB;10 条合成后 TOTAL PSS 690MB / Native 408MB(增量约 +300MB,超出清单预期的 100~250MB)。待确认是 ORT arena 缓存(长文本大张量)还是泄漏:继续合成是否持续增长、删除模型后是否回落(清单 §2.3)。
 
 ---

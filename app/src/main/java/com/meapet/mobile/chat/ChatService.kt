@@ -284,16 +284,30 @@ class ChatService(
                     ApiResponse.chatCompletionContent(responseJson)?.takeIf { it.isNotBlank() }
                 }
 
-                // 6) 解析响应（choices 为空或 content 缺失视为失败，不入史）
-                if (assistantContent == null) {
-                    Log.w(TAG, "Unexpected API response: missing choices or content")
+                // 6) 解析响应（choices 为空或 content 缺失视为失败，不入史）。
+                //    先清洗模型可能以文本形式泄漏的工具调用标记（见 ToolCallMarkup）。
+                var content = assistantContent
+                    ?.let { com.meapet.mobile.chat.tools.ToolCallMarkup.strip(it) }
+                    .orEmpty()
+                if (content.isBlank()) {
+                    Log.w(TAG, "Unexpected API response: empty or markup-only content, retrying without tools")
+                    // 工具模式下最后一轮可能只剩标记：补一次不带 tools 的请求，尽量给用户一句正常回复
+                    if (toolsOn) {
+                        val fallbackJson = runCatching { clientProvider().chatCompletion(requestBody) }.getOrNull()
+                        content = fallbackJson
+                            ?.let { ApiResponse.chatCompletionContent(it) }
+                            ?.let { com.meapet.mobile.chat.tools.ToolCallMarkup.strip(it) }
+                            .orEmpty()
+                    }
+                }
+                if (content.isBlank()) {
                     conversationManager.removeMessage(userMessage.id)
                     return@withContext Result.failure(
                         IllegalStateException("API 响应中没有有效的回复内容")
                     )
                 }
                 // 6b) 剥离模型附在回复末尾的记忆协议块（对用户不可见，见 MemoryOpsProtocol）
-                val parsed = MemoryOpsProtocol.extract(assistantContent)
+                val parsed = MemoryOpsProtocol.extract(content)
                 val memoryOps = parsed.ops
                 val assistantMessage = ChatMessage(
                     role = ChatRole.assistant,

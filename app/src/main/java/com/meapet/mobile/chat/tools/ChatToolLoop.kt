@@ -58,8 +58,12 @@ class ChatToolLoop(
     companion object {
         private const val TAG = "ChatToolLoop"
 
-        /** 最大请求轮数。4 轮足够「检索 → 补充检索 → 最终回复」，再多延迟不可接受。 */
-        const val DEFAULT_MAX_ROUNDS = 4
+        /**
+         * 最大请求轮数。6 轮足够「检索 → 纠错 → 再检索 → 最终回复」这类多步记忆操作；
+         * 太少（如 4）会在「删掉多余的两条再查一遍」这类请求上被卡到最后一轮，
+         * 而最后一轮 `tool_choice=none` 会让模型把工具调用当文本吐出来。
+         */
+        const val DEFAULT_MAX_ROUNDS = 6
 
         /** 单轮最多执行多少个工具调用（模型偶尔会一口气返回一串）。 */
         const val DEFAULT_MAX_CALLS_PER_ROUND = 8
@@ -100,8 +104,14 @@ class ChatToolLoop(
                 ?: throw IllegalStateException("API 响应中没有有效的消息")
 
             if (parsed.toolCalls.isEmpty()) {
-                val content = parsed.content?.takeIf { it.isNotBlank() }
+                val rawContent = parsed.content?.takeIf { it.isNotBlank() }
                     ?: throw IllegalStateException("API 响应中没有有效的回复内容")
+                // 少数模型会在禁止调用工具的回合把内部标记当文本吐出来：这里清掉，交给调用方判断是否为空
+                val content = ToolCallMarkup.strip(rawContent)
+                if (content.isBlank()) {
+                    Log.w(TAG, "Round $round: content was only tool-call markup, treated as empty")
+                    return ToolLoopResult("", round, totalCalls, firstPromptTokens)
+                }
                 Log.d(TAG, "Tool loop finished in $round round(s), $totalCalls tool call(s)")
                 return ToolLoopResult(content, round, totalCalls, firstPromptTokens)
             }
