@@ -39,6 +39,8 @@ import kotlinx.coroutines.withContext
  */
 class ChatService(
     private val clientProvider: () -> OpenAiCompatibleClient,
+    /** 首次发送且无容量缓存时触发后台探测（不阻塞本次请求）。 */
+    private val onBeforeSend: () -> Unit = {},
     private val conversationManager: ConversationManager,
     private val memoryManager: MemoryManager?,
     private val settingsManager: SettingsManager,
@@ -72,6 +74,8 @@ class ChatService(
         return withContext(Dispatchers.IO) {
             val content = userMessage.content
             try {
+                onBeforeSend()
+
                 // 1) 用户消息先入史：apiMessages 由历史构建，当前消息必须已在其中。
                 //    代价是任何失败路径都必须回滚，否则留下从未发出的"幽灵消息"
                 //    （污染后续请求上下文，且会被持久化）。

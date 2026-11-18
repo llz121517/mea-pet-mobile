@@ -28,12 +28,14 @@ internal class SettingsLocalState(initial: SettingsUiState) {
     var maxTokens by mutableStateOf(initial.maxTokens.toFloat())
     var summaryInterval by mutableStateOf(initial.summaryInterval.toFloat())
     var apiKeyVisible by mutableStateOf(false)
+    var contextWindow by mutableStateOf(initial.contextWindow?.toString() ?: "")
 
     /** 离开页面时的兜底保存（值有变化才落盘，见 ViewModel）。 */
     fun persist(viewModel: SettingsViewModel) {
         viewModel.saveApiKey(apiKey)
         viewModel.saveApiUrl(apiUrl)
         viewModel.saveModel(model)
+        viewModel.saveContextWindow(contextWindow)
         viewModel.saveSystemPrompt(systemPrompt)
     }
 }

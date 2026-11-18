@@ -71,6 +71,7 @@ class SettingsManager(context: Context) {
     private val KEY_MODEL = stringPreferencesKey(SettingsKeys.MODEL)
     private val KEY_TEMPERATURE = doublePreferencesKey(SettingsKeys.TEMPERATURE)
     private val KEY_MAX_TOKENS = intPreferencesKey(SettingsKeys.MAX_TOKENS)
+    private val KEY_CONTEXT_WINDOW = intPreferencesKey(SettingsKeys.CONTEXT_WINDOW)
     private val KEY_ENABLE_MEMORY = booleanPreferencesKey(SettingsKeys.ENABLE_MEMORY)
     private val KEY_ENABLE_AUTO_SUMMARY = booleanPreferencesKey(SettingsKeys.ENABLE_AUTO_SUMMARY)
     private val KEY_SUMMARY_INTERVAL = intPreferencesKey(SettingsKeys.SUMMARY_INTERVAL)
@@ -115,6 +116,9 @@ class SettingsManager(context: Context) {
     val maxTokensFlow: Flow<Int> = dataStore.data.map { prefs ->
         prefs[KEY_MAX_TOKENS] ?: SettingsKeys.Defaults.MAX_TOKENS
     }
+
+    /** 手动上下文窗口流（null = 自动）。 */
+    val contextWindowFlow: Flow<Int?> = dataStore.data.map { prefs -> prefs[KEY_CONTEXT_WINDOW] }
 
     /** 记忆开关流。 */
     val enableMemoryFlow: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -218,6 +222,8 @@ class SettingsManager(context: Context) {
     fun getModel(): String = currentPrefs()[KEY_MODEL] ?: SettingsKeys.Defaults.MODEL
     fun getTemperature(): Double = currentPrefs()[KEY_TEMPERATURE] ?: SettingsKeys.Defaults.TEMPERATURE
     fun getMaxTokens(): Int = currentPrefs()[KEY_MAX_TOKENS] ?: SettingsKeys.Defaults.MAX_TOKENS
+    /** 手动上下文窗口（原始容量 token）；null = 自动。 */
+    fun getContextWindow(): Int? = currentPrefs()[KEY_CONTEXT_WINDOW]
     fun getSystemPrompt(): String = currentPrefs()[KEY_SYSTEM_PROMPT] ?: SettingsKeys.Defaults.SYSTEM_PROMPT
     fun isMemoryEnabled(): Boolean = currentPrefs()[KEY_ENABLE_MEMORY] ?: SettingsKeys.Defaults.ENABLE_MEMORY
     fun isAutoSummaryEnabled(): Boolean = currentPrefs()[KEY_ENABLE_AUTO_SUMMARY] ?: SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY
@@ -287,6 +293,13 @@ class SettingsManager(context: Context) {
 
     suspend fun setMaxTokens(tokens: Int) {
         cachedPrefs = dataStore.edit { prefs -> prefs[KEY_MAX_TOKENS] = tokens }
+    }
+
+    /** 写入手动上下文窗口；传 null 清除，回到自动。 */
+    suspend fun setContextWindow(tokens: Int?) {
+        cachedPrefs = dataStore.edit { prefs ->
+            if (tokens == null) prefs.remove(KEY_CONTEXT_WINDOW) else prefs[KEY_CONTEXT_WINDOW] = tokens
+        }
     }
 
     suspend fun setEnableMemory(enabled: Boolean) {

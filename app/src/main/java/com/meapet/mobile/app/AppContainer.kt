@@ -137,10 +137,20 @@ class AppContainer(
         )
     }
 
+    /** 上下文容量提供者（手动值 > 探测缓存 > 兜底）。 */
+    val contextCapacity: com.meapet.mobile.client.ContextCapacityProvider by lazy {
+        com.meapet.mobile.client.ContextCapacityProvider(
+            settingsManager = settingsManager,
+            clientFactory = { apiClient },
+            scope = applicationScope
+        )
+    }
+
     /** 聊天服务（核心业务逻辑）。 */
     val chatService: ChatService by lazy {
         ChatService(
             clientProvider = { apiClient },
+            onBeforeSend = { contextCapacity.refreshIfNeeded() },
             conversationManager = conversationManager,
             memoryManager = memoryManager,
             settingsManager = settingsManager,
@@ -244,6 +254,8 @@ class AppContainer(
         warmUpJob = applicationScope.launch(Dispatchers.IO) {
             // 1.9 存储迁移：旧 JSON -> SQLite 必须先于会话/记忆的首次访问同步完成（旧 JSON 文件保留不动）
             com.meapet.mobile.storage.LegacyJsonImporter(database, context.filesDir).importIfNeeded()
+            // 首次启动：后台探测上下文容量（失败降级兜底）
+            contextCapacity.refreshIfNeeded()
             listOf(
                 launch { memoryRepository.loadFromDisk() },
                 launch { conversationManager.restoreFromRepository() },
@@ -281,6 +293,8 @@ class AppContainer(
         }
         old?.close()
         Log.i(TAG, "API client invalidated, will be rebuilt on next request")
+        // 保存/切换服务商设置：容量缓存随之失效并后台重新探测
+        contextCapacity.refresh()
     }
 
     /**

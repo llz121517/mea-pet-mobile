@@ -60,6 +60,11 @@ data class SettingsUiState(
     val availableModels: List<String> = emptyList(),
     val isLoadingModels: Boolean = false,
     val modelsError: String? = null,
+    /** 手动上下文窗口（null = 自动）。 */
+    val contextWindow: Int? = null,
+    /** 当前生效的原始容量与来源。 */
+    val effectiveCapacity: Int = 0,
+    val capacitySource: com.meapet.mobile.client.CapacitySource = com.meapet.mobile.client.CapacitySource.FALLBACK,
     // ── TTS 语音 ──
     val ttsMainEnabled: Boolean = SettingsKeys.Defaults.TTS_MAIN_ENABLED,
     val ttsOverlayEnabled: Boolean = SettingsKeys.Defaults.TTS_OVERLAY_ENABLED,
@@ -205,6 +210,7 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
 
         // 从 PackageManager 读取版本号（统一实现见 core.AppInfo）
         _state.update { it.copy(appVersion = readAppVersion()) }
+        runCatching { refreshCapacityState() }
     }
 
     /**
@@ -255,6 +261,40 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             if (model == settingsManager.getModel()) return@launch
             settingsManager.setModel(model)
+            container.contextCapacity.refresh()
+            refreshCapacityState()
+        }
+    }
+
+    /** 保存手动上下文窗口；空串或非法值 = 清除，回到自动。 */
+    fun saveContextWindow(text: String) {
+        viewModelScope.launch {
+            val v = text.trim().toIntOrNull()?.takeIf { it >= 1024 }
+            if (v == settingsManager.getContextWindow()) return@launch
+            settingsManager.setContextWindow(v)
+            if (v == null) container.contextCapacity.refresh()
+            refreshCapacityState()
+        }
+    }
+
+    /** 重新检测：清除手动值并强制探测。 */
+    fun redetectContextWindow() {
+        viewModelScope.launch {
+            settingsManager.setContextWindow(null)
+            container.contextCapacity.refresh()
+            kotlinx.coroutines.delay(1500)
+            refreshCapacityState()
+        }
+    }
+
+    private fun refreshCapacityState() {
+        val c = container.contextCapacity.current()
+        _state.update {
+            it.copy(
+                contextWindow = settingsManager.getContextWindow(),
+                effectiveCapacity = c.tokens,
+                capacitySource = c.source
+            )
         }
     }
 
@@ -580,7 +620,9 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
             val result = withContext(Dispatchers.IO) {
                 val client = OpenAiCompatibleClient(apiKey = apiKey, baseUrl = apiUrl)
                 try {
-                    Result.success(ApiResponse.modelIds(client.listModels()))
+                    val body = client.listModels()
+                    container.contextCapacity.onModelsBody(body)
+                    Result.success(ApiResponse.modelIds(body))
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {

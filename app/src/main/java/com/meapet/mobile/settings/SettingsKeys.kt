@@ -11,6 +11,9 @@ object SettingsKeys {
     const val MODEL = "model"
     const val TEMPERATURE = "temperature"
     const val MAX_TOKENS = "max_tokens"
+
+    /** 用户手动填写的上下文窗口（原始容量，token）。无此键 = 自动；有值则优先于探测缓存。 */
+    const val CONTEXT_WINDOW = "context_window"
     const val ENABLE_MEMORY = "enable_memory"
     const val ENABLE_AUTO_SUMMARY = "enable_auto_summary"
     const val SUMMARY_INTERVAL = "summary_interval"

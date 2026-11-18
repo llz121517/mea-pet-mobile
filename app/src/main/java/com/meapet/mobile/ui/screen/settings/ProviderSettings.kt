@@ -15,6 +15,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -216,6 +218,38 @@ internal fun ModelParamsSection(
             }
         }
     }
+
+    Spacer(Modifier.height(8.dp))
+
+    OutlinedTextField(
+        value = local.contextWindow,
+        onValueChange = { v -> local.contextWindow = v.filter { it.isDigit() }.take(8) },
+        label = { Text("上下文窗口（token）") },
+        placeholder = { Text("留空 = 自动") },
+        modifier = Modifier
+            .fillMaxWidth()
+            .saveOnFocusChange { viewModel.saveContextWindow(local.contextWindow) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        trailingIcon = {
+            if (local.contextWindow.isNotEmpty()) {
+                IconButton(onClick = {
+                    local.contextWindow = ""
+                    viewModel.saveContextWindow("")
+                }) {
+                    Icon(Icons.Filled.Close, contentDescription = "重置为自动")
+                }
+            }
+        },
+        supportingText = {
+            val src = when (state.capacitySource) {
+                com.meapet.mobile.client.CapacitySource.MANUAL -> "手动"
+                com.meapet.mobile.client.CapacitySource.PROBED -> "探测"
+                com.meapet.mobile.client.CapacitySource.FALLBACK -> "兜底"
+            }
+            Text("当前生效 ${state.effectiveCapacity}（$src）；实际使用约为其 85%。本地推理服务请按实际加载的窗口填写")
+        }
+    )
 
     Spacer(Modifier.height(8.dp))
 
