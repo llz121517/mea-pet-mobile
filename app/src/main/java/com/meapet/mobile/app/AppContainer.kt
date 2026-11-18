@@ -9,13 +9,18 @@ import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.chat.ChatService
 import com.meapet.mobile.chat.ConversationManager
 import com.meapet.mobile.chat.ConversationStore
+import com.meapet.mobile.storage.ConversationRepository
+import com.meapet.mobile.storage.SqliteConversationRepository
+import com.meapet.mobile.storage.SqliteDatabase
+import androidx.sqlite.driver.AndroidSQLiteDriver
 import com.meapet.mobile.config.AppConfig
 import com.meapet.mobile.core.AppInfo
 import com.meapet.mobile.core.LifecycleManager
 import com.meapet.mobile.core.WallpaperStore
 import com.meapet.mobile.legacy.LegacyMigration
 import com.meapet.mobile.memory.MemoryManager
-import com.meapet.mobile.memory.MemoryRepository
+import com.meapet.mobile.memory.MemoryStore
+import com.meapet.mobile.storage.SqliteMemoryStore
 import com.meapet.mobile.memory.MemoryService
 import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.tts.TtsManager
@@ -80,23 +85,36 @@ class AppContainer(
             _apiClient ?: createClient().also { _apiClient = it }
         }
 
-    /** 会话历史持久化存储。 */
+    /** 旧版 JSON 会话存储：仅供 legacy 导入读取，不再写入。 */
     val conversationStore: ConversationStore by lazy {
         ConversationStore(context.filesDir, applicationScope)
     }
 
-    /** 会话历史管理器。 */
+    /** 会话 + 记忆共用的 SQLite 数据库（惰性打开，首次访问时建表/迁移）。 */
+    val database: SqliteDatabase by lazy {
+        val dbFile = context.getDatabasePath("meapet.db")
+        dbFile.parentFile?.mkdirs()
+        SqliteDatabase(AndroidSQLiteDriver(), dbFile.absolutePath)
+    }
+
+    /** 会话仓库：完整历史永久保存，UI 分页读取，与发给模型的窗口解耦。 */
+    val conversationRepository: ConversationRepository by lazy {
+        SqliteConversationRepository(database)
+    }
+
+    /** 会话历史管理器（内存窗口 + 有序落库）。 */
     val conversationManager: ConversationManager by lazy {
         ConversationManager(
             maxSize = config.maxHistoryMessages,
             trimBatch = config.historyTrimBatch,
-            store = conversationStore
+            repository = conversationRepository,
+            persistScope = applicationScope
         )
     }
 
     /** 记忆存储器。 */
-    val memoryRepository: MemoryRepository by lazy {
-        MemoryRepository(context.filesDir, maxItems = config.maxMemoryItems)
+    val memoryRepository: MemoryStore by lazy {
+        SqliteMemoryStore(database, maxItems = config.maxMemoryItems)
     }
 
     /** 记忆业务服务。 */
@@ -224,9 +242,11 @@ class AppContainer(
     /** 启动时异步加载持久化的记忆与会话历史（不阻塞主线程）。 */
     fun warmUp() {
         warmUpJob = applicationScope.launch(Dispatchers.IO) {
+            // 1.9 存储迁移：旧 JSON -> SQLite 必须先于会话/记忆的首次访问同步完成（旧 JSON 文件保留不动）
+            com.meapet.mobile.storage.LegacyJsonImporter(database, context.filesDir).importIfNeeded()
             listOf(
                 launch { memoryRepository.loadFromDisk() },
-                launch { conversationManager.restore(conversationStore.load()) },
+                launch { conversationManager.restoreFromRepository() },
                 // 版本迁移：启动时异步执行（框架长期保留；当前 TTS step 预计 1.9.0 移除，见 docs/legacy-compat.md）
                 launch { LegacyMigration.run(context, settingsManager, ttsModelManager) },
                 // Live2D 模型文件预读到内存缓存：模型加载在 GL 线程同步执行，

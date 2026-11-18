@@ -39,7 +39,7 @@ import kotlinx.serialization.json.Json
  * @param config 应用配置
  */
 class MemoryService(
-    private val repository: MemoryRepository,
+    private val repository: MemoryStore,
     private val summarizationClient: () -> OpenAiCompatibleClient?,
     private val settingsManager: SettingsManager,
     private val config: AppConfig = AppConfig.DEFAULT

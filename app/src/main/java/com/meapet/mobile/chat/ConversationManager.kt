@@ -1,34 +1,43 @@
 package com.meapet.mobile.chat
 
 import android.util.Log
+import com.meapet.mobile.storage.ConversationRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 
 /**
  * 会话历史管理器。
  *
  * ## 职责
- * - 维护消息列表的添加、查询、清空；
- * - 实现滑动窗口：超出 [maxSize] 时丢弃最早的非 system 消息；
+ * - 维护**发给模型的内存窗口**：添加、查询、清空，超出 [maxSize] 时丢弃最早的非 system 消息；
  * - 为 API 请求组装消息列表（含 system prompt）；
- * - 消息变更后通过 [ConversationStore] 异步持久化（可选）。
+ * - 把每次变更按顺序写入 [ConversationRepository]（可选）。
  *
- * ## 低耦合
- * - 内存操作 + 可选的存储回调，不依赖其他业务模块；
- * - 但**确实关心消息角色**：system 消息不参与窗口裁剪（见 [trimWindow]）、
- *   也不进 API 历史（[buildApiMessages] 自行重组 system 前缀），
- *   并提供 [lastUserMessage] / [lastAssistantMessage] 按角色查询。
+ * ## 与 UI 历史解耦
+ * 内存窗口被裁剪**不影响**仓库：仓库保存完整历史（UI 通过仓库分页读取），
+ * 窗口只决定本轮发给模型多少上下文。
+ *
+ * ## 持久化顺序
+ * 所有写操作在持锁时入同一个有序队列，由单个消费协程依次执行，
+ * 因此仓库里的顺序与内存一致；[flush] 等队列排空后返回。
  *
  * ## 线程安全
- * 启动时 [restore] 在 IO 线程执行，可能与发送链路并发访问，
  * 所有读写方法用 [lock] 串行化。
  *
- * @param maxSize 最大保留消息数
+ * @param maxSize 内存窗口最大消息数
  * @param trimBatch 超限时一次裁掉的条数（见 [trimWindow]）
- * @param store 会话持久化存储（null = 纯内存，不落盘）
+ * @param repository 会话仓库（null = 纯内存，不落库）
+ * @param persistScope 落库消费协程的作用域（应用级；与 repository 同时提供才会落库）
  */
 class ConversationManager(
     private val maxSize: Int = 50,
     private val trimBatch: Int = 1,
-    private val store: ConversationStore? = null
+    private val repository: ConversationRepository? = null,
+    persistScope: CoroutineScope? = null
 ) {
     private val lock = Any()
     private val messages = mutableListOf<ChatMessage>()
@@ -37,15 +46,49 @@ class ConversationManager(
         private const val TAG = "ConversationManager"
     }
 
-    /** 当前消息数量。 */
+    private sealed interface PersistOp {
+        class Append(val message: ChatMessage) : PersistOp
+        class Remove(val id: String) : PersistOp
+        object Clear : PersistOp
+        class ReplaceAll(val messages: List<ChatMessage>) : PersistOp
+        class Flush(val done: CompletableDeferred<Unit>) : PersistOp
+    }
+
+    private val persistEnabled = repository != null && persistScope != null
+    private val persistQueue = Channel<PersistOp>(Channel.UNLIMITED)
+
+    init {
+        if (repository != null && persistScope != null) {
+            persistScope.launch(Dispatchers.IO) {
+                for (op in persistQueue) {
+                    try {
+                        when (op) {
+                            is PersistOp.Append -> repository.append(op.message)
+                            is PersistOp.Remove -> repository.remove(op.id)
+                            PersistOp.Clear -> repository.clear()
+                            is PersistOp.ReplaceAll -> repository.replaceAll(op.messages)
+                            is PersistOp.Flush -> op.done.complete(Unit)
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Persist op failed: ${op::class.simpleName}", e)
+                        if (op is PersistOp.Flush) op.done.complete(Unit)
+                    }
+                }
+            }
+        }
+    }
+
+    /** 当前内存窗口内的消息数量。 */
     val size: Int get() = synchronized(lock) { messages.size }
 
-    /** 添加一条消息。自动触发窗口裁剪。 */
+    /** 添加一条消息。自动触发窗口裁剪，并入队落库。 */
     fun addMessage(message: ChatMessage) {
         synchronized(lock) {
             messages.add(message)
             trimWindow()
-            persistLocked()
+            enqueue(PersistOp.Append(message))
         }
         // 只记角色与长度，对话内容不进 Logcat（隐私）
         Log.d(TAG, "Message added [${message.role}] (${message.content.length} chars, total: $size)")
@@ -56,7 +99,7 @@ class ConversationManager(
         synchronized(lock) {
             messages.addAll(newMessages)
             trimWindow()
-            persistLocked()
+            newMessages.forEach { enqueue(PersistOp.Append(it)) }
         }
     }
 
@@ -73,10 +116,40 @@ class ConversationManager(
             messages.addAll(0, persisted.filter { it.id !in existingIds })
             trimWindow()
         }
-        Log.i(TAG, "Restored ${persisted.size} messages from disk (total: $size)")
+        Log.i(TAG, "Restored ${persisted.size} messages from storage (window: $size)")
     }
 
-    /** 获取所有消息（不可变快照）。 */
+    /** 从仓库取最近 [maxSize] 条恢复进内存窗口（启动预热用）。无仓库时为 no-op。 */
+    suspend fun restoreFromRepository() {
+        val repo = repository ?: return
+        restore(repo.loadRecent(maxSize))
+    }
+
+    /**
+     * UI 懒加载：从仓库取 [beforeId] 之前的 [limit] 条（完整历史，不受内存窗口裁剪影响）。
+     * 先等写队列排空，保证刚发出的消息已落库、分页边界一致。无仓库时返回空。
+     */
+    suspend fun pageBefore(beforeId: String?, limit: Int): List<ChatMessage> {
+        val repo = repository ?: return emptyList()
+        flush()
+        return repo.pageBefore(beforeId, limit)
+    }
+
+    /** 完整历史（清除对话前取撤销快照用）：先排空写队列，再读仓库全部消息；无仓库时退化为内存窗口。 */
+    suspend fun loadFullHistory(): List<ChatMessage> {
+        val repo = repository ?: return getMessages()
+        flush()
+        return repo.loadRecent(Int.MAX_VALUE)
+    }
+
+    /** UI 首屏：取仓库里最近 [limit] 条；无仓库时退化为内存窗口。 */
+    suspend fun loadRecentForUi(limit: Int): List<ChatMessage> {
+        val repo = repository ?: return getMessages()
+        flush()
+        return repo.loadRecent(limit)
+    }
+
+    /** 获取内存窗口内的所有消息（不可变快照）。 */
     fun getMessages(): List<ChatMessage> = synchronized(lock) { messages.toList() }
 
     /**
@@ -125,11 +198,11 @@ class ConversationManager(
         }
     }
 
-    /** 清除所有消息。 */
+    /** 清除所有消息（内存窗口与仓库中的完整历史）。 */
     fun clear() {
         synchronized(lock) {
             messages.clear()
-            persistLocked()
+            enqueue(PersistOp.Clear)
         }
         Log.i(TAG, "Conversation cleared")
     }
@@ -137,8 +210,7 @@ class ConversationManager(
     /**
      * 用给定列表整体替换会话历史（撤销「清除对话」用）。
      *
-     * 与 [restore] 的区别：不插队、不去重，按传入顺序**原样**恢复并落盘——
-     * 撤销要求的是"回到清空前的精确状态"，任何合并策略都可能改变原结果。
+     * 与 [restore] 的区别：不插队、不去重，按传入顺序**原样**恢复并落库。
      *
      * @param snapshot 清空前的 [getMessages] 快照
      */
@@ -146,15 +218,22 @@ class ConversationManager(
         synchronized(lock) {
             messages.clear()
             messages.addAll(snapshot)
-            persistLocked()
+            // 内存窗口只保留发给模型的部分；仓库按完整快照恢复
+            trimWindow()
+            enqueue(PersistOp.ReplaceAll(snapshot.toList()))
         }
         Log.i(TAG, "Conversation restored from undo snapshot (${snapshot.size} messages)")
     }
 
-    /** 按 id 移除消息。@return 是否有消息被移除 */
+    /**
+     * 按 id 移除消息。仓库侧无论窗口里有没有都会尝试删除
+     * （消息可能已被窗口裁掉，但仍在完整历史里）。
+     *
+     * @return 内存窗口里是否有消息被移除
+     */
     fun removeMessage(id: String): Boolean = synchronized(lock) {
         val removed = messages.removeAll { it.id == id }
-        if (removed) persistLocked()
+        enqueue(PersistOp.Remove(id))
         removed
     }
 
@@ -168,7 +247,24 @@ class ConversationManager(
         messages.lastOrNull { it.role == ChatRole.assistant }
     }
 
+    /**
+     * 等待此前入队的所有写操作落库完成。
+     *
+     * 在 `onStop` 等「即将进后台或被杀」的时机调用。纯内存无仓库时为 no-op。
+     */
+    suspend fun flush() {
+        if (!persistEnabled) return
+        val done = CompletableDeferred<Unit>()
+        persistQueue.send(PersistOp.Flush(done))
+        done.await()
+    }
+
     // ── 内部 ──────────────────────────────────────────
+
+    /** 必须在持有 [lock] 时调用，保证入队顺序与内存变更顺序一致。 */
+    private fun enqueue(op: PersistOp) {
+        if (persistEnabled) persistQueue.trySend(op)
+    }
 
     /**
      * 把最近 [turns] 条助手消息的 [ChatMessage.memoryOpsBlock] 贴回正文，
@@ -192,28 +288,8 @@ class ConversationManager(
         }
     }
 
-    /** 必须在持有 [lock] 时调用。 */
-    private fun persistLocked() {
-        store?.persistAsync(messages.toList())
-    }
-
     /**
-     * 同步落盘当前会话快照，直到写完才返回。
-     *
-     * [persistAsync] 是 conflate 合并写队列，进程被系统回收时排队中的最新快照
-     * 可能来不及落盘。在 `onStop` 等「即将进后台或被杀」的时机调用本方法补一次
-     * 确定性落盘。纯内存无 store 时为 no-op。
-     *
-     * 先把内存当前状态记录进 store 再写：store 的 writer 永远写「最近记录的快照」，
-     * 因此与排队的合并写之间不会出现旧快照后写（见 [ConversationStore] 类注释）。
-     */
-    suspend fun flush() {
-        synchronized(lock) { store?.record(messages.toList()) }
-        store?.flush()
-    }
-
-    /**
-     * 必须在持有 [lock] 时调用。
+     * 必须在持有 [lock] 时调用。只裁**内存窗口**，仓库里的完整历史不动。
      *
      * 超限时一次裁掉 [trimBatch] 条而非刚好一条：逐条裁剪会让每轮请求的消息前缀
      * 都往后挪一格，服务端的自动 prefix cache 全程无法命中。批量裁一次，

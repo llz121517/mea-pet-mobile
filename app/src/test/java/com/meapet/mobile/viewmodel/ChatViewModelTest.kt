@@ -80,6 +80,9 @@ class ChatViewModelTest {
         wheneverBlocking { updateChecker.check() }.thenReturn(UpdateCheckResult.UpToDate("1.0.0"))
         wheneverBlocking { memoryManager.getStats() }.thenReturn(MemoryStats())
         wheneverBlocking { memoryManager.getAllMemories() }.thenReturn(emptyList())
+        // UI 首屏与撤销快照改读「完整历史」接口；测试里沿用各用例对 getHistory() 的 stub 作为完整历史
+        wheneverBlocking { chatService.loadRecentForUi(any()) }.thenAnswer { chatService.getHistory() }
+        wheneverBlocking { chatService.loadFullHistory() }.thenAnswer { chatService.getHistory() }
 
         // from(application) 真实执行：application 是 MeaPetApplication 的 mock，container 经 doReturn 注入
         Mockito.doReturn(container).`when`(application).container
@@ -160,9 +163,9 @@ class ChatViewModelTest {
 
         vm.reloadHistory()
 
-        // 被裁剪的 old1/old2 不应被拼到末尾；结果 = 新历史（有序）+ 无多余尾巴
+        // 新语义：UI 展示完整历史，被内存窗口裁掉的 old1/old2 仍保留在列表头部；既不重复，也不会被拼到末尾
         assertEquals(
-            listOf(old3, old4, latestUser, latestReply),
+            listOf(old1, old2, old3, old4, latestUser, latestReply),
             vm.state.value.messages
         )
     }

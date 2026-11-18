@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -66,6 +67,7 @@ import com.meapet.mobile.ui.component.OverlayMenu
 import com.meapet.mobile.ui.component.UndoSnackbarEffect
 import com.meapet.mobile.ui.screen.settings.SettingsScreen
 import com.meapet.mobile.viewmodel.ChatViewModel
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** 内部页面导航。 */
 private enum class Page { CHAT, SETTINGS }
@@ -175,11 +177,22 @@ private fun ChatPage(
 
     // 新消息或错误卡片出现时自动滚动到底部。
     // 错误卡片是列表末尾的额外 item，所以它出现时也要滚一次，否则用户看不到重试按钮。
-    LaunchedEffect(state.messages.size, state.error) {
+    // 以「最后一条消息的 id」为触发键而非条数：向上懒加载会在头部插入消息，
+    // 条数变化不能把用户拽回底部（LazyColumn 带 key，头部插入时滚动位置自动锚定）。
+    LaunchedEffect(state.messages.lastOrNull()?.id, state.error) {
         val lastIndex = state.messages.size - 1 + if (state.error != null) 1 else 0
         if (lastIndex >= 0) {
             listState.animateScrollToItem(lastIndex)
         }
+    }
+
+    // 懒加载：滚动到接近顶部时向上加载更早的一页（ViewModel 内部防重入、判断是否还有更多）
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { index ->
+                if (index <= 3) chatViewModel.loadOlderMessages()
+            }
     }
 
     // 启动静默更新提示：有新版本时底部轻提示，可点「查看」打开 GitHub Release

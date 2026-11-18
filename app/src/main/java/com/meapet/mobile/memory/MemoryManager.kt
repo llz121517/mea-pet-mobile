@@ -35,7 +35,7 @@ import kotlinx.coroutines.sync.withLock
  */
 class MemoryManager(
     private val service: MemoryService,
-    private val repository: MemoryRepository,
+    private val repository: MemoryStore,
     private val settingsManager: SettingsManager,
     private val config: AppConfig = AppConfig.DEFAULT
 ) {

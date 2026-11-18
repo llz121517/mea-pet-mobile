@@ -184,6 +184,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.datastore.preferences)
 
+    // SQLite 存储（会话历史 + 记忆）：androidx.sqlite 驱动 API + 框架实现
+    implementation(libs.androidx.sqlite)
+    implementation(libs.androidx.sqlite.framework)
+
     // Live2D Cubism Core
     implementation(files("libs/Live2DCubismCore.aar"))
 
@@ -235,4 +239,6 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockito.kotlin)
+    // JVM 单测的真实 SQLite 引擎（仅测试期，通过自写 SQLiteDriver 适配器接入）
+    testImplementation(libs.sqlite.jdbc)
 }

@@ -1,5 +1,6 @@
 package com.meapet.mobile.chat
 
+import com.meapet.mobile.storage.InMemoryConversationRepository
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -111,16 +112,14 @@ class ConversationStoreTest {
 
     @Test
     fun managerPersistsOnChange() = runTest {
-        val dir = tmp.newFolder()
-        val store = ConversationStore(dir, backgroundScope)
-        val manager = ConversationManager(maxSize = 50, store = store)
+        // ConversationManager 现在写入 ConversationRepository（有序异步队列），flush 等队列排空
+        val repo = InMemoryConversationRepository()
+        val manager = ConversationManager(maxSize = 50, repository = repo, persistScope = backgroundScope)
 
         manager.addMessage(msg(ChatRole.user, "第一条"))
-        // persistAsync 是合并异步写；测试里直接同步落盘当前快照验证链路。
-        // 用同一 store 实例 load，与后台写共享同一把锁，避免并发窗口
-        store.persist(manager.getMessages())
+        manager.flush()
 
-        val loaded = store.load()
+        val loaded = repo.loadRecent(10)
         assertEquals(1, loaded.size)
         assertEquals("第一条", loaded.single().content)
     }

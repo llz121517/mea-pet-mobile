@@ -30,7 +30,7 @@ import kotlin.math.max
 class MemoryRepository(
     private val dir: File,
     private val maxItems: Int = 500
-) {
+) : MemoryStore {
     private val mutex = Mutex()
     private val memories = mutableListOf<MemoryItem>()
 
@@ -50,7 +50,7 @@ class MemoryRepository(
     // ── CRUD ──────────────────────────────────────────
 
     /** 保存一条记忆（若 id 已存在则覆盖，不存在则新增）。 */
-    suspend fun save(item: MemoryItem): MemoryItem {
+    override suspend fun save(item: MemoryItem): MemoryItem {
         mutex.withLock {
             ensureLoadedLocked()
             val idx = memories.indexOfFirst { it.id == item.id }
@@ -66,7 +66,7 @@ class MemoryRepository(
     }
 
     /** 批量保存。 */
-    suspend fun saveAll(items: List<MemoryItem>) {
+    override suspend fun saveAll(items: List<MemoryItem>) {
         mutex.withLock {
             ensureLoadedLocked()
             items.forEach { item ->
@@ -89,7 +89,7 @@ class MemoryRepository(
      * @param upserts 要新增或按 id 覆盖的条目（按入参顺序应用）
      * @param deleteIds 要删除的条目 id
      */
-    suspend fun applyChanges(upserts: List<MemoryItem>, deleteIds: Collection<String> = emptyList()) {
+    override suspend fun applyChanges(upserts: List<MemoryItem>, deleteIds: Collection<String>) {
         if (upserts.isEmpty() && deleteIds.isEmpty()) return
         mutex.withLock {
             ensureLoadedLocked()
@@ -108,19 +108,19 @@ class MemoryRepository(
     }
 
     /** 根据 ID 查询。 */
-    suspend fun findById(id: String): MemoryItem? = mutex.withLock {
+    override suspend fun findById(id: String): MemoryItem? = mutex.withLock {
         ensureLoadedLocked()
         memories.find { it.id == id }
     }
 
     /** 获取所有记忆（按重要性降序）。 */
-    suspend fun getAll(): List<MemoryItem> = mutex.withLock {
+    override suspend fun getAll(): List<MemoryItem> = mutex.withLock {
         ensureLoadedLocked()
         memories.sortedByDescending { it.importance }.toList()
     }
 
     /** 按类型过滤。 */
-    suspend fun getByType(type: MemoryType): List<MemoryItem> = mutex.withLock {
+    override suspend fun getByType(type: MemoryType): List<MemoryItem> = mutex.withLock {
         ensureLoadedLocked()
         memories.filter { it.type == type }
             .sortedByDescending { it.importance }
@@ -136,7 +136,7 @@ class MemoryRepository(
      * 返回顺序固定按 [MemoryItem.createdAt] 升序——注入内容越稳定，
      * 服务端 prefix cache 越容易命中。
      */
-    suspend fun getPersonaFacts(maxCount: Int = Int.MAX_VALUE): List<MemoryItem> = mutex.withLock {
+    override suspend fun getPersonaFacts(maxCount: Int): List<MemoryItem> = mutex.withLock {
         ensureLoadedLocked()
         val all = memories.filter { isPermanent(it) }
         val kept = if (all.size <= maxCount) all else {
@@ -147,7 +147,7 @@ class MemoryRepository(
     }
 
     /** 删除指定记忆。 */
-    suspend fun delete(id: String) {
+    override suspend fun delete(id: String) {
         mutex.withLock {
             ensureLoadedLocked()
             memories.removeAll { it.id == id }
@@ -159,7 +159,7 @@ class MemoryRepository(
      * 批量删除。整批只落盘一次——摘要一次要吃掉几十条短期记忆，
      * 逐条 [delete] 会把整个记忆库重写同样多次。
      */
-    suspend fun deleteAll(ids: Collection<String>) {
+    override suspend fun deleteAll(ids: Collection<String>) {
         if (ids.isEmpty()) return
         mutex.withLock {
             ensureLoadedLocked()
@@ -170,7 +170,7 @@ class MemoryRepository(
     }
 
     /** 清除所有记忆（包括事实/特质——这是用户手动操作，不受自动淘汰豁免规则限制）。 */
-    suspend fun clear() {
+    override suspend fun clear() {
         mutex.withLock {
             // 即使还没加载也要清：标记已加载，防止之后惰性加载又把旧数据捞回来
             loaded = true
@@ -185,7 +185,7 @@ class MemoryRepository(
     /**
      * 全文关键词搜索（简单包含匹配，未来可替换为向量搜索）。
      */
-    suspend fun search(query: String): List<MemoryItem> = mutex.withLock {
+    override suspend fun search(query: String): List<MemoryItem> = mutex.withLock {
         ensureLoadedLocked()
         val q = query.lowercase()
         memories.filter {
@@ -207,7 +207,7 @@ class MemoryRepository(
      * @param userInput 当前对话上下文/用户输入
      * @param maxCount 最大返回条数
      */
-    suspend fun getRelevant(userInput: String, maxCount: Int = 5): List<MemoryItem> = mutex.withLock {
+    override suspend fun getRelevant(userInput: String, maxCount: Int): List<MemoryItem> = mutex.withLock {
         ensureLoadedLocked()
         val input = userInput.lowercase()
         val candidates = memories.filter {
@@ -232,7 +232,7 @@ class MemoryRepository(
      * 与 [getRelevant] 配对：查询是纯读，访问记账作为独立命令由调用方
      * （[MemoryManager.buildContext]）在注入后显式触发。找不到的 id 静默跳过。
      */
-    suspend fun markAccessed(ids: Collection<String>) {
+    override suspend fun markAccessed(ids: Collection<String>) {
         if (ids.isEmpty()) return
         mutex.withLock {
             ensureLoadedLocked()
@@ -249,7 +249,7 @@ class MemoryRepository(
     }
 
     /** 获取统计数据。 */
-    suspend fun getStats(): MemoryStats = mutex.withLock {
+    override suspend fun getStats(): MemoryStats = mutex.withLock {
         ensureLoadedLocked()
         if (memories.isEmpty()) return MemoryStats()
         MemoryStats(
@@ -265,7 +265,7 @@ class MemoryRepository(
     }
 
     /** 清除低价值缓存（内存压力时调用）。事实/特质不受影响。 */
-    suspend fun trimCache() {
+    override suspend fun trimCache() {
         mutex.withLock {
             ensureLoadedLocked()
             val permanent = memories.filter { isPermanent(it) }
@@ -287,7 +287,7 @@ class MemoryRepository(
     /**
      * 从磁盘加载（启动预热用，可选——任何公共方法都会先惰性加载）。
      */
-    suspend fun loadFromDisk() {
+    override suspend fun loadFromDisk() {
         mutex.withLock {
             ensureLoadedLocked()
         }

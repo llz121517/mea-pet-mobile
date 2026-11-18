@@ -17,6 +17,8 @@ import com.meapet.mobile.memory.MemoryStats
  * @property updateNotice 启动静默检测发现的新版本提示（Snackbar 用）
  * @property memoryDialog 记忆查看对话框数据（null = 不显示）
  * @property pendingUndo 刚执行、仍在撤销窗口内的破坏性操作（null = 无可撤销项）
+ * @property hasMoreHistory 仓库里是否还有更早的历史可向上加载
+ * @property isLoadingOlder 是否正在加载更早的一页
  */
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
@@ -25,7 +27,9 @@ data class ChatUiState(
     val inputText: String = "",
     val updateNotice: UpdateNoticeUi? = null,
     val memoryDialog: MemoryDialogUi? = null,
-    val pendingUndo: ChatUndo? = null
+    val pendingUndo: ChatUndo? = null,
+    val hasMoreHistory: Boolean = false,
+    val isLoadingOlder: Boolean = false
 )
 
 /** UI 层展示的更新提示。 */

@@ -204,8 +204,18 @@ class ChatService(
         return sendMessage(userMessage)
     }
 
-    /** 获取当前会话历史。 */
+    /** 获取当前会话历史（仅内存窗口，即发给模型的那部分）。 */
     fun getHistory(): List<ChatMessage> = conversationManager.getMessages()
+
+    /** 完整历史（撤销「清除对话」的快照用，不受内存窗口裁剪影响）。 */
+    suspend fun loadFullHistory(): List<ChatMessage> = conversationManager.loadFullHistory()
+
+    /** UI 首屏：完整历史里最近 [limit] 条。 */
+    suspend fun loadRecentForUi(limit: Int): List<ChatMessage> = conversationManager.loadRecentForUi(limit)
+
+    /** UI 懒加载：[beforeId] 之前的 [limit] 条完整历史（按时间正序）。 */
+    suspend fun loadOlder(beforeId: String, limit: Int): List<ChatMessage> =
+        conversationManager.pageBefore(beforeId, limit)
 
     /** 清除历史。 */
     fun clearHistory() {

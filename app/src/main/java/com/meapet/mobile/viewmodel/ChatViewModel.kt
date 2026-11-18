@@ -21,6 +21,7 @@ import com.meapet.mobile.memory.MemoryStats
 import com.meapet.mobile.update.UpdateCheckResult
 import com.meapet.mobile.update.UpdateChecker
 import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +30,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
+
+/** UI 懒加载每页条数（首屏与向上翻页共用）。 */
+private const val UI_PAGE_SIZE = 50
 
 /**
  * 单条系统气泡的生命周期状态。
@@ -89,10 +93,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // ViewModel 往往先于异步加载完成而创建，此时 getHistory() 还是空的
         viewModelScope.launch {
             container.warmUpJob.join()
-            val restored = chatService.getHistory()
+            // UI 首屏读仓库里的完整历史（最近一页），与发给模型的内存窗口解耦
+            val restored = chatService.loadRecentForUi(UI_PAGE_SIZE)
             if (restored.isNotEmpty()) {
                 _state.update { current ->
-                    current.copy(messages = mergeWithHistory(restored, current.messages))
+                    current.copy(
+                        messages = mergeWithHistory(restored, current.messages),
+                        hasMoreHistory = restored.size >= UI_PAGE_SIZE
+                    )
                 }
             }
         }
@@ -192,7 +200,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val history = chatService.getHistory()
         if (history.isEmpty()) return
         _state.update { cur ->
-            cur.copy(messages = mergeWithHistory(history, cur.messages))
+            // 已向上加载的更早页要保留：history 只是内存窗口，合并会丢掉它之前的内容
+            val firstIdx = cur.messages.indexOfFirst { it.id == history.first().id }
+            val olderPrefix = if (firstIdx > 0) cur.messages.take(firstIdx) else emptyList()
+            cur.copy(messages = olderPrefix + mergeWithHistory(history, cur.messages.drop(olderPrefix.size)))
+        }
+    }
+
+    /**
+     * 向上懒加载更早的一页历史（滚动接近列表顶部时由 UI 触发）。
+     * 以当前列表里最早的非系统消息为锚点做 keyset 分页，加载完成前重复触发会被忽略。
+     */
+    fun loadOlderMessages() {
+        val s = _state.value
+        if (!s.hasMoreHistory || s.isLoadingOlder) return
+        val anchor = s.messages.firstOrNull { it.role != ChatRole.system }?.id ?: return
+        _state.update { it.copy(isLoadingOlder = true) }
+        viewModelScope.launch {
+            val older = try {
+                chatService.loadOlder(anchor, UI_PAGE_SIZE)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
+            _state.update { cur ->
+                val ids = cur.messages.mapTo(HashSet()) { it.id }
+                cur.copy(
+                    messages = older.filter { it.id !in ids } + cur.messages,
+                    isLoadingOlder = false,
+                    hasMoreHistory = older.size >= UI_PAGE_SIZE
+                )
+            }
         }
     }
 
@@ -365,8 +404,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // 取消在途发送，否则回复到达后会把消息回写进已清空的会话
         sendJob?.cancel()
         sendJob = null
-        // 快照必须在清空之前取：撤销窗口内这是唯一的回滚依据
-        val snapshot = chatService.getHistory()
+        viewModelScope.launch {
+        // 快照必须在清空之前取：撤销窗口内这是唯一的回滚依据。
+        // 取仓库里的完整历史（不是内存窗口），否则撤销会丢掉窗口之前的消息
+        val snapshot = chatService.loadFullHistory()
         chatService.clearHistory()
         _state.update {
             // 只清对话相关字段，保留 updateNotice / memoryDialog 等无关状态
@@ -385,6 +426,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     snapshot = snapshot
                 )
             )
+        }
         }
     }
 
@@ -476,7 +518,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         when (undo) {
             is ChatUndo.ClearConversation -> {
                 chatService.restoreHistory(undo.snapshot)
-                _state.update { it.copy(messages = undo.snapshot, pendingUndo = null) }
+                _state.update {
+                    // UI 只展示最近一页，更早的仍可向上懒加载
+                    it.copy(
+                        messages = undo.snapshot.takeLast(UI_PAGE_SIZE),
+                        hasMoreHistory = undo.snapshot.size > UI_PAGE_SIZE,
+                        pendingUndo = null
+                    )
+                }
             }
             is ChatUndo.ClearMemory -> {
                 viewModelScope.launch {
