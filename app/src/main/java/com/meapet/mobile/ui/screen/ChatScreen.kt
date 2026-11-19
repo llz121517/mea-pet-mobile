@@ -424,8 +424,22 @@ private fun MessageList(
             }
         }
 
-        // 等待首条回复期间不额外显示「Mea 正在思考...」文字：
-        // 输入栏的发送键转圈已经表达了「在等」，再加一行字既重复又把列表顶上去。
+        // 等待首条回复时显示「Mea 正在思考...」；出第一条气泡后由输入栏上方的状态条表达进度
+        if (state.turnPhase == TurnPhase.WAITING_FIRST_REPLY) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Mea 正在思考...",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
+            }
+        }
 
         // 错误卡片跟在最后一条消息之后，随对话一起滚动。
         // 只从 state.error 渲染，不进 messages，因此不会被写入会话历史。
