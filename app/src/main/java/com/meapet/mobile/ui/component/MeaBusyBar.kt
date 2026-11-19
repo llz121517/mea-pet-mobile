@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.dp
  * - 手动压缩上下文进行中
  *
  * 出现/消失由调用方用 `AnimatedVisibility` 包裹做渐入渐出，避免状态切换时跳变。
- * 设计稿见 `docs/2026-11-18-interject-ui-mock.html` 的状态条。
+ * 设计稿（已归档）见 `docs/archive/plans/2026-11-18-interject-ui-mock.html` 的状态条。
  *
  * @param text 文案，如「Mea 还在整理前面的内容…」
  * @param actionLabel 右侧动作文案；null = 不显示动作
