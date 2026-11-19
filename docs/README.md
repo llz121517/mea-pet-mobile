@@ -46,8 +46,16 @@
 
 | 文件 | 内容 | 更新时机 |
 |---|---|---|
-| [`rules.md`](rules.md) | 项目规则（通用逻辑优先） | 新增 / 修改规则时 |
+| [`rules.md`](rules.md) | 项目规则（通用逻辑优先 / 过时文档直接删除） | 新增 / 修改规则时 |
 | [`adr/0001-tool-round-limit-interception.md`](adr/0001-tool-round-limit-interception.md) | ADR：工具轮次用尽时在工具执行端拦截，不发送 `tool_choice="none"` | 新决策按编号追加 |
+
+### 2.4 活跃计划文档
+
+| 文件 | 内容 |
+|---|---|
+| [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) | 1.9 记忆工具化：工具循环、4 个记忆工具、工具消息入历史、插队发送、检索打分 |
+| [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) | 1.9 SQLite 存储、上下文压缩、容量探测 |
+| [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) | web 搜索工具：通用映射 + 适配器层（DeepSeek Search API、AnySearch 匿名/token），待实施 |
 
 ## 3. 历史归档（只读，不再维护）
 

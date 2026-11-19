@@ -59,6 +59,8 @@
 - [ ] **1.10：清理备胎代码** — `MemoryRepository`（JSON 实现）、`ConversationStore`、旧 JSON 内存仓库与相关单测；legacy 导入保留到 1.11（见 `legacy-compat.md`）。
 - [ ] **被打断 turn 的 `interrupted` 落库标记** — 当前仅 `TurnMetrics` 日志记录，无消费方；等有「中断轮次分析」需求再补（`extra_json` 或 meta 记录，不改 schema）。
 - [ ] **备用 tail 模式（`SEPARATE_USER`）未接线** — 只有常量与单测，没有设置入口，也没有计划里的「返回 400/500 且正文命中模板报错 → 回退 MERGE_USER 并按 baseUrl+model 缓存」探测/降级逻辑；默认 MERGE_USER 兼容性最好，暂不启用，等确有端点需要连续 user 时再做（避免写永不执行的死代码）。
+- [ ] **S4：拆 `ChatService.wantsTools`**（工具注册表重构遗留）— 目前一个布尔值同时决定走不走工具循环、是否走文本协议、是否回放工具历史、system 拼什么。要支持「仅 web 工具开启 + 记忆走文本协议」，需拆成 `memoryUsesTools`（记忆走工具还是文本协议、人设/说明注入）与 `useToolLoop`（registry 非空且端点支持 tools：决定循环与工具历史回放）。**触发条件**：S5（web 搜索）开工时再做，没有第二个工具时拆它没有收益。风险：`toolsUnsupported` 降级需同 turn 重建 stable/tail/echo 并强制 `includeToolHistory=false`；历史已有 tool 消息而当前只开文本记忆时，`includeToolHistory` 必须按 `useToolLoop` 而不是记忆模式；`TurnMetrics.toolMode` 含义需重新对齐。需补测试：仅 web 开 + 记忆 TEXT、记忆 AUTO + web 关（system 与 tools SHA 逐字节不变）、端点拒绝 tools 时同 turn 降级。
+- [ ] **web 搜索工具（计划见 [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md)）** — 前置：先做上面的 S4（拆 `wantsTools`）。首批适配器 DeepSeek Search API（复用聊天 Key）与 AnySearch（匿名/token）；对模型只暴露通用 `web_search` function tool，失败返回错误信封、体积上限 1500 字符，默认关闭。
 - [ ] **设备残留数据清理**（可选，下次接设备时）— 测试注入的长消息、重复记忆 `mem_ln3glfhc` / `mem_39ypzmxj`。
 
 ---
