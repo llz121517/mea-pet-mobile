@@ -25,9 +25,10 @@ import androidx.compose.ui.unit.dp
  * 左侧小转圈 + 文案，右侧可选动作（如「停止」）。
  *
  * 用于：
- * - 手动压缩上下文进行中（当前）
- * - 将来的工具循环进行中 / 插队发送（同一组件复用）
+ * - 工具/插队 turn 进行中：出现第一条回复后显示，右侧「停止」（见 ChatScreen）
+ * - 手动压缩上下文进行中
  *
+ * 出现/消失由调用方用 `AnimatedVisibility` 包裹做渐入渐出，避免状态切换时跳变。
  * 设计稿见 `docs/2026-11-18-interject-ui-mock.html` 的状态条。
  *
  * @param text 文案，如「Mea 还在整理前面的内容…」

@@ -2,6 +2,7 @@ package com.meapet.mobile.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -298,22 +299,28 @@ private fun ChatPage(
             modifier = Modifier.align(Alignment.TopEnd)
         )
 
-        // ── Layer 3: 底部输入栏（turn 状态条 / 压缩中状态条，turn 优先）──
+        // ── Layer 3: 底部输入栏（turn 状态条 / 压缩中状态条）──
         Column(modifier = Modifier.align(Alignment.BottomCenter)) {
-            if (state.turnPhase != TurnPhase.IDLE) {
-                // turn 进行中：文案随阶段变化，右侧「停止」直接取消本轮（保留已显示气泡）
-                val text = when (state.turnPhase) {
-                    TurnPhase.WAITING_FIRST_REPLY -> "Mea 还在想…"
-                    TurnPhase.REPLYING -> "Mea 还在说…（可以直接发新消息打断）"
-                    TurnPhase.IDLE -> ""
-                }
+            // 「Mea 还在…」只在**出现第一条回复后**才出现：等待首条期间输入栏发送键转圈即可，
+            // 不再提前弹状态条（还没看到任何输出就显示「还在说」既不准确也让人以为卡住）。
+            // 渐入/渐出避免出现、消失时跳变。
+            AnimatedVisibility(
+                visible = state.turnPhase == TurnPhase.REPLYING,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
                 MeaBusyBar(
-                    text = text,
+                    text = "Mea 还在说…（可以直接发新消息打断）",
                     actionLabel = "停止",
                     onAction = { chatViewModel.onEvent(ChatEvent.StopTurn) }
                 )
-            } else if (state.isCompacting) {
-                // 压缩状态条保持原样；与 turn 同时存在时以 turn 优先（避免两条叠在一起）
+            }
+            // 压缩状态条与 turn 不叠加：turn 进行中时让位给 turn 状态条
+            AnimatedVisibility(
+                visible = state.turnPhase == TurnPhase.IDLE && state.isCompacting,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
                 MeaBusyBar(text = "Mea 还在整理前面的内容…")
             }
             // 等待首条回复期间保持原禁用/转圈表现；已出第一条气泡后恢复输入，发送即插队
@@ -417,22 +424,8 @@ private fun MessageList(
             }
         }
 
-        // 「思考中」只在还没出任何气泡时显示；已经连发片段后由输入栏上方的状态条表达进度
-        if (state.turnPhase == TurnPhase.WAITING_FIRST_REPLY) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Mea 正在思考...",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                    )
-                }
-            }
-        }
+        // 等待首条回复期间不额外显示「Mea 正在思考...」文字：
+        // 输入栏的发送键转圈已经表达了「在等」，再加一行字既重复又把列表顶上去。
 
         // 错误卡片跟在最后一条消息之后，随对话一起滚动。
         // 只从 state.error 渲染，不进 messages，因此不会被写入会话历史。
