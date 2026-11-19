@@ -79,8 +79,8 @@ enum class SearchErrorCode { INVALID_REQUEST, UNAUTHORIZED, QUOTA_EXCEEDED, RATE
 - 成功信封（沿用 `ToolEnvelope` 风格）：
   `{"ok":true,"results":[{"title","url","snippet","site_name","date"}],"returned":N}`
 - 失败信封：`{"ok":false,"error":"<code>","message":"给模型看的说明"}`。
-- 体积上限（与记忆检索一致）：单条 `snippet` 截断 200 字，总长 ≈ 1500 字符上限，`limit` 再大也不突破。
-- 隐私：日志只记 `query.length`、provider、返回条数、耗时；**不记 query 内容、不记结果内容**。
+- 体积上限：单条 `snippet` 截 200 字，`url` 截 300 字、`title` 截 120 字、`site_name` 截 40 字、`date` 截 32 字，总长 ≈ 1500 字符上限（只按 snippet 计数会被超长 URL 突破）。
+- 隐私：日志只记 `query.length`、provider、返回条数、耗时；**不记 query 内容、不记结果内容**。日志行抽成 `internal fun privacyLogLine(...)` 纯函数，单测直接断言，不依赖 JVM 里被桩掉的 `android.util.Log`。
 
 ### 2.3 错误归一化与重试
 
@@ -92,13 +92,17 @@ enum class SearchErrorCode { INVALID_REQUEST, UNAUTHORIZED, QUOTA_EXCEEDED, RATE
 | `rate_limited` | 429 | 退避 1 次 | 稍后再试 |
 | `unavailable` | 408/5xx/超时/解析失败 | 退避 1 次 | 搜索服务暂不可用 |
 
-- 重试只做**一次**短退避，避免工具轮次被拖长；失败后仍返回错误信封让模型自行收尾（不使整个 turn 失败）。
+- 重试只做**一次**短退避（约 800ms，仅 429/5xx），避免工具轮次被拖长；失败后仍返回错误信封让模型自行收尾（不使整个 turn 失败）。
+- **硬边界：搜索错误绝不可以 `ApiException` 逃出 Tool。** `ChatService` 会把工具循环抛出的 `ApiException(400/404/422/501)` 判成「端点不支持 tools」并置 `toolsUnsupported`，本进程永久关掉全部工具——搜索的 400/404 若漏出会误杀记忆工具。由 provider 返回 `SearchOutcome.Failure`，`WebSearchTool` 兜住所有异常（仅 `CancellationException` 穿透，与 `MemoryToolExecutor` 一致）。
+- **不复用 `OpenAiCompatibleClient`**：它只拼 `baseUrl+固定路径`，且非 2xx 会把**完整响应体写日志**（AnySearch 402 body 可能含自动生成凭据）。新增 `client/JsonHttpClient`：复用 `HttpClientEngine`，返回原始 `HttpResponse`、不抛 `ApiException`、**不记 body**。
+- **超时用 `withTimeoutOrNull(15s)`**，不能用 `withTimeout` + `catch (TimeoutCancellationException)`：后者分不清「工具自身超时」与「整轮超时 / 用户取消」；超时**不重试**（已耗预算），否则 15s × 12 轮会击穿 `turnTimeoutMs = 180s`。
 
-### 2.4 provider 选择（通用逻辑，不做服务商硬编码表）
+### 2.4 provider 选择（通用逻辑，不设内置表）
 
 - 设置项 `web_search_provider`：`auto`（默认）/ `deepseek` / `anysearch`。
-- `auto` 规则：聊天 `baseUrl` 主机为 `api.deepseek.com` → DeepSeek；否则 AnySearch（有 Key 用 token 档，无 Key 用匿名档）。
-- 不做运行时学习、不设内置表；只按一个可解释规则选择，失败不跨 provider 静默补救（配置类错误直接报错信封）。
+- 适配器自报 `id`、`endpointHost`、`isAvailable()`（DeepSeek = 聊天 Key 非空；AnySearch = 恒 true）。
+- `SearchProviderResolver` 规则：显式选择按 id 匹配（不可用则返回 null，不静默换家）；`auto` 在可用列表中找 `endpointHost == hostOf(聊天 baseUrl)` 的适配器，没有则取第一个可用者（兜底值，失败不跨 provider 补救）。host 用 `java.net.URI` 解析，解析失败直接走兜底（`rules.md`「识别失败直接降级」）。
+- 判断全部在装配层（AppContainer），**Tool 内零服务商分支**：Tool 只 `providerProvider() ?: return not_configured`；各 provider 内部的字段映射是唯一允许的 per-provider 代码。
 
 ## 3. 配置与设置页
 
@@ -108,6 +112,8 @@ enum class SearchErrorCode { INVALID_REQUEST, UNAUTHORIZED, QUOTA_EXCEEDED, RATE
 - DeepSeek 侧直接用 `SettingsManager.getApiKey()`，不新增 Key 字段。
 - UI：`ProviderSettings` 新增分组「联网搜索」：开关、provider 单选、AnySearch Key 输入（`auto` 且 baseUrl 非 DeepSeek 时显示）、说明文案（匿名档限速/免费额度、Pro 计费、查询不用于训练）。
 - 修改开关或 provider 会改变 tools 数组 → 接受一次缓存失效（与新增工具同类事件）。
+- **注册表现在是静态的**（`ToolRegistry.schemas` 构造时定格、`AppContainer.chatToolLoop` 是 `lazy val`），而 web 开关与 `memoryMode` 都是运行时设置。改 `ChatService(toolLoopProvider: (includeMemoryTools: Boolean) -> ChatToolLoop? = { null }, memoryTools: TurnScoped? = null)`，**每 turn 开头取一次**（同 turn 内 tools 数组不变）；装配留在 AppContainer，不重建 ChatService（重建会丢 `activeTurnJob`/`toolsUnsupported`，`cancelActiveTurn` 失效）。
+- 签名变更波及 4 个测试构造点（`ChatViewModelTest`、`ChatServiceFailureRollbackTest`、`ChatServiceToolRoundCounterTest`、`ChatServiceToolPersonaTest`），机械改为 `toolLoopProvider = { loop }`。
 
 ## 4. 与 S4 的关系（必须先拆）
 
@@ -117,17 +123,48 @@ enum class SearchErrorCode { INVALID_REQUEST, UNAUTHORIZED, QUOTA_EXCEEDED, RATE
 - `useToolLoop = registry 非空 && !toolsUnsupported`（决定是否走循环；决定 `includeToolHistory`）
 - `textProtocol = !memoryUsesTools && memoryMode != MemoryMode.OFF`
 - `includeToolHistory = useToolLoop`
-- `TurnMetrics.toolMode = useToolLoop`，`mode` 仍为 `memoryMode`
-- 端点拒绝 tools 的降级：同 turn 重建 stable/tail/echo，并强制 `includeToolHistory = false`
+- system 拼接必须按**三种组合**分支（现有代码只有工具/文本两类）：
+  ```
+  memoryUsesTools → registry.hint + 人设段
+  textProtocol    → memoryContext.stable（已含协议说明 + 人设）
+  否则（记忆 OFF）→ registry.hint（不注入人设，与现在 OFF 语义一致）
+  ```
+- `memoryOpsEchoTurns` 改按 `textProtocol` 判定（不是 `stableContext.isNotBlank() && !wantsTools`），否则「web 开 + 记忆 TEXT」时文本协议块没有格式范例。
+- 空回复兜底重试（不带 tools 的请求）必须重建 stable：不能残留工具 hint，否则模型看到「有 web_search 说明」却收不到 tools 数组。
+- `TurnMetrics.toolMode = useToolLoop`（建议语义：「本轮是否尝试工具协议」）；降级/超时轮怎么记需实现前拍板，并在 `sendMessage` 开头快照 `attemptedToolLoop` 供 catch 使用（现在 catch 里用的是 `wantsTools`）。
+- 端点拒绝 tools 的降级：同 turn 重建 stable/tail/echo，并强制 `includeToolHistory = false`。
 
 ## 5. 缓存与测试
 
-- tools 数组变化会使 SHA-256 快照失效一次：把 `toolsArrayIsByteStableSnapshot` 拆成「记忆工具子集 hash（不变）」+「完整 registry hash（随开关/新增工具更新）」。
+- tools 数组变化会使 SHA-256 快照失效一次，测试拆三条：
+  1) `MemoryToolSchemas.ALL.toString()` 独立哈希（不随 registry 组成变）；
+  2) 完整 registry `schemas.toString()` 双快照 —— web 关必须仍等于现网 `614470f1…66d1`；
+  3) web 开为新常量。
+  现测试取 body 里 `"tools":` 之后整段（含尾部 `tool_choice`），新测试直接对构造结果哈希，不再依赖请求体拼接。
 - 新增测试：
   - `DeepSeekSearchProviderTest` / `AnySearchProviderTest`：FakeHttpClientEngine 脚本化成功、空结果、400/401/402/403/429/5xx、字段缺省容错；
   - `WebSearchToolTest`：schema 稳定、信封体积上限、`limit` 夹取、隐私日志不含 query；
   - `ChatService`：仅 web 开 + 记忆 TEXT 的组合（S4 测试清单）；
   - 设置页状态：开关/provider/Key 落盘与回显。
+
+## 5.1 文件清单与类签名（代码复查后补充）
+
+新增，包 `com.meapet.mobile.search`：
+- `SearchModels.kt`：`SearchHit(title, url, snippet, siteName?, publishedAt?)`；`sealed interface SearchOutcome { Ok(hits) / Failure(code, retryable) }`；`enum SearchErrorCode { INVALID_REQUEST, UNAUTHORIZED, QUOTA_EXCEEDED, RATE_LIMITED, UNAVAILABLE, NOT_CONFIGURED }`
+- `SearchProvider.kt`：`interface SearchProvider { val id: String; val endpointHost: String; fun isAvailable(): Boolean; suspend fun search(query: String, limit: Int): SearchOutcome }`
+- `DeepSeekSearchProvider.kt`：`class DeepSeekSearchProvider(http: JsonHttpClient, apiKeyProvider: () -> String, endpoint: String = "https://api.deepseek.com/v1/tools/search", retryDelayMs: Long = 800)`
+- `AnySearchProvider.kt`：`class AnySearchProvider(http: JsonHttpClient, apiKeyProvider: () -> String, endpoint: String = "https://api.anysearch.com/v1/search")`（key 空 = 匿名档，不带 `Authorization`）
+- `SearchProviderResolver.kt`：`class SearchProviderResolver(providers: List<SearchProvider>, selectedId: () -> WebSearchProviderId, chatBaseUrl: () -> String) { fun resolve(): SearchProvider? }`
+- `WebSearchSchemas.kt`：`object WebSearchSchemas { const val NAME = "web_search"; const val HINT: String; val SCHEMA: JsonObject }`（`type → function{name,description,parameters}`，与 `MemoryToolSchemas.functionTool` 同构）
+- `WebSearchTool.kt`：`class WebSearchTool(providerProvider: () -> SearchProvider?, timeoutMs: Long = 15_000, maxResultChars: Int = 1500, maxSnippetChars: Int = 200) : Tool`
+
+新增，包 `com.meapet.mobile.client`：`JsonHttpClient.kt`（`suspend fun postJson(url, json, headers): HttpResponse`，复用 `HttpClientEngine`，不抛 `ApiException`、不记 body）。
+
+新增，包 `com.meapet.mobile.config`：`WebSearchProviderId.kt`（`AUTO / DEEPSEEK / ANYSEARCH`，`parse()` 未知值降级 `AUTO`，同 `MemoryMode.parse`；放 config 避免 settings↔search 循环依赖）。
+
+修改：`ChatService.kt`（S4 + `toolLoopProvider`）、`AppContainer.kt`（独立 `searchHttpClient` + 两个 provider + resolver + `webSearchTool` + `toolLoopProvider`）、`SettingsKeys.kt`、`SettingsManager.kt`（3 flow + 3 getter + 3 setter）、`SettingsViewModel.kt`、`SettingsState.kt`、`SettingsScreen.kt`、新建 `ui/screen/settings/WebSearchSettings.kt`（挂到 `SettingsPage.PROVIDER`）、`OpenAiCompatibleClientTest.kt`。
+
+> 注意：mock `SettingsManager` 时新 getter 必须打桩（Mockito 对非空 String/枚举返回 null）。
 
 ## 6. 分步实施
 
@@ -141,7 +178,8 @@ enum class SearchErrorCode { INVALID_REQUEST, UNAUTHORIZED, QUOTA_EXCEEDED, RATE
 
 ## 7. 风险
 
-- **延迟**：AnySearch 示例 `search_time_ms` 可达 4s，工具循环里每轮都会等；需单次超时（如 15s）与体积上限，避免拖慢整轮。
+- **误杀工具开关（最高）**：任何搜索错误变成 `ApiException` 逃出 Tool → `ChatService` 误判「端点不支持 tools」→ 本进程永久关掉全部工具。验收必须覆盖搜索 400/401/404。
+- **延迟**：AnySearch 示例 `search_time_ms` 可达 4s，工具循环里每轮都会等；单次超时 ≤15s、仅 429/5xx 重试一次，避免击穿 `turnTimeoutMs = 180s`。
 - **计费**：DeepSeek $0.75/1k 次；AnySearch Free 1000/天、Pro 按包。默认关闭可避免用户不知情消耗。
 - **凭据泄露**：AnySearch 402 body 可能含自动生成凭据 → 该路径只记 HTTP 状态与 request_id。
 - **缓存**：开关/新增工具都会导致前缀失效一次，按版本事件对待。
@@ -152,6 +190,7 @@ enum class SearchErrorCode { INVALID_REQUEST, UNAUTHORIZED, QUOTA_EXCEEDED, RATE
 - DeepSeek Search 是否需单独开通；`need_content` 正文长度上限；Fetch 页面长度上限与每域 QPS；是否支持流式。
 - AnySearch 匿名档具体额度/QPS、是否支持 `tag`/`params`、429 的 `Retry-After`、匿名 IP 记录保留期。
 - 两家搜索的缓存/重复调用折扣（如有）。
+- AnySearch 空结果时 `data` 是否缺省；独立 search 引擎是否需要在 `reloadClient()` 中重建（Key 用 getter 每次现读，理论上不必）。
 
 ## 9. 参考
 
