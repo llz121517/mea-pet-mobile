@@ -159,6 +159,6 @@ private fun memoryModeLabel(mode: MemoryMode): String = when (mode) {
 private fun memoryModeHint(mode: MemoryMode): String = when (mode) {
     MemoryMode.AUTO -> "自动：优先让模型自己调用检索工具，端点不支持时回退关键词注入"
     MemoryMode.TOOLS -> "工具：模型主动检索/写入记忆（需要端点支持 function calling）"
-    MemoryMode.TEXT -> "文本：按关键词注入相关记忆，写入走文本协议（旧版行为）"
+    MemoryMode.TEXT -> "文本：按关键词注入相关记忆，写入走文本协议（旧版行为，可能在后续版本移除支持）"
     MemoryMode.OFF -> "关闭检索：不注入也不检索，记忆仍会保存"
 }

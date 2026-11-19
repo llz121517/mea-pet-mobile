@@ -311,7 +311,7 @@ private fun ChatPage(
                 exit = fadeOut()
             ) {
                 MeaBusyBar(
-                    text = "Mea 还在说…（可以直接发新消息打断）",
+                    text = "Mea 还在说…",
                     actionLabel = "停止",
                     onAction = { chatViewModel.onEvent(ChatEvent.StopTurn) }
                 )

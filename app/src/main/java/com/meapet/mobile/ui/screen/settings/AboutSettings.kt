@@ -82,7 +82,7 @@ internal fun AppInfoSection() {
     Spacer(Modifier.height(10.dp))
 
     Text(
-        "又是逢初度，霜轻叶落时。\n11·1 | 十月初六",
+        "我见青山多妩媚，料青山见我应如是",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -91,11 +91,10 @@ internal fun AppInfoSection() {
     Spacer(Modifier.height(3.dp))
     LinkItem("GitHub 仓库", AppInfo.gitRepoUrl, uriHandler, linkStyle)
     Spacer(Modifier.height(3.dp))
-    LinkItem("交流 QQ 群", AppInfo.qqGroupUrl, uriHandler, linkStyle)
 
     Spacer(Modifier.height(6.dp))
     Text(
-        "技术栈：Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Markwon  ·  Coroutines  ·  GLSurfaceView  ·  sherpa-onnx  ·  Kotlin 2.2 / AGP 9.3 / minSdk 26",
+        "技术栈：Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Markwon  ·  Coroutines  ·  GLSurfaceView  ·  sherpa-onnx",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = ALPHA_MUTED_TEXT),
         modifier = Modifier.padding(bottom = 8.dp)
