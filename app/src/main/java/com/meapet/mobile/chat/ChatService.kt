@@ -508,6 +508,7 @@ class ChatService(
             "Sending request to $model (${local.messages.size} messages, " +
                 "${local.messages.sumOf { it.content.length }} chars, ~$estimated tokens)"
         )
+        if (com.meapet.mobile.BuildConfig.DEBUG) logRequestDetail(local.messages)
 
         var toolsUsed = false
         var rounds = 1
@@ -593,6 +594,33 @@ class ChatService(
             promptTokens = usagePromptTokens,
             cacheHitTokens = usageCacheHitTokens
         )
+    }
+
+    /**
+     * **仅 debug 构建**：把本次请求的结构打进 logcat，方便排查「实际发出去的 system
+     * prompt / 上下文到底是什么」。
+     *
+     * 只打印第一条 system 的全文（它由 设置里的 System Prompt + 工具说明 + 压缩摘要
+     * 拼成，排查人设不生效时第一眼看的就是它）；其余消息只打印角色、长度与是否有
+     * tool_calls，不把用户对话正文写进 logcat。
+     *
+     * Release 构建不会调用本方法（入口处 `BuildConfig.DEBUG` 判断）。
+     */
+    private fun logRequestDetail(messages: List<ChatMessage>) {
+        Log.d(TAG, "── request detail (${messages.size} msgs) ──")
+        messages.forEachIndexed { index, msg ->
+            val flags = buildString {
+                if (msg.rawAssistantJson != null) append(" raw")
+                if (!msg.toolCallId.isNullOrBlank()) append(" toolCallId=${msg.toolCallId}")
+            }
+            Log.d(
+                TAG,
+                "  #$index ${msg.role} ${msg.content.length} chars$flags"
+            )
+        }
+        messages.firstOrNull { it.role == ChatRole.system }?.let { system ->
+            Log.d(TAG, "  system[${system.content.length}]: ${system.content}")
+        }
     }
 
     /**

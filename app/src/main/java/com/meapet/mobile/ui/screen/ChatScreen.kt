@@ -26,7 +26,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -164,7 +163,9 @@ private fun ChatPage(
     onOpenSettings: () -> Unit
 ) {
     val state by chatViewModel.state.collectAsState()
-    val listState = rememberLazyListState()
+    // 会话代际变化（清空/撤销恢复）时重建滚动状态：LazyListState 里存着旧列表的
+    // 可见下标，原地从 300 多条切到 0 条会让 LazyLayout 回收 item 时触发内部 NPE
+    val listState = remember(state.conversationEpoch) { LazyListState() }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // 破坏性操作是「立即执行 + 可撤销」：执行结果与撤销快照都在
@@ -193,7 +194,7 @@ private fun ChatPage(
     // - 首屏定位完成前列表保持透明（contentReady=false）：避免先闪一下空态/顶部内容。
     // - 之后：新消息或错误卡片出现才带动画滚动。
     // 触发键仍是「最后一条消息 id」而非条数：向上懒加载会在头部插消息，条数变化不能把用户拽回底部。
-    var initialScrollApplied by remember { mutableStateOf(false) }
+    var initialScrollApplied by remember(state.conversationEpoch) { mutableStateOf(false) }
     LaunchedEffect(state.initialLoadDone, state.messages.lastOrNull()?.id, state.error) {
         if (!state.initialLoadDone) return@LaunchedEffect
         val lastIndex = state.messages.size - 1 + if (state.error != null) 1 else 0
@@ -392,7 +393,9 @@ private fun MessageList(
         verticalArrangement = Arrangement.Bottom
     ) {
         if (state.initialLoadDone && uniqueMessages.isEmpty()) {
-            item {
+            // 显式 key：与消息 item 的 key 空间区分开，避免空态/思考中等固定 item
+            // 在 LazyLayout 回收时与某个消息 key 撞车
+            item(key = "empty-state") {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -412,8 +415,6 @@ private fun MessageList(
             items = uniqueMessages,
             key = { _, message -> message.id }
         ) { index, message ->
-            // 双保险：即便过滤逻辑将来被改坏，也不让 tool 消息走到 ChatBubble（它没有分支）
-            if (!message.isVisibleInUi) return@itemsIndexed
             // 按天轻时间分隔条：相邻消息跨自然日时插一条（纯 UI 派生，不入库）
             val previousTs = if (index > 0) uniqueMessages[index - 1].timestamp else null
             dayDividerLabel(previousTs, message.timestamp)?.let { DividerLabel(it) }
@@ -426,7 +427,7 @@ private fun MessageList(
 
         // 等待首条回复时显示「Mea 正在思考...」；出第一条气泡后由输入栏上方的状态条表达进度
         if (state.turnPhase == TurnPhase.WAITING_FIRST_REPLY) {
-            item {
+            item(key = "thinking") {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()

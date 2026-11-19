@@ -54,7 +54,17 @@ data class ChatUiState(
     val compactedUpToMessageId: String? = null,
     val initialLoadDone: Boolean = false,
     /** 压缩完成后的一次性提示（成功/失败文案），由 UI 弹完即清空。 */
-    val compactionNotice: String? = null
+    val compactionNotice: String? = null,
+    /**
+     * 会话代际：清空对话 / 撤销恢复时自增。
+     *
+     * UI 以它作为 key 重建消息列表与 [androidx.compose.foundation.lazy.LazyListState]：
+     * 把「300 多条消息的滚动与子组合状态」直接原地切成 0 条时，Compose 的
+     * LazyLayout 在回收 item 布局的过程中会触发内部 NPE
+     * （`SubcomposeLayout.getSlotIdAtIndex`）。换一代状态、整块重建，比让框架
+     * 原地回收安全得多；清空/撤销本来就是低频操作，重建成本可忽略。
+     */
+    val conversationEpoch: Long = 0
 ) {
     /** 是否正在等待 AI 响应（派生自 [turnPhase]，避免两处状态不一致）。 */
     val isLoading: Boolean get() = turnPhase != TurnPhase.IDLE

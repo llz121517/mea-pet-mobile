@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **清空对话时偶发崩溃** — 长会话（数百条消息）下点「清除对话」，消息列表从几十条瞬间变空时，Compose LazyLayout 回收 item 布局会抛内部 NPE 导致闪退；现在清空/撤销恢复时重建列表滚动状态（`conversationEpoch`），不再让框架原地回收整列 item。
 - **端点不支持 tools 时聊天中断** — 自动降级为文本协议；超时（默认 180s）会回滚整轮并提示重试，不会一直转圈。
 - **重试按整轮处理** — 重试会清掉该轮所有片段 / 工具记录后重发，不会留下无法配对的半轮。
 

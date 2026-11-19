@@ -520,7 +520,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 inputText = "",
                 compactHint = false,
                 canCompactContext = false,
-                compactedUpToMessageId = null
+                compactedUpToMessageId = null,
+                // 让 UI 丢掉旧列表的滚动/子组合状态（见 ChatUiState.conversationEpoch）
+                conversationEpoch = it.conversationEpoch + 1
             )
         }
         if (snapshot.isNotEmpty()) {
@@ -630,7 +632,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         messages = visibleSnapshot.takeLast(UI_PAGE_SIZE),
                         hasMoreHistory = visibleSnapshot.size > UI_PAGE_SIZE,
-                        pendingUndo = null
+                        pendingUndo = null,
+                        // 整份历史刚被替换：重建列表状态，避免沿用清空后的空列表状态
+                        conversationEpoch = it.conversationEpoch + 1
                     )
                 }
                 refreshCompactionUi()
