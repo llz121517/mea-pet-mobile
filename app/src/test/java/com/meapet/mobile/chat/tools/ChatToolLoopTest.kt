@@ -115,22 +115,70 @@ class ChatToolLoopTest {
         assertTrue(toolMsg["content"]!!.jsonPrimitive.content.contains("mem_1"))
     }
 
+    /**
+     * 工具轮次用尽后**在工具执行端拦截**：调用不执行，回填「已达上限」的 tool 结果让模型收尾。
+     * 全程不发送 `tool_choice="none"`（那会逼模型把工具调用当正文吐出来，见 ADR 0001）。
+     */
     @Test
-    fun `达到最大轮数时最后一轮用 tool_choice none 并失败`() = runTest {
+    fun `工具轮次用尽时拦截调用并把上限提示回填给模型`() = runTest {
+        val responses = ArrayDeque(
+            listOf(
+                toolCallResponse(toolCall("call_1")),
+                toolCallResponse(toolCall("call_2")),
+                // maxRounds=2：第 3 轮的调用应被拦截
+                toolCallResponse(toolCall("call_3")),
+                textResponse("好喵")
+            )
+        )
+        val engine = FakeHttpClientEngine { responses.removeFirst() }
+        val loop = ChatToolLoop(
+            clientProvider = { OpenAiCompatibleClient("k", "https://x/v1", engine) },
+            executor = MemoryToolExecutor(fakeSearch),
+            maxRounds = 2
+        )
+
+        val result = loop.run("m", listOf(buildJsonObject { put("role", "user") }), 0.7, 512, turnId = "t1")
+
+        assertEquals("好喵", result.finalContent)
+        assertEquals(4, engine.requests.size, "前两轮执行 + 一轮拦截 + 一轮收尾")
+        assertEquals(2, result.toolCalls, "被拦截的调用不执行、不计数")
+        repeat(engine.requests.size) { index ->
+            val body = bodyOf(engine, index)
+            assertTrue(body.containsKey("tools"), "第 ${index + 1} 轮应声明 tools")
+            assertEquals(
+                "auto",
+                body["tool_choice"]!!.jsonPrimitive.content,
+                "第 ${index + 1} 轮不应发送 tool_choice=none"
+            )
+        }
+        // 最后一个请求里应能看到拦截结果（对应第 3 轮 call_3）
+        val lastRequest = bodyOf(engine, 3)
+        val toolMsgs = lastRequest["messages"]!!.jsonArray.map { it.jsonObject }
+            .filter { it["role"]?.jsonPrimitive?.content == "tool" }
+        assertTrue(
+            toolMsgs.last()["content"]!!.jsonPrimitive.content.contains("tool_round_limit"),
+            "拦截轮应回填 tool_round_limit 信封"
+        )
+    }
+
+    /** 模型死犟、被拦截后仍反复要工具：总请求数有上限，超限如实失败。 */
+    @Test
+    fun `模型死犟时请求数有上限并如实失败`() = runTest {
         val engine = FakeHttpClientEngine { toolCallResponse(toolCall("call_x")) }
         val loop = ChatToolLoop(
             clientProvider = { OpenAiCompatibleClient("k", "https://x/v1", engine) },
             executor = MemoryToolExecutor(fakeSearch),
-            maxRounds = 3
+            maxRounds = 1
         )
 
         assertFailsWith<IllegalStateException> {
             loop.run("m", listOf(buildJsonObject { put("role", "user") }), 0.7, 512, turnId = "t1")
         }
-        assertEquals(3, engine.requests.size, "最多请求 maxRounds 次")
-        val last = bodyOf(engine, 2)
-        assertEquals("none", last["tool_choice"]!!.jsonPrimitive.content)
-        assertTrue(last.containsKey("tools"), "最后一轮仍保留 tools，保持前缀一致")
+        assertEquals(
+            1 + MAX_TOOL_GRACE_ROUNDS,
+            engine.requests.size,
+            "工具轮次 + 拦截轮之后必须停止请求"
+        )
     }
 
     @Test

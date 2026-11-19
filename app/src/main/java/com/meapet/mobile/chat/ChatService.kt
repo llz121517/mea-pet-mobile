@@ -8,7 +8,6 @@ import com.meapet.mobile.chat.compaction.ContextCompactor
 import com.meapet.mobile.chat.compaction.TokenEstimator
 import com.meapet.mobile.chat.compaction.dropCountToFit
 import com.meapet.mobile.chat.compaction.foldCountFor
-import com.meapet.mobile.chat.tools.ToolCallMarkup
 import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.client.exception.ApiException
 import com.meapet.mobile.client.model.ApiRequest
@@ -494,15 +493,16 @@ class ChatService(
                 usagePromptTokens = actual
                 usageCacheHitTokens = ApiResponse.usagePromptCacheHitTokens(responseJson)
             }
-            return ApiResponse.chatCompletionContent(responseJson)
-                ?.let { ToolCallMarkup.strip(it) }
-                .orEmpty()
+            return ApiResponse.chatCompletionContent(responseJson).orEmpty()
         }
 
+        val loop = if (wantsTools) toolLoop else null
         var local = buildLocalRequest(
             includeToolHistory = wantsTools,
             stable = stableContext,
-            tail = tailFragments,
+            // 工具模式下 tail 由循环每轮重建（当前时间 + 工具轮次计数），初始请求先不带；
+            // 非工具模式仍按原样把 tail 并入最后一条 user
+            tail = if (loop != null) emptyList() else tailFragments,
             echo = memoryOpsEchoTurns
         )
         Log.d(
@@ -511,7 +511,6 @@ class ChatService(
                 "${local.messages.sumOf { it.content.length }} chars, ~$estimated tokens)"
         )
 
-        val loop = if (wantsTools) toolLoop else null
         var toolsUsed = false
         var rounds = 1
         var toolCalls = 0
@@ -527,7 +526,12 @@ class ChatService(
                     maxTokens = maxTokens,
                     turnId = turnId,
                     onVisibleFragment = onVisibleFragment,
-                    onTranscript = { record -> transcript += record }
+                    onTranscript = { record -> transcript += record },
+                    // 每轮把「时间 + 工具轮次计数」并入最后一条 user 的发出版本：
+                    // 模型能看到 x/上限、自己决定何时收尾（与执行端拦截互补）
+                    roundTailProvider = { used, max ->
+                        composeTail(listOf(TimeContext.describe(), toolRoundCounter(used, max)))
+                    }
                 )
                 // 用第一轮的真实 prompt_tokens 校准本地估算；cache hit 只进观察指标
                 loopResult.firstPromptTokens?.let { estimator.calibrate(local.rawEstimate, it) }
@@ -570,25 +574,25 @@ class ChatService(
             finalContent = requestOnce(local)
         }
 
-        // 清洗模型可能以文本形式泄漏的工具调用标记；工具模式下最后一轮可能只剩标记，
-        // 补一次不带 tools 的请求，尽量给用户一句正常回复（不丢整轮）
-        var cleaned = ToolCallMarkup.strip(finalContent)
-        if (cleaned.isBlank() && toolsUsed) {
-            Log.w(TAG, "Unexpected API response: empty or markup-only content, retrying without tools")
+        // 工具模式下模型只给 tool_calls / 空回复（服务端偶有）时，补一次不带 tools 的请求，
+        // 尽量给用户一句正常回复，而不是把整轮判失败
+        var reply = finalContent
+        if (reply.isBlank() && toolsUsed) {
+            Log.w(TAG, "Empty reply after tool loop, retrying without tools")
             val fallback = buildLocalRequest(
                 includeToolHistory = false,
                 stable = stableContext,
                 tail = tailFragments,
                 echo = 0
             )
-            cleaned = ToolCallMarkup.strip(requestOnce(fallback))
+            reply = requestOnce(fallback)
             finalRaw = null
         }
-        if (cleaned.isBlank()) {
+        if (reply.isBlank()) {
             throw IllegalStateException("API 响应中没有有效的回复内容")
         }
         return TurnExecution(
-            content = cleaned,
+            content = reply,
             finalRaw = finalRaw,
             rounds = rounds,
             toolCalls = toolCalls,
@@ -596,6 +600,23 @@ class ChatService(
             promptTokens = usagePromptTokens,
             cacheHitTokens = usageCacheHitTokens
         )
+    }
+
+    /**
+     * 工具轮次计数器（tail 片段，格式 `已用/上限`，如 `3/12`）。
+     *
+     * 放进 tail 让模型自己看到消耗了多少轮、还剩多少，接近上限时主动收尾；
+     * 与执行端的硬拦截（ADR 0001）互补：一个靠提示，一个靠拒绝执行。
+     * 上限由 [ChatToolLoop] 传入（其文件级常量），这里不写死数字。
+     */
+    private fun toolRoundCounter(used: Int, max: Int): String {
+        val remaining = (max - used).coerceAtLeast(0)
+        val hint = when {
+            remaining == 0 -> "（已达上限，后续工具调用会被拒绝，请直接回答）"
+            remaining <= 2 -> "（接近上限，请尽快用文字回答）"
+            else -> ""
+        }
+        return "工具调用轮次 $used/$max$hint"
     }
 
     /**
