@@ -103,7 +103,7 @@ class ChatService(
      */
     private val toolLoop: com.meapet.mobile.chat.tools.ChatToolLoop? = null,
     /** 工具执行器（与 [toolLoop] 共用同一实例：暂存写入需要从它身上取回）。 */
-    private val memoryTools: com.meapet.mobile.memory.tools.MemoryToolExecutor? = null
+    private val memoryTools: com.meapet.mobile.chat.tools.TurnScoped? = null
 ) {
     companion object {
         private const val TAG = "ChatService"
@@ -243,10 +243,7 @@ class ChatService(
 
                     // 3) 工具模式：整个 turn 成功后才提交暂存写入（失败/取消已在各 catch 中丢弃）
                     if (config.enableMemoryTools) {
-                        val pending = memoryTools?.drainPending()
-                        if (pending != null && !pending.isEmpty) {
-                            memoryManager?.applyToolChanges(pending)
-                        }
+                        memoryTools?.onTurnSuccess()
                     }
 
                     // 4) 事后处理：应用记忆操作/触发摘要转后台，不阻塞本次回复返回
@@ -279,7 +276,7 @@ class ChatService(
                     // 单独先于 CancellationException 捕获：超时是失败，不是用户取消
                     Log.w(TAG, "Turn timed out after ${config.turnTimeoutMs} ms")
                     conversationManager.removeMessage(turnUser.id)
-                    memoryTools?.discardPending()
+                    memoryTools?.onTurnAbort()
                     TurnMetrics.record(
                         mode = memoryMode,
                         toolMode = wantsTools,
@@ -304,7 +301,7 @@ class ChatService(
                     } else {
                         conversationManager.removeMessage(turnUser.id)
                     }
-                    memoryTools?.discardPending()
+                    memoryTools?.onTurnAbort()
                     TurnMetrics.record(
                         mode = memoryMode,
                         toolMode = wantsTools,
@@ -318,7 +315,7 @@ class ChatService(
                     // 失败路径：transcript 从未入史，只需回滚开头的 user 消息
                     Log.e(TAG, "Failed to send message", e)
                     conversationManager.removeMessage(turnUser.id)
-                    memoryTools?.discardPending()
+                    memoryTools?.onTurnAbort()
                     TurnMetrics.record(
                         mode = memoryMode,
                         toolMode = wantsTools,
@@ -374,7 +371,7 @@ class ChatService(
         onVisibleFragment: (ChatMessage) -> Unit
     ): TurnExecution {
         onBeforeSend()
-        if (config.enableMemoryTools) memoryTools?.discardPending()
+        if (config.enableMemoryTools) memoryTools?.onTurnStart()
         // 上一轮的墓碑（若未被 UI 取走）属于旧 turn，不能混进本轮的撤销项
         memoryManager?.clearRecentToolDeletions()
 

@@ -20,22 +20,48 @@ interface Tool {
 }
 
 /**
+ * 带 turn 生命周期的工具（有暂存状态的工具实现它；无状态工具如 web 搜索无需实现）。
+ *
+ * - [onTurnStart]：新 turn 开始前，清掉上一轮残留；
+ * - [onTurnSuccess]：整个 turn 成功（历史已落库）后调用，提交暂存；
+ * - [onTurnAbort]：超时 / 取消 / 失败时调用，丢弃暂存。
+ */
+interface TurnScoped {
+    fun onTurnStart()
+    suspend fun onTurnSuccess()
+    fun onTurnAbort()
+}
+
+/**
  * 工具注册表：按注册顺序一次性生成 tools 数组，之后只读。
  *
  * 顺序即 [schemas] 的顺序，必须保持稳定；未知工具名返回 `unknown_tool` 信封。
+ * 同时把 turn 生命周期钩子扇出给所有 [TurnScoped] 工具与额外注册的 [turnHooks]。
  */
-class ToolRegistry(tools: List<Tool>) {
+class ToolRegistry(
+    tools: List<Tool>,
+    turnHooks: List<TurnScoped> = emptyList()
+) {
     private val byName: Map<String, Tool> = LinkedHashMap<String, Tool>().also { map ->
         tools.forEach { tool ->
             require(map.put(tool.name, tool) == null) { "重复的工具名：${tool.name}" }
         }
     }
 
+    private val scoped: List<TurnScoped> =
+        (tools.filterIsInstance<TurnScoped>() + turnHooks).distinct()
+
     /** 下发给模型的 tools 数组（构造时生成一次）。 */
     val schemas: JsonArray = buildJsonArray { tools.forEach { add(it.schema) } }
 
     suspend fun execute(name: String, argumentsJson: String): String =
         byName[name]?.execute(argumentsJson) ?: ToolEnvelope.error("unknown_tool", "未知工具：$name")
+
+    fun turnStart() = scoped.forEach { it.onTurnStart() }
+
+    suspend fun turnSuccess() = scoped.forEach { it.onTurnSuccess() }
+
+    fun turnAbort() = scoped.forEach { it.onTurnAbort() }
 }
 
 /** 工具结果信封：ok / error / message，各工具与循环共用。 */

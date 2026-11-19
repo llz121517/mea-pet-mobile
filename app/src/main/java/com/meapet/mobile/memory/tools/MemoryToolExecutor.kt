@@ -67,8 +67,25 @@ class MemoryToolExecutor(
     private val search: MemorySearch,
     /** 读写记忆的存储；仅做只读检索时可为 null（此时写类工具返回 unsupported）。 */
     private val store: MemoryStore? = null,
-    private val clock: () -> Long = System::currentTimeMillis
-) {
+    private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * turn 成功后提交暂存变更的回调（生产环境由容器传入 `memoryManager::applyToolChanges`）。
+     * 为 null 时 [onTurnSuccess] 只清空暂存，不提交。
+     */
+    private val commit: (suspend (PendingMemoryChanges) -> Unit)? = null
+) : com.meapet.mobile.chat.tools.TurnScoped {
+
+    // ── turn 生命周期（TurnScoped）──────────────────────
+
+    override fun onTurnStart() = discardPending()
+
+    override suspend fun onTurnSuccess() {
+        val pending = drainPending()
+        if (!pending.isEmpty) commit?.invoke(pending)
+    }
+
+    override fun onTurnAbort() = discardPending()
+
     /**
      * 把本执行器的 4 个记忆工具暴露为 [com.meapet.mobile.chat.tools.Tool]，供 [com.meapet.mobile.chat.tools.ToolRegistry] 注册。
      *

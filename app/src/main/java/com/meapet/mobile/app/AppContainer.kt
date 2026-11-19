@@ -173,7 +173,8 @@ class AppContainer(
         } else {
             MemoryToolExecutor(
                 search = BigramMemorySearcher(memoryRepository),
-                store = memoryRepository
+                store = memoryRepository,
+                commit = { changes -> memoryManager.applyToolChanges(changes) }
             )
         }
     }
