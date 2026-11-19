@@ -42,6 +42,13 @@
 > TTS 生成管线的代码与完整说明在 [`tools/tts/`](../tools/tts/README.md)（`README.md` + `build_model.md`），
 > `model.onnx` 不在管线内（需外部 checkpoint），见 [`tools/tts/build_model.md`](../tools/tts/build_model.md)。
 
+### 2.3 项目规则与决策记录
+
+| 文件 | 内容 | 更新时机 |
+|---|---|---|
+| [`rules.md`](rules.md) | 项目规则（通用逻辑优先） | 新增 / 修改规则时 |
+| [`adr/0001-tool-round-limit-interception.md`](adr/0001-tool-round-limit-interception.md) | ADR：工具轮次用尽时在工具执行端拦截，不发送 `tool_choice="none"` | 新决策按编号追加 |
+
 ## 3. 历史归档（只读，不再维护）
 
 | 文件 | 内容 |

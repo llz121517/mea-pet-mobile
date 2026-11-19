@@ -8,7 +8,7 @@
 |---|---|---|
 | M0 请求/响应层探针 | ✅ | tools/tool_choice/tool_calls/reasoning_content 均已按 M0 结论实现 |
 | 请求/响应层（tools、toolMessage、assistant 原样透传） | ✅ | `ApiRequest` / `ApiResponse.chatCompletionMessage` |
-| 工具循环 `ChatToolLoop` | ✅ | 轮数上限取 **12**（为后续 web 搜索预留，原计划 4），单轮 8 调用，末轮 `tool_choice=none`、tools 字段不变 |
+| 工具循环 `ChatToolLoop` | ✅ | 轮数上限 12（工具轮次，为后续 web 搜索预留，原计划 4），单轮 8 调用；全程 `tool_choice=auto`，轮次用尽后由工具执行端拦截调用并回填提示（ADR 0001） |
 | 4 个工具 + 统一信封 + 护栏 | ✅ | 暂存提交、永久类删除护栏、写入上限；`LONG_TERM` 不可直接创建 |
 | search_memory 检索 | ✅ | 内存打分（权重为实测修订值，见 §11.1） |
 | 工具消息入历史 + `turn_id` | ✅ | 一 turn 一事务（`appendAll`）；失败整轮不写；被取消按已完成部分提交 |
@@ -36,9 +36,9 @@
 
 ## 1. M0 探针结论（DeepSeek，真实请求，已核实）
 
-- 标准 `tools` / `tool_calls` 可用，`tool_choice: auto` 与 `none` 可用，且模型会在一轮里并行返回多个 tool_calls，执行器必须支持多调用并按 tool_call_id 一一回填。
+- 标准 `tools` / `tool_calls` 可用，`tool_choice: auto` 与 `none` 均可用，且模型会在一轮里并行返回多个 tool_calls，执行器必须支持多调用并按 tool_call_id 一一回填。
 - `reasoning_content` 回传非必需（去掉后第二轮也成功），但仍建议原样透传 assistant message，兼容思考模式的端点。
-- 以 `tool_choice: none` 收尾可用；保持 tools 字段不变以稳定前缀。
+- 探测时 `tool_choice: none` 可收尾；**实施不采用**：强制禁止调用会让模型把工具调用标记当正文吐出（见 ADR 0001），改为轮次用尽后在工具执行端拦截。
 - usage 含 `prompt_cache_hit_tokens`，可用来验证工具化后的缓存收益；改了 tools 字段的位置或内容会使缓存失效一次。
 - 仍未核实：`required` / 指定函数名与思考模式的冲突（本方案不使用）；content 与写类 tool_calls 同时出现的频率。
 
@@ -142,9 +142,11 @@ internal const val TAIL_LABEL: String = "[系统提示]"
 
 ### 9.1b tail 的内容与结构（已确认）
 
-- 目前 tail 只放一项：**当前时间**（沿用 `TimeContext.describe()`，格式 `【当前时间】yyyy-MM-dd HH:mm EEEE(zone,UTC±hh:mm)`，精度到分钟）。相关回忆改由 `search_memory` 检索，收尾提醒删除，因此不再进入 tail。
+- 目前 tail 放两项：**当前时间**（沿用 `TimeContext.describe()`，格式 `【当前时间】yyyy-MM-dd HH:mm EEEE(zone,UTC±hh:mm)`，精度到分钟）与**工具调用轮次计数**（仅工具模式，格式 `工具调用轮次 已用/上限`，如 `3/12`，接近上限时附一句提示）。相关回忆改由 `search_memory` 检索，收尾提醒删除，因此不再进入 tail。
 - tail 为**有序字符串片段列表**，按固定顺序拼接后并入最后一条 user，前缀为 `TAIL_LABEL`。新增动态内容只需追加片段，不改 `ConversationManager`。
 - 时间精度到分钟：tail 不进历史，每轮该条 user 本就重新生成，对缓存没有额外影响。
+- **工具循环内 tail 每轮重建**：循环持有「最后一条 user 的原始正文」，每轮按当前已执行轮次重新拼 tail 覆盖其发出副本（不进历史），模型才能看到计数随轮次增长。
+- 上限常量在 `ChatToolLoop` 文件中（`MAX_TOOL_ROUNDS`），tail 计数与执行端拦截共用，避免两处各写一个数字。
 
 ### 9.2 策略
 
@@ -212,7 +214,7 @@ MERGE_USER 与 SEPARATE_USER 的消息构造、严格交替校验、tail 不进�
 ### 11.2 多轮循环
 
 - 流程：请求（带 tools）→ 有 tool_calls 则全部执行并按 `tool_call_id` 一一回填 → 追加 assistant 原始 message 与各 tool 消息 → 再请求，直到无 tool_calls。
-- `maxToolRounds = 12`（原计划 4，实测多步记忆操作常 5~6 轮，且要为后续 web 搜索工具预留），最后一轮 `tool_choice:"none"` 且 tools 字段不变；单轮最多 8 个调用；写类按序执行并合并为一次 `applyChanges`；整个 turn 设 `withTimeout`（`AppConfig.turnTimeoutMs`）。
+- `maxToolRounds = 12`（工具轮次；原计划 4，实测多步记忆操作常 5~6 轮，且要为后续 web 搜索工具预留）；**全程 `tool_choice:auto`，不设强制收尾轮**——轮次用尽后由工具执行端拦截后续调用、回填「已达上限」tool 结果让模型自行收尾（见 ADR 0001）；单轮最多 8 个调用；写类按序执行并合并为一次 `applyChanges`；整个 turn 设 `withTimeout`（`AppConfig.turnTimeoutMs`）。
 - assistant 消息原样透传（含 `reasoning_content`）。
 - 本轮 content 不当作最终回复；content 非空且只含写类调用时直接结束的「终结型写入」仅为可选优化，需先统计频率。
 
