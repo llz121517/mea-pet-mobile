@@ -90,7 +90,7 @@ class ChatToolLoopTest {
         val engine = FakeHttpClientEngine { responses.removeFirst() }
         val loop = ChatToolLoop(
             clientProvider = { OpenAiCompatibleClient("k", "https://x/v1", engine) },
-            executor = MemoryToolExecutor(fakeSearch)
+            registry = ToolRegistry(MemoryToolExecutor(fakeSearch).asTools())
         )
 
         val result = loop.run("m", listOf(buildJsonObject { put("role", "user"); put("content", "hi") }), 0.7, 512, turnId = "t1")
@@ -133,7 +133,7 @@ class ChatToolLoopTest {
         val engine = FakeHttpClientEngine { responses.removeFirst() }
         val loop = ChatToolLoop(
             clientProvider = { OpenAiCompatibleClient("k", "https://x/v1", engine) },
-            executor = MemoryToolExecutor(fakeSearch),
+            registry = ToolRegistry(MemoryToolExecutor(fakeSearch).asTools()),
             maxRounds = 2
         )
 
@@ -167,7 +167,7 @@ class ChatToolLoopTest {
         val engine = FakeHttpClientEngine { toolCallResponse(toolCall("call_x")) }
         val loop = ChatToolLoop(
             clientProvider = { OpenAiCompatibleClient("k", "https://x/v1", engine) },
-            executor = MemoryToolExecutor(fakeSearch),
+            registry = ToolRegistry(MemoryToolExecutor(fakeSearch).asTools()),
             maxRounds = 1
         )
 
@@ -188,7 +188,7 @@ class ChatToolLoopTest {
         val engine = FakeHttpClientEngine { responses.removeFirst() }
         val loop = ChatToolLoop(
             clientProvider = { OpenAiCompatibleClient("k", "https://x/v1", engine) },
-            executor = MemoryToolExecutor(fakeSearch),
+            registry = ToolRegistry(MemoryToolExecutor(fakeSearch).asTools()),
             maxCallsPerRound = 8
         )
 
@@ -216,7 +216,7 @@ class ChatToolLoopTest {
         val engine = FakeHttpClientEngine { responses.removeFirst() }
         val loop = ChatToolLoop(
             clientProvider = { OpenAiCompatibleClient("k", "https://x/v1", engine) },
-            executor = MemoryToolExecutor(fakeSearch)
+            registry = ToolRegistry(MemoryToolExecutor(fakeSearch).asTools())
         )
         val visible = mutableListOf<ChatMessage>()
         val transcript = mutableListOf<ChatMessage>()
@@ -268,7 +268,7 @@ class ChatToolLoopTest {
         }
         val loop = ChatToolLoop(
             clientProvider = { OpenAiCompatibleClient("k", "https://x/v1", engine) },
-            executor = MemoryToolExecutor(fakeSearch)
+            registry = ToolRegistry(MemoryToolExecutor(fakeSearch).asTools())
         )
 
         assertFailsWith<IllegalStateException> {

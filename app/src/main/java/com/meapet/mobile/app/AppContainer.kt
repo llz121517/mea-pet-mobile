@@ -183,7 +183,7 @@ class AppContainer(
         val executor = memoryToolExecutor ?: return@lazy null
         ChatToolLoop(
             clientProvider = { apiClient },
-            executor = executor
+            registry = com.meapet.mobile.chat.tools.ToolRegistry(executor.asTools())
         )
     }
 

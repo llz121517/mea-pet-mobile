@@ -260,7 +260,7 @@ class ChatServiceFailureRollbackTest {
         config = com.meapet.mobile.config.AppConfig.DEFAULT,
         toolLoop = com.meapet.mobile.chat.tools.ChatToolLoop(
             clientProvider = { OpenAiCompatibleClient("sk-test", "https://api.example.com/v1", engine) },
-            executor = executor
+            registry = com.meapet.mobile.chat.tools.ToolRegistry(executor.asTools())
         ),
         memoryTools = executor
     )

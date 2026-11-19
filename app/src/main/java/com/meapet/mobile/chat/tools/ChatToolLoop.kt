@@ -6,11 +6,7 @@ import com.meapet.mobile.chat.ChatRole
 import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.client.model.ApiRequest
 import com.meapet.mobile.client.model.ApiResponse
-import com.meapet.mobile.memory.tools.MemoryToolExecutor
-import com.meapet.mobile.memory.tools.MemoryToolSchemas
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 
 /**
  * 一次工具循环的结果。
@@ -99,7 +95,7 @@ private const val TAG = "ChatToolLoop"
 
 class ChatToolLoop(
     private val clientProvider: () -> OpenAiCompatibleClient,
-    private val executor: MemoryToolExecutor,
+    private val registry: ToolRegistry,
     private val maxRounds: Int = MAX_TOOL_ROUNDS,
     private val maxCallsPerRound: Int = MAX_TOOL_CALLS_PER_ROUND
 ) {
@@ -147,7 +143,7 @@ class ChatToolLoop(
                 temperature = temperature,
                 maxTokens = maxTokens,
                 stream = false,
-                tools = MemoryToolSchemas.ALL,
+                tools = registry.schemas,
                 toolChoice = "auto"
             )
             val rawResponse = clientProvider().chatCompletion(requestBody)
@@ -201,7 +197,7 @@ class ChatToolLoop(
                     else -> {
                         executed++
                         totalCalls++
-                        executor.execute(call.name, call.arguments)
+                        registry.execute(call.name, call.arguments)
                     }
                 }
                 // 轮次计数拼进**发给模型的 tool 返回内容**：工具循环里最后一条消息是 tool，
@@ -231,11 +227,8 @@ class ChatToolLoop(
         }
     }
 
-    private fun tooManyCallsEnvelope(): String = buildJsonObject {
-        put("ok", false)
-        put("error", "too_many_calls")
-        put("message", "单轮工具调用超过上限，未执行；请减少调用数量后重试")
-    }.toString()
+    private fun tooManyCallsEnvelope(): String =
+        ToolEnvelope.error("too_many_calls", "单轮工具调用超过上限，未执行；请减少调用数量后重试")
 
     /**
      * 把工具轮次计数拼到 tool 返回内容末尾（格式 `x/上限`，如 `3/12`）。
@@ -261,13 +254,9 @@ class ChatToolLoop(
      * 让它别再调用，直接基于已有信息回答——这是模型自行收尾的关键信号。
      * 信封格式与执行器其它结果一致（ok/error/message），模型无需理解新协议。
      */
-    private fun toolRoundLimitEnvelope(): String = buildJsonObject {
-        put("ok", false)
-        put("error", "tool_round_limit")
-        put(
-            "message",
-            "工具调用轮次已达上限，本次调用未执行；请不要再调用任何工具，" +
-                "直接基于上文已有信息用文字回答用户"
-        )
-    }.toString()
+    private fun toolRoundLimitEnvelope(): String = ToolEnvelope.error(
+        "tool_round_limit",
+        "工具调用轮次已达上限，本次调用未执行；请不要再调用任何工具，" +
+            "直接基于上文已有信息用文字回答用户"
+    )
 }

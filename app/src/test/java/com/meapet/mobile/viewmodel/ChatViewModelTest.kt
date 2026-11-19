@@ -458,7 +458,7 @@ class ChatViewModelTest {
                     clientProvider = {
                         com.meapet.mobile.client.OpenAiCompatibleClient("k", "https://x/v1", engine)
                     },
-                    executor = executor
+                    registry = com.meapet.mobile.chat.tools.ToolRegistry(executor.asTools())
                 ),
                 memoryTools = executor
             )

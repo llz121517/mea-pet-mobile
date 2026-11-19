@@ -69,6 +69,25 @@ class MemoryToolExecutor(
     private val store: MemoryStore? = null,
     private val clock: () -> Long = System::currentTimeMillis
 ) {
+    /**
+     * 把本执行器的 4 个记忆工具暴露为 [com.meapet.mobile.chat.tools.Tool]，供 [com.meapet.mobile.chat.tools.ToolRegistry] 注册。
+     *
+     * 顺序固定为 search → create → update → delete，与 [MemoryToolSchemas.ALL] 逐字节一致
+     * （tools 数组属于请求前缀，顺序变化会使缓存失效）。四个工具共享同一份 turn 暂存状态，
+     * 因此仍由本类统一执行，只是分别包装成 Tool。
+     */
+    fun asTools(): List<com.meapet.mobile.chat.tools.Tool> =
+        MemoryToolSchemas.ALL.map { element ->
+            val schema = element.jsonObject
+            val toolName = schema["function"]!!.jsonObject["name"]!!.jsonPrimitive.content
+            object : com.meapet.mobile.chat.tools.Tool {
+                override val name: String = toolName
+                override val schema: JsonObject = schema
+                override suspend fun execute(argumentsJson: String): String =
+                    this@MemoryToolExecutor.execute(toolName, argumentsJson)
+            }
+        }
+
     companion object {
         private const val TAG = "MemoryToolExecutor"
         private const val MAX_RESULT_CHARS = 1500

@@ -76,7 +76,7 @@ class ChatServiceToolPersonaTest {
             maxTokensCapProvider = { maxTokensCap },
             toolLoop = ChatToolLoop(clientProvider = {
                 OpenAiCompatibleClient("sk-test", "https://api.example.com/v1", engine)
-            }, executor = executor),
+            }, registry = com.meapet.mobile.chat.tools.ToolRegistry(executor.asTools())),
             memoryTools = executor
         )
     }

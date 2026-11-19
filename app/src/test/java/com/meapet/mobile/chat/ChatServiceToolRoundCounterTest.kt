@@ -98,7 +98,7 @@ class ChatServiceToolRoundCounterTest {
             override suspend fun search(query: MemoryQuery): List<MemoryItem> = emptyList()
         }
         val executor = MemoryToolExecutor(search)
-        val loop = ChatToolLoop(clientProvider = { client(engine) }, executor = executor)
+        val loop = ChatToolLoop(clientProvider = { client(engine) }, registry = com.meapet.mobile.chat.tools.ToolRegistry(executor.asTools()))
         return ChatService(
             clientProvider = { client(engine) },
             conversationManager = cm,
