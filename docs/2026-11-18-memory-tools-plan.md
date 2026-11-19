@@ -142,11 +142,11 @@ internal const val TAIL_LABEL: String = "[系统提示]"
 
 ### 9.1b tail 的内容与结构（已确认）
 
-- 目前 tail 放两项：**当前时间**（沿用 `TimeContext.describe()`，格式 `【当前时间】yyyy-MM-dd HH:mm EEEE(zone,UTC±hh:mm)`，精度到分钟）与**工具调用轮次计数**（仅工具模式，格式 `工具调用轮次 已用/上限`，如 `3/12`，接近上限时附一句提示）。相关回忆改由 `search_memory` 检索，收尾提醒删除，因此不再进入 tail。
+- tail 只放一项：**当前时间**（沿用 `TimeContext.describe()`，格式 `【当前时间】yyyy-MM-dd HH:mm EEEE(zone,UTC±hh:mm)`，精度到分钟）。相关回忆改由 `search_memory` 检索，收尾提醒删除，因此不再进入 tail。
 - tail 为**有序字符串片段列表**，按固定顺序拼接后并入最后一条 user，前缀为 `TAIL_LABEL`。新增动态内容只需追加片段，不改 `ConversationManager`。
 - 时间精度到分钟：tail 不进历史，每轮该条 user 本就重新生成，对缓存没有额外影响。
-- **工具循环内 tail 每轮重建**：循环持有「最后一条 user 的原始正文」，每轮按当前已执行轮次重新拼 tail 覆盖其发出副本（不进历史），模型才能看到计数随轮次增长。
-- 上限常量在 `ChatToolLoop` 文件中（`MAX_TOOL_ROUNDS`），tail 计数与执行端拦截共用，避免两处各写一个数字。
+- **工具轮次计数不放 tail**：工具循环里最后一条消息是 tool，没有 user 可以挂 tail；计数改为拼在**发给模型的 tool 返回内容末尾**（`【工具调用轮次】x/上限`，如 `3/12`），只进请求副本、不入历史（与 tail 同属每轮动态内容）。
+- 上限常量在 `ChatToolLoop` 文件中（`MAX_TOOL_ROUNDS`），工具返回消息里的计数与执行端拦截共用，避免两处各写一个数字。
 
 ### 9.2 策略
 

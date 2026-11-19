@@ -500,9 +500,7 @@ class ChatService(
         var local = buildLocalRequest(
             includeToolHistory = wantsTools,
             stable = stableContext,
-            // 工具模式下 tail 由循环每轮重建（当前时间 + 工具轮次计数），初始请求先不带；
-            // 非工具模式仍按原样把 tail 并入最后一条 user
-            tail = if (loop != null) emptyList() else tailFragments,
+            tail = tailFragments,
             echo = memoryOpsEchoTurns
         )
         Log.d(
@@ -526,12 +524,7 @@ class ChatService(
                     maxTokens = maxTokens,
                     turnId = turnId,
                     onVisibleFragment = onVisibleFragment,
-                    onTranscript = { record -> transcript += record },
-                    // 每轮把「时间 + 工具轮次计数」并入最后一条 user 的发出版本：
-                    // 模型能看到 x/上限、自己决定何时收尾（与执行端拦截互补）
-                    roundTailProvider = { used, max ->
-                        composeTail(listOf(TimeContext.describe(), toolRoundCounter(used, max)))
-                    }
+                    onTranscript = { record -> transcript += record }
                 )
                 // 用第一轮的真实 prompt_tokens 校准本地估算；cache hit 只进观察指标
                 loopResult.firstPromptTokens?.let { estimator.calibrate(local.rawEstimate, it) }
@@ -600,23 +593,6 @@ class ChatService(
             promptTokens = usagePromptTokens,
             cacheHitTokens = usageCacheHitTokens
         )
-    }
-
-    /**
-     * 工具轮次计数器（tail 片段，格式 `已用/上限`，如 `3/12`）。
-     *
-     * 放进 tail 让模型自己看到消耗了多少轮、还剩多少，接近上限时主动收尾；
-     * 与执行端的硬拦截（ADR 0001）互补：一个靠提示，一个靠拒绝执行。
-     * 上限由 [ChatToolLoop] 传入（其文件级常量），这里不写死数字。
-     */
-    private fun toolRoundCounter(used: Int, max: Int): String {
-        val remaining = (max - used).coerceAtLeast(0)
-        val hint = when {
-            remaining == 0 -> "（已达上限，后续工具调用会被拒绝，请直接回答）"
-            remaining <= 2 -> "（接近上限，请尽快用文字回答）"
-            else -> ""
-        }
-        return "工具调用轮次 $used/$max$hint"
     }
 
     /**

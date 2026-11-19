@@ -10,8 +10,6 @@ import com.meapet.mobile.memory.tools.MemoryToolExecutor
 import com.meapet.mobile.memory.tools.MemoryToolSchemas
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
@@ -72,7 +70,7 @@ data class ToolLoopResult(
 /**
  * 工具调用轮次上限（**文件内常量**）。
  *
- * 抽成文件级常量而不放类里：同一轮请求的 tail 计数器（ChatService 拼装）与执行端的拦截
+ * 抽成文件级常量而不放类里：工具返回消息里的轮次计数（本类拼接）与执行端的拦截
  * 必须用同一个数，两处各写一个字面量迟早漂移。
  *
  * 取 12 轮（较宽松）：
@@ -109,15 +107,12 @@ class ChatToolLoop(
     /**
      * 执行一次完整的工具循环。
      *
-     * @param messages 初始消息（首条 system + 历史 + 最后一条 user；不含 tail，
-     *   工具模式下 tail 由 [roundTailProvider] 每轮重建）
+     * @param messages 初始消息（首条 system + 历史 + 并入 tail 的最后一条 user）
      * @param turnId 本轮 turn 的 id，写进所有交给 [onTranscript] 的消息
      * @param onVisibleFragment 某一轮**同时给了文本片段和工具调用**时，把该 assistant 记录回调出去。
      *   调用方据此立即显示一条助手消息（用户看到「连发多条」），而不是等整个循环结束。
      * @param onTranscript 需要进历史的每条记录（assistant 片段 + tool 结果），按发生顺序回调。
-     * @param roundTailProvider 每轮生成 tail 文本（调用方负责拼标签/片段）；参数是
-     *   「已执行工具轮次、上限」。tail 只并入**最后一条 user 的发出副本**，不进历史。
-     *   用于把工具轮次计数器告诉模型（`x/上限`），让它接近上限时主动收尾。
+     * @param onTranscript 需要进历史的每条记录（assistant 片段 + tool 结果），按发生顺序回调。
      * @throws IllegalStateException 响应无法解析 / 达到最大轮数仍只给工具调用 / 最终无文本
      */
     suspend fun run(
@@ -127,8 +122,7 @@ class ChatToolLoop(
         maxTokens: Int,
         turnId: String,
         onVisibleFragment: (ChatMessage) -> Unit = {},
-        onTranscript: (ChatMessage) -> Unit = {},
-        roundTailProvider: ((used: Int, max: Int) -> String)? = null
+        onTranscript: (ChatMessage) -> Unit = {}
     ): ToolLoopResult {
         val conversation = messages.toMutableList()
         var totalCalls = 0
@@ -136,9 +130,6 @@ class ChatToolLoop(
         var round = 0
         var firstPromptTokens: Int? = null
         var firstPromptCacheHit: Int? = null
-        // tail 只改「最后一条 user」的发出副本：记住它的下标与原始正文，每轮用新计数器重建
-        var tailUserIndex = -1
-        var tailUserBase: String? = null
 
         // 总请求数 = 工具轮次 + 少量「拦截后收尾」轮。拦截轮只请求、不执行，
         // 正常情况下模型收到「已达上限」的 tool 结果就会给正文，所以只需 1~2 轮余量；
@@ -148,26 +139,6 @@ class ChatToolLoop(
                 throw IllegalStateException("工具调用轮次已达上限，模型仍未给出最终回复")
             }
             round++
-            if (roundTailProvider != null) {
-                if (tailUserIndex < 0) {
-                    tailUserIndex = conversation.indexOfLast {
-                        it["role"]?.jsonPrimitive?.contentOrNull == "user"
-                    }
-                    tailUserBase = conversation.getOrNull(tailUserIndex)
-                        ?.get("content")?.jsonPrimitive?.contentOrNull
-                }
-                val index = tailUserIndex
-                val base = tailUserBase
-                if (index >= 0 && base != null) {
-                    val tail = roundTailProvider(toolRoundsUsed, maxRounds)
-                    if (tail.isNotBlank()) {
-                        conversation[index] = buildJsonObject {
-                            put("role", "user")
-                            put("content", "$base\n\n$tail")
-                        }
-                    }
-                }
-            }
             // 每一轮都声明 tools + auto：绝不发 tool_choice="none"（见类注释：
             // 强制禁止调用会逼模型把工具调用当文本吐给用户）
             val requestBody = ApiRequest.chatCompletion(
@@ -221,6 +192,8 @@ class ChatToolLoop(
             if (fragment.isNotBlank()) onVisibleFragment(assistantRecord)
 
             var executed = 0
+            // 本轮的轮次号：拦截轮固定显示上限值（“已达上限”）
+            val roundNo = if (intercept) maxRounds else toolRoundsUsed + 1
             for (call in parsed.toolCalls) {
                 val content = when {
                     intercept -> toolRoundLimitEnvelope()
@@ -231,7 +204,10 @@ class ChatToolLoop(
                         executor.execute(call.name, call.arguments)
                     }
                 }
-                conversation += ApiRequest.toolMessage(call.id, content)
+                // 轮次计数拼进**发给模型的 tool 返回内容**：工具循环里最后一条消息是 tool，
+                // 没有 user 可以挂 tail，模型只有从这里才能看到「已用 x/上限」。
+                // 历史（transcript）保留原始结果，计数只属于本次请求，和 tail 一样不入历史。
+                conversation += ApiRequest.toolMessage(call.id, withRoundCounter(content, roundNo))
                 onTranscript(
                     ChatMessage(
                         role = ChatRole.tool,
@@ -260,6 +236,23 @@ class ChatToolLoop(
         put("error", "too_many_calls")
         put("message", "单轮工具调用超过上限，未执行；请减少调用数量后重试")
     }.toString()
+
+    /**
+     * 把工具轮次计数拼到 tool 返回内容末尾（格式 `x/上限`，如 `3/12`）。
+     *
+     * 只用于**发给模型的请求副本**：工具循环里最后一条消息是 tool，没有 user 可以挂 tail，
+     * 模型只有从工具结果里才能看到「已用几轮 / 还有几轮」。历史（transcript）保存原始结果，
+     * 计数和 tail 一样属于每轮动态内容、不写入历史。
+     */
+    private fun withRoundCounter(content: String, roundNo: Int): String {
+        val remaining = (maxRounds - roundNo).coerceAtLeast(0)
+        val hint = when {
+            remaining == 0 -> "（已达上限，请直接回答）"
+            remaining <= 2 -> "（接近上限，请尽快用文字回答）"
+            else -> ""
+        }
+        return "$content\n\n【工具调用轮次】$roundNo/$maxRounds$hint"
+    }
 
     /**
      * 工具轮次用尽后的拦截结果。
