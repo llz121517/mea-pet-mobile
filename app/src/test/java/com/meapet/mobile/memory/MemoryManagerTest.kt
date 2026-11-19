@@ -236,4 +236,53 @@ class MemoryManagerTest {
         // 空快照没有可还原的内容，不该多写一次盘
         verifyBlocking(repository, never()) { saveAll(any()) }
     }
+
+    // ── 工具删除的墓碑快照 ────────────────────────────
+
+    @Test
+    fun toolDeletionTombstonesAreKeptForUndo() = runTest {
+        val repository = mock<MemoryStore>()
+        val mgr = MemoryManager(
+            service = mock(),
+            repository = repository,
+            settingsManager = FakeSettings(interval = 10).build(),
+            config = AppConfig.DEFAULT
+        )
+        val deleted = MemoryItem(id = "m1", content = "旧事实", type = MemoryType.FACTUAL)
+
+        mgr.applyToolChanges(
+            com.meapet.mobile.memory.tools.PendingMemoryChanges(
+                deletes = listOf("m1"),
+                deletedItems = listOf(deleted)
+            )
+        )
+
+        verifyBlocking(repository) { applyChanges(emptyList(), listOf("m1")) }
+        assertEquals(listOf(deleted), mgr.takeRecentToolDeletions(), "墓碑应完整保留删除前条目")
+        assertTrue(mgr.takeRecentToolDeletions().isEmpty(), "取出后清空，不会重复撤销")
+
+        // 撤销路径：快照原样写回
+        mgr.restoreAll(listOf(deleted))
+        verifyBlocking(repository) { saveAll(listOf(deleted)) }
+    }
+
+    @Test
+    fun clearingTombstonesDropsPreviousTurnDeletions() = runTest {
+        val mgr = MemoryManager(
+            service = mock(),
+            repository = mock<MemoryStore>(),
+            settingsManager = FakeSettings(interval = 10).build(),
+            config = AppConfig.DEFAULT
+        )
+        mgr.applyToolChanges(
+            com.meapet.mobile.memory.tools.PendingMemoryChanges(
+                deletes = listOf("m1"),
+                deletedItems = listOf(MemoryItem(id = "m1", content = "旧事实", type = MemoryType.FACTUAL))
+            )
+        )
+
+        mgr.clearRecentToolDeletions()
+
+        assertTrue(mgr.takeRecentToolDeletions().isEmpty(), "旧 turn 的删除不能混进新一轮的撤销项")
+    }
 }

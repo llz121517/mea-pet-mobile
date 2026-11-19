@@ -34,6 +34,9 @@ class ContextCompactor(
         /** 摘要请求的 system 提示：只要摘要正文，不要任何包装。 */
         private const val SYSTEM_PROMPT: String =
             "你是一个对话历史摘要助手。你只输出整理后的摘要正文，不加任何解释、前缀或标记。"
+
+        /** 折进摘要时单条工具结果的截断长度（工具结果是机器 JSON，不需要全文）。 */
+        private const val SUMMARY_TOOL_CONTENT_CHARS = 200
     }
 
     /**
@@ -96,9 +99,16 @@ class ContextCompactor(
                 ChatRole.user -> "用户"
                 ChatRole.assistant -> "助手"
                 ChatRole.system -> "系统"
-                else -> "其它"
+                ChatRole.tool -> "工具结果"
             }
-            appendLine("$role：${msg.content}")
+            // 工具结果是机器生成的大段 JSON（单条可达上千字符），原样塞进摘要请求既贵又
+            // 淹没人话：按概览所需截断，摘要只需要「查了什么、大致得到什么」
+            val text = if (msg.role == ChatRole.tool && msg.content.length > SUMMARY_TOOL_CONTENT_CHARS) {
+                msg.content.take(SUMMARY_TOOL_CONTENT_CHARS) + "…"
+            } else {
+                msg.content
+            }
+            appendLine("$role：$text")
         }
     }
 }
@@ -110,17 +120,30 @@ class ContextCompactor(
  * - 每轮从一条 user 消息开始，到下一条 user 之前结束；
  * - 折叠条数必须落在某一轮结束处（不会把一轮拆成两半）；
  * - 剩余至少 [minKeepTurns] 轮；消息不足以折叠时返回 0。
+ * - 给出 [targetTokens] 与 [estimator] 时，在保留轮数下限的范围内**尽量少折**：
+ *   从最旧的轮开始逐轮增加折叠量，折叠到「剩余估算 ≤ 目标」为止（[CompactionConfig.TARGET_RATIO]
+ *   的目标值，非硬性保证；折到上限仍不达标就按上限折）。少折可以保留更多原文细节，
+ *   摘要也不会被一次性灌入过多内容。
  *
  * @return 可折叠的消息条数（0 表示无需/无法折叠）
  */
 fun foldCountFor(
     messages: List<ChatMessage>,
-    minKeepTurns: Int = CompactionConfig.MIN_KEEP_TURNS
+    minKeepTurns: Int = CompactionConfig.MIN_KEEP_TURNS,
+    targetTokens: Int? = null,
+    estimator: TokenEstimator? = null
 ): Int {
     val turns = turnBoundaries(messages)
     if (turns.size <= minKeepTurns) return 0
     // 折叠到倒数第 minKeepTurns 轮之前
-    return turns[turns.size - minKeepTurns]
+    val maxFoldTurnIndex = turns.size - minKeepTurns
+    if (targetTokens != null && estimator != null) {
+        for (index in 1..maxFoldTurnIndex) {
+            val remaining = messages.subList(turns[index], messages.size)
+            if (estimator.estimate(remaining) <= targetTokens) return turns[index]
+        }
+    }
+    return turns[maxFoldTurnIndex]
 }
 
 /**

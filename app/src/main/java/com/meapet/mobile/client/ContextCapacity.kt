@@ -37,6 +37,14 @@ internal const val LOOPBACK_FALLBACK_CAPACITY_TOKENS: Int = 32768
  */
 internal const val CAPACITY_FACTOR: Double = 0.85
 
+/**
+ * `max_tokens`（本轮输出上限）最多占容量的比例。
+ *
+ * 上下文窗口是输入输出合计：输出上限过大时输入预算会被吃穿，请求可能被服务端直接拒绝。
+ * 约 25% 是计划里的起始值，随探测/手动容量一起生效。
+ */
+internal const val MAX_TOKENS_CAPACITY_RATIO: Double = 0.25
+
 /** 合理容量字段的取值范围（过滤掉 max_tokens 之类的小值与哨兵大值）。 */
 private const val MIN_CAPACITY = 1024L
 private const val MAX_CAPACITY = 10_000_000L

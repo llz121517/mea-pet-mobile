@@ -7,6 +7,7 @@ import com.meapet.mobile.client.test.FakeHttpClientEngine
 import com.meapet.mobile.settings.SettingsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -14,6 +15,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.wheneverBlocking
 
 /**
  * 发送失败后的会话历史回滚。
@@ -27,14 +29,15 @@ import org.mockito.kotlin.whenever
  */
 class ChatServiceFailureRollbackTest {
 
-    private fun settings(): SettingsManager = mock<SettingsManager>().also {
-        whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
-        whenever(it.getModel()).thenReturn("gpt-4o-mini")
-        whenever(it.getTemperature()).thenReturn(0.8)
-        whenever(it.getMaxTokens()).thenReturn(1024)
-        // 枚举 mock 默认 null → ChatService 解析模式时 NPE；这些用例只验证单次请求链路
-        whenever(it.getMemoryMode()).thenReturn(com.meapet.mobile.config.MemoryMode.TEXT)
-    }
+    private fun settings(mode: com.meapet.mobile.config.MemoryMode = com.meapet.mobile.config.MemoryMode.TEXT): SettingsManager =
+        mock<SettingsManager>().also {
+            whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
+            whenever(it.getModel()).thenReturn("gpt-4o-mini")
+            whenever(it.getTemperature()).thenReturn(0.8)
+            whenever(it.getMaxTokens()).thenReturn(1024)
+            // 枚举 mock 默认 null → ChatService 解析模式时 NPE；默认走单请求链路
+            whenever(it.getMemoryMode()).thenReturn(mode)
+        }
 
     private fun service(
         cm: ConversationManager,
@@ -218,5 +221,134 @@ class ChatServiceFailureRollbackTest {
             cm.getMessages().isEmpty()
         )
         assertFalse("超时结束后不应仍处于在途状态", svc.isTurnActive)
+    }
+
+    // ── 取消（插队 / 停止）────────────────────────────
+
+    /** 第一轮「正文片段 + 工具调用」，用于验证取消时可见片段保留、未完成工具丢弃。 */
+    private fun toolCallWithFragmentResponse(): HttpResponse {
+        val body = """
+            {"choices":[{"message":{"role":"assistant","content":"先查一下",
+            "tool_calls":[{"id":"call_1","type":"function",
+            "function":{"name":"search_memory","arguments":"{\"query\":\"炸鸡\"}"}}]},
+            "finish_reason":"tool_calls"}]}
+        """.trimIndent()
+        return HttpResponse(200, body.encodeToByteArray(), "application/json")
+    }
+
+    private fun toolCallResponse(name: String, args: String): HttpResponse {
+        val body = """
+            {"choices":[{"message":{"role":"assistant","content":"",
+            "tool_calls":[{"id":"call_1","type":"function",
+            "function":{"name":"$name","arguments":"$args"}}]},
+            "finish_reason":"tool_calls"}]}
+        """.trimIndent()
+        return HttpResponse(200, body.encodeToByteArray(), "application/json")
+    }
+
+    private fun toolService(
+        cm: ConversationManager,
+        engine: FakeHttpClientEngine,
+        executor: com.meapet.mobile.memory.tools.MemoryToolExecutor,
+        memoryManager: com.meapet.mobile.memory.MemoryManager? = null
+    ): ChatService = ChatService(
+        clientProvider = { OpenAiCompatibleClient("sk-test", "https://api.example.com/v1", engine) },
+        conversationManager = cm,
+        memoryManager = memoryManager,
+        settingsManager = settings(com.meapet.mobile.config.MemoryMode.AUTO),
+        postProcessScope = CoroutineScope(Dispatchers.Unconfined),
+        config = com.meapet.mobile.config.AppConfig.DEFAULT,
+        toolLoop = com.meapet.mobile.chat.tools.ChatToolLoop(
+            clientProvider = { OpenAiCompatibleClient("sk-test", "https://api.example.com/v1", engine) },
+            executor = executor
+        ),
+        memoryTools = executor
+    )
+
+    private fun emptyExecutor(store: com.meapet.mobile.memory.MemoryStore? = null) =
+        com.meapet.mobile.memory.tools.MemoryToolExecutor(
+            search = object : com.meapet.mobile.memory.search.MemorySearch {
+                override suspend fun search(
+                    query: com.meapet.mobile.memory.search.MemoryQuery
+                ): List<com.meapet.mobile.memory.MemoryItem> = emptyList()
+            },
+            store = store
+        )
+
+    /**
+     * 取消 = 插队 / 点「停止」：只提交已展示的正文片段，未完成的 tool_calls 与 tool 结果
+     * 整组丢弃（否则历史里留下无法配对的 tool_call_id，下一轮请求直接 400）。
+     */
+    @Test
+    fun `取消在途工具轮只提交已展示的片段`() = kotlinx.coroutines.runBlocking {
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val secondStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val engine = FakeHttpClientEngine {
+            if (calls.getAndIncrement() == 0) {
+                toolCallWithFragmentResponse()
+            } else {
+                secondStarted.complete(Unit)
+                gate.await()
+                okResponse()
+            }
+        }
+        val cm = ConversationManager()
+        val svc = toolService(cm, engine, emptyExecutor())
+
+        val job = launch(Dispatchers.Default) {
+            svc.sendMessage(ChatMessage(role = ChatRole.user, content = "帮我查一下", id = "u1"))
+        }
+        kotlinx.coroutines.withTimeout(5_000) { secondStarted.await() }
+        svc.cancelActiveTurn()
+        kotlinx.coroutines.withTimeout(5_000) { job.join() }
+
+        val history = cm.getMessages()
+        assertEquals(listOf("u1"), history.filter { it.role == ChatRole.user }.map { it.id })
+        assertTrue("未完成的工具结果不能落库: " + history.map { it.role }, history.none { it.isTool })
+        assertEquals(
+            "已展示的正文片段应保留: " + history.map { it.content },
+            1,
+            history.count { it.role == ChatRole.assistant && it.content == "先查一下" }
+        )
+        assertTrue("取消应以协程取消收尾（调用方随后重发）", job.isCancelled)
+    }
+
+    /** 取消时写类工具的暂存必须丢弃，绝不能提交到记忆库。 */
+    @Test
+    fun `取消后写类工具暂存不提交`() = kotlinx.coroutines.runBlocking {
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val secondStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val engine = FakeHttpClientEngine {
+            if (calls.getAndIncrement() == 0) {
+                toolCallResponse("create_memory", "{\\\"content\\\":\\\"主人明天面试\\\",\\\"keywords\\\":[\\\"面试\\\"]}")
+            } else {
+                secondStarted.complete(Unit)
+                gate.await()
+                okResponse()
+            }
+        }
+        val store = mock<com.meapet.mobile.memory.MemoryStore>()
+        wheneverBlocking { store.getAll() }.thenReturn(emptyList())
+        val memoryManager = mock<com.meapet.mobile.memory.MemoryManager>()
+        val executor = emptyExecutor(store)
+        val cm = ConversationManager()
+        val svc = toolService(cm, engine, executor, memoryManager)
+
+        val job = launch(Dispatchers.Default) {
+            svc.sendMessage(ChatMessage(role = ChatRole.user, content = "记住我明天面试", id = "u1"))
+        }
+        kotlinx.coroutines.withTimeout(5_000) { secondStarted.await() }
+        svc.cancelActiveTurn()
+        kotlinx.coroutines.withTimeout(5_000) { job.join() }
+
+        assertTrue("取消后暂存必须清空", executor.drainPending().isEmpty)
+        org.mockito.kotlin.verifyBlocking(store, org.mockito.kotlin.never()) {
+            applyChanges(org.mockito.kotlin.any(), org.mockito.kotlin.any())
+        }
+        org.mockito.kotlin.verifyBlocking(memoryManager, org.mockito.kotlin.never()) {
+            applyToolChanges(org.mockito.kotlin.any())
+        }
     }
 }

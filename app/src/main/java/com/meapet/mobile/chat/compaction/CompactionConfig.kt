@@ -27,7 +27,11 @@ object CompactionConfig {
     const val HARD_TRIGGER_RATIO: Double = 0.90
 
     /**
-     * 压缩后希望回落到有效预算的比例（目标值，非硬性保证）。
+     * 自动压缩后希望回落到有效预算的比例（目标值，非硬性保证）。
+     *
+     * 自动压缩（硬触发兜底）按它决定折叠量：折叠量取「能让剩余估算 ≤ 预算×本比例」
+     * 的最小轮数（保留最近 [MIN_KEEP_TURNS] 轮原文）；折到上限仍不达标就按上限折。
+     * 手动压缩不受它影响——用户点了「整理一下」就按最大可折量折。
      */
     const val TARGET_RATIO: Double = 0.35
 

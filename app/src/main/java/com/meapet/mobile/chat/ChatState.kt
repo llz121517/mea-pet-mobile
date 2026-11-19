@@ -114,4 +114,17 @@ sealed interface ChatUndo : UndoableAction {
     ) : ChatUndo {
         override val message: String get() = "已清除 ${snapshot.size} 条记忆"
     }
+
+    /**
+     * 模型通过 `delete_memory` 工具删除的记忆：快照为删除前的完整条目（墓碑）。
+     *
+     * 删除在 turn 成功时一次性提交，用户可能并不想要这个结果；撤销即按墓碑原样恢复。
+     */
+    data class ToolDeletedMemories(
+        override val id: Long,
+        override val deadlineMs: Long,
+        val snapshot: List<MemoryItem>
+    ) : ChatUndo {
+        override val message: String get() = "已删除 ${snapshot.size} 条记忆"
+    }
 }

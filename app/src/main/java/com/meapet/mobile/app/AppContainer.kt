@@ -200,6 +200,7 @@ class AppContainer(
             compactionStore = compactionStore,
             compactor = contextCompactor,
             budgetProvider = { contextCapacity.budget() },
+            maxTokensCapProvider = { contextCapacity.effectiveMaxTokens() },
             toolLoop = chatToolLoop,
             memoryTools = memoryToolExecutor
         )

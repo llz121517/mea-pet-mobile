@@ -53,6 +53,16 @@ class ContextCapacityProvider(
     /** 当前有效预算（容量 × 0.85 − max_tokens，下限容量 25%）。 */
     fun budget(): Int = effectiveBudget(current().tokens, settingsManager.getMaxTokens())
 
+    /**
+     * 本轮实际使用的输出上限（`max_tokens`）：不超过用户配置值，也不超过容量的
+     * [MAX_TOKENS_CAPACITY_RATIO]（窗口是输入输出合计，输出吃太多输入就没预算了）。
+     */
+    fun effectiveMaxTokens(): Int {
+        val configured = settingsManager.getMaxTokens()
+        val cap = (current().tokens * MAX_TOKENS_CAPACITY_RATIO).toInt().coerceAtLeast(1)
+        return configured.coerceAtMost(cap)
+    }
+
     /** 缓存缺失、过期或对应设置已变时返回 true。 */
     fun needsRefresh(): Boolean {
         val e = cache ?: return true

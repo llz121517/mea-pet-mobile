@@ -45,6 +45,15 @@ class MemoryManager(
 
     private val stateMutex = Mutex()
 
+    /**
+     * 最近一次工具 turn 删除的条目快照（墓碑），供撤销用。
+     *
+     * 写方是 [applyToolChanges]（IO 线程），读方是 UI 线程的成功收尾（[takeRecentToolDeletions]），
+     * 用 [Volatile] 保证可见性；换 turn 时整体覆盖，不做跨 turn 累积。
+     */
+    @Volatile
+    private var recentToolDeletions: List<MemoryItem> = emptyList()
+
     // ── 对外 API ──────────────────────────────────────
 
     /**
@@ -127,11 +136,11 @@ class MemoryManager(
 
         val stable = buildString {
             append(MemoryOpsProtocol.instructions())
-            if (facts.isNotEmpty()) {
+            val persona = personaSection(facts)
+            if (persona.isNotBlank()) {
                 appendLine()
                 appendLine()
-                appendLine("【用户人设】（永久，可引用 id 更新/删除）")
-                facts.forEach { appendLine("- [${it.id}] (${typeLabel(it.type)}) ${it.content}") }
+                append(persona)
             }
         }.trimEnd()
 
@@ -154,6 +163,27 @@ class MemoryManager(
     }
 
     /**
+     * 只取「用户人设」段（FACTUAL / CORE_TRAIT，全量、与当前输入无关）。
+     *
+     * 工具模式下不再走 [buildContext]（协议说明与相关回忆都由工具承担），但计划要求
+     * 人设事实**仍全量注入**：模型不必为「主人叫什么、说过什么永久设定」去检索。
+     * 返回空串表示暂无事实或记忆已关闭，调用方直接省略该段。
+     *
+     * 内容顺序固定为 createdAt 升序（[MemoryStore.getPersonaFacts] 契约），
+     * 轮与轮之间字节稳定，不会破坏前缀缓存。
+     */
+    suspend fun buildPersonaSection(): String {
+        if (!isMemoryEnabled()) return ""
+        return personaSection(repository.getPersonaFacts(maxCount = config.maxPersonaFacts))
+    }
+
+    private fun personaSection(facts: List<MemoryItem>): String = buildString {
+        if (facts.isEmpty()) return@buildString
+        appendLine("【用户人设】（永久，可引用 id 更新/删除）")
+        facts.forEach { appendLine("- [${it.id}] (${typeLabel(it.type)}) ${it.content}") }
+    }.trimEnd()
+
+    /**
      * 读取距上次摘要的对话轮数。
      *
      * 供「清除记忆」的撤销快照使用：清空会把计数归零，撤销要一并还原。
@@ -171,11 +201,35 @@ class MemoryManager(
      * 提交一个 turn 内工具产生的记忆变更（暂存后一次性落库）。
      *
      * 由 ChatService 在整个 turn 成功后调用；失败/取消直接丢弃，不调用本方法。
+     * 删除项的**墓碑快照**（[com.meapet.mobile.memory.tools.PendingMemoryChanges.deletedItems]）
+     * 会在这里留存，供 UI 的撤销条还原（[takeRecentToolDeletions]）。
      */
     suspend fun applyToolChanges(changes: com.meapet.mobile.memory.tools.PendingMemoryChanges) {
         if (changes.isEmpty) return
         repository.applyChanges(changes.upserts, changes.deletes)
-        Log.i(TAG, "Applied tool memory changes: ${changes.upserts.size} upsert, ${changes.deletes.size} delete")
+        recentToolDeletions = changes.deletedItems
+        Log.i(
+            TAG,
+            "Applied tool memory changes: ${changes.upserts.size} upsert, " +
+                "${changes.deletes.size} delete (${changes.deletedItems.size} tombstone(s))"
+        )
+    }
+
+    /**
+     * 取出并清空最近一次工具 turn 删除条目的墓碑快照（UI 撤销用）。
+     *
+     * 只返回**本 turn 删除、且删除前已在库里**的条目；同 turn 内刚创建又删除的
+     * 记忆没有墓碑（它从未真正存在过，无需撤销）。
+     */
+    fun takeRecentToolDeletions(): List<MemoryItem> {
+        val tombstones = recentToolDeletions
+        recentToolDeletions = emptyList()
+        return tombstones
+    }
+
+    /** 新一轮开始前清掉上一轮的墓碑，避免把旧 turn 的删除当成新 turn 的撤销项。 */
+    fun clearRecentToolDeletions() {
+        recentToolDeletions = emptyList()
     }
 
     /**

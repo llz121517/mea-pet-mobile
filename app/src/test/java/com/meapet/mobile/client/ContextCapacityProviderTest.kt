@@ -73,4 +73,25 @@ class ContextCapacityProviderTest {
         p.probeNow()
         assertEquals(65536, p.current().tokens)
     }
+
+    /**
+     * 输出上限按容量 25% 夹住：窗口很小时，用户设置的大 max_tokens 会把输入预算吃穿，
+     * 请求直接被服务端拒绝。
+     */
+    @Test
+    fun maxTokensCappedToQuarterOfCapacity() {
+        // 兜底容量 32768 → 上限 8192；用户配 4096 时不受影响
+        assertEquals(4096, provider(settings()).effectiveMaxTokens())
+
+        // 手动填的小窗口 2000 → 上限 500，配置的 4096 必须被夹下来
+        assertEquals(500, provider(settings(manual = 2000)).effectiveMaxTokens())
+    }
+
+    @Test
+    fun maxTokensCapUsesProbedCapacity() {
+        val p = provider(settings())
+        p.onModelsBody("""{"data":[{"id":"m","context_length":8000}]}""")
+        // 8000 × 0.25 = 2000
+        assertEquals(2000, p.effectiveMaxTokens())
+    }
 }

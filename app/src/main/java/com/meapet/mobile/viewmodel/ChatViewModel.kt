@@ -419,6 +419,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         container.ttsManager.speak(assistantMsg, TtsManager.Source.MAIN)
         refreshCompactionUi()
+        // 模型可能在本轮调 delete_memory 删了记忆（turn 成功时已提交）：墓碑快照还在，
+        // 给用户一次撤销机会；没有删除时不打扰
+        val tombstones = memoryManager.takeRecentToolDeletions()
+        if (tombstones.isNotEmpty()) {
+            beginUndo(
+                ChatUndo.ToolDeletedMemories(
+                    id = nextUndoId(),
+                    deadlineMs = nextUndoDeadline(),
+                    snapshot = tombstones
+                )
+            )
+        }
     }
 
     /** 失败收尾：移除本轮已插入的片段，保留乐观 user 供重试。 */
@@ -646,6 +658,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update { it.copy(pendingUndo = null) }
                 }
             }
+            is ChatUndo.ToolDeletedMemories -> {
+                // 墓碑快照是删除前的完整条目，按原样写回即可（id/时间/关键词都不变）
+                viewModelScope.launch {
+                    memoryManager.restoreAll(undo.snapshot)
+                    _state.update { it.copy(pendingUndo = null) }
+                }
+            }
         }
     }
 
@@ -770,3 +789,4 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
 }
+

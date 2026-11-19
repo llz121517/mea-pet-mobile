@@ -127,4 +127,66 @@ class ContextCompactorTest {
         assertNull(compactor.compact(messages(3), "", 0))
         assertEquals(0, engine.requests.size)
     }
+
+    /**
+     * 工具结果是机器 JSON（单条可达 1500 字符），进入摘要提示时必须截断：
+     * 原样塞进去既贵又会淹没人话，摘要只需要「查了什么、大致得到什么」。
+     */
+    @Test
+    fun `摘要输入里工具结果被截断为概览`() = runTest {
+        var seenBody = ""
+        val engine = FakeHttpClientEngine { req ->
+            seenBody = (req.body as com.meapet.mobile.client.RequestBody.Json).content
+            HttpResponse(
+                statusCode = 200,
+                body = """{"choices":[{"message":{"role":"assistant","content":"摘要"}}]}"""
+                    .encodeToByteArray(),
+                contentType = "application/json"
+            )
+        }
+        val compactor = ContextCompactor(
+            clientProvider = { OpenAiCompatibleClient("k", "https://x/v1", engine) },
+            modelProvider = { "m" }
+        )
+        val longToolResult = "X".repeat(800)
+        val msgs = listOf(
+            ChatMessage(role = ChatRole.user, content = "查一下", id = "u1"),
+            ChatMessage(
+                role = ChatRole.tool, content = longToolResult, id = "t1",
+                toolCallId = "c1", toolName = "search_memory"
+            )
+        )
+
+        compactor.compact(msgs, previousSummary = "", foldCount = 2)
+
+        assertTrue(seenBody.contains("工具结果："), "工具消息应有可读角色标签")
+        assertTrue(seenBody.contains("X".repeat(200) + "…"), "应保留前 200 字并加省略号")
+        assertTrue(!seenBody.contains("X".repeat(300)), "不应把整段工具结果塞进摘要请求")
+    }
+
+    /**
+     * 自动压缩按 `TARGET_RATIO` 选折叠量：只要能折到目标以下，就**尽量少折**，
+     * 保留更多原文细节（旧实现一律折到只剩最近 4 轮）。
+     */
+    @Test
+    fun `目标比例下选择能达标的最小折叠量`() {
+        val msgs = messages(10)
+        val estimator = TokenEstimator()
+        val target = estimator.estimate(msgs.takeLast(16))
+
+        val fold = foldCountFor(msgs, minKeepTurns = 4, targetTokens = target, estimator = estimator)
+
+        assertEquals(4, fold, "折 2 轮（4 条）即可达标，不该折到 12 条")
+        assertEquals(ChatRole.user, msgs[fold].role)
+    }
+
+    @Test
+    fun `目标无法达成时折叠到保留轮数下限`() {
+        val msgs = messages(10)
+        val estimator = TokenEstimator()
+
+        val fold = foldCountFor(msgs, minKeepTurns = 4, targetTokens = 1, estimator = estimator)
+
+        assertEquals(12, fold, "折到底仍不达标 → 按上限折（保留最近 4 轮）")
+    }
 }

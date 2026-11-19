@@ -29,10 +29,14 @@ import kotlinx.serialization.json.put
  * **暂存后一次性提交**：写类工具先记在这里，等整个 turn（含多轮工具调用）成功拿到最终回复后，
  * 由 ChatService 调用 [MemoryStore.applyChanges] 一次性落库。失败/取消/被打断则直接丢弃，
  * 因此「重试、断网、插队」都不会产生重复或幽灵记忆。
+ *
+ * @property deletedItems 删除条目的**墓碑快照**（删除前已在库里的完整条目），供撤销还原；
+ *   同 turn 内刚创建又删除的记忆没有墓碑（它从未真正落库，撤销无意义）
  */
 data class PendingMemoryChanges(
     val upserts: List<MemoryItem> = emptyList(),
-    val deletes: List<String> = emptyList()
+    val deletes: List<String> = emptyList(),
+    val deletedItems: List<MemoryItem> = emptyList()
 ) {
     val isEmpty: Boolean get() = upserts.isEmpty() && deletes.isEmpty()
 }
@@ -87,6 +91,9 @@ class MemoryToolExecutor(
     // ── 本 turn 暂存 ──────────────────────────────────
     private val pendingUpserts = LinkedHashMap<String, MemoryItem>()
     private val pendingDeletes = LinkedHashSet<String>()
+
+    /** 删除条目的墓碑快照：id → 删除前在库里的完整条目（同 turn 内新建的条目没有墓碑）。 */
+    private val deletionTombstones = LinkedHashMap<String, MemoryItem>()
     private var writeCount = 0
     private var permanentDeleteCount = 0
 
@@ -94,7 +101,8 @@ class MemoryToolExecutor(
     fun drainPending(): PendingMemoryChanges {
         val changes = PendingMemoryChanges(
             upserts = pendingUpserts.values.toList(),
-            deletes = pendingDeletes.toList()
+            deletes = pendingDeletes.toList(),
+            deletedItems = deletionTombstones.values.toList()
         )
         discardPending()
         return changes
@@ -104,6 +112,7 @@ class MemoryToolExecutor(
     fun discardPending() {
         pendingUpserts.clear()
         pendingDeletes.clear()
+        deletionTombstones.clear()
         writeCount = 0
         permanentDeleteCount = 0
     }
@@ -272,7 +281,7 @@ class MemoryToolExecutor(
     private suspend fun deleteMemory(argumentsJson: String): String {
         val args = parseObject(argumentsJson)
             ?: return errorEnvelope(INVALID_ARGUMENTS, "参数不是合法 JSON 对象")
-        store ?: return errorEnvelope(UNSUPPORTED, "当前不支持写入记忆")
+        val st = store ?: return errorEnvelope(UNSUPPORTED, "当前不支持写入记忆")
         val id = args.str("id")
         if (id.isEmpty()) return errorEnvelope(INVALID_ARGUMENTS, "id 不能为空")
         val existing = findItem(id)
@@ -299,6 +308,9 @@ class MemoryToolExecutor(
 
         pendingUpserts.remove(id)
         pendingDeletes.add(id)
+        // 墓碑取**删除前已在库里的原始条目**：本轮先 update 后 delete 时，撤销应回到本轮修改前，
+        // 而不是恢复成中间版本。同 turn 内新建又删除的条目库里查不到，自然没有墓碑。
+        st.findById(id)?.let { original -> deletionTombstones.putIfAbsent(id, original) }
         writeCount++
         return buildJsonObject {
             put("ok", true)

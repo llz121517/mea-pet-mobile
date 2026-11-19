@@ -136,6 +136,37 @@ class MemoryToolWriteTest {
         assertEquals(listOf("mem_s"), executor.drainPending().deletes)
     }
 
+    /**
+     * 删除要留**墓碑快照**（删除前存库的完整条目），供 UI 撤销还原；
+     * 同 turn 内刚创建又删除的条目从未落库，不该有墓碑（撤销无意义）。
+     */
+    @Test
+    fun `删除记录删除前条目的墓碑快照`() = runTest {
+        val (executor, repo) = setup()
+        val existing = MemoryItem(id = "mem_s", content = "临时信息", type = MemoryType.SHORT_TERM, keywords = listOf("临时"))
+        repo.save(existing)
+
+        executor.execute("delete_memory", """{"id":"mem_s"}""")
+        val pending = executor.drainPending()
+
+        assertEquals(listOf("mem_s"), pending.deletes)
+        assertEquals(1, pending.deletedItems.size, "删除前已落库的条目应有墓碑")
+        assertEquals("临时信息", pending.deletedItems.single().content)
+    }
+
+    @Test
+    fun `同 turn 内新建后又删除的条目不产生墓碑`() = runTest {
+        val (executor, _) = setup()
+        val created = executor.execute("create_memory", """{"content":"刚建的","keywords":["新建"]}""")
+        val id = str(created, "id")
+
+        executor.execute("delete_memory", """{"id":"$id"}""")
+        val pending = executor.drainPending()
+
+        assertEquals(listOf(id), pending.deletes)
+        assertTrue(pending.deletedItems.isEmpty(), "从未落库的条目不产生墓碑")
+    }
+
     @Test
     fun `单 turn 写入超过上限时返回 too_many_writes`() = runTest {
         val (executor, _) = setup()

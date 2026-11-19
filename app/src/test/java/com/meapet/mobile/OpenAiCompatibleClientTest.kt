@@ -315,4 +315,31 @@ class OpenAiCompatibleClientTest {
         val parsed = Json.parseToJsonElement(body).jsonObject
         assertEquals(4096, parsed["max_tokens"]?.jsonPrimitive?.content?.toInt())
     }
+
+    /**
+     * `tools` 数组是请求前缀的一部分（服务端渲染在 messages 之前）：**字节级稳定**
+     * 才能让全量用户的前缀缓存持续命中。字段顺序、措辞、增删工具都会让缓存整体失效
+     * 一次，因此这里用 SHA-256 做字节快照——任何改动都必须显式更新本常量，
+     * 视为一次版本事件（见 [com.meapet.mobile.memory.tools.MemoryToolSchemas] 的 KDoc）。
+     */
+    @Test
+    fun toolsArrayIsByteStableSnapshot() {
+        val body = ApiRequest.chatCompletion(
+            model = "m",
+            messages = listOf(ApiRequest.textMessage("user", "hi")),
+            tools = com.meapet.mobile.memory.tools.MemoryToolSchemas.ALL,
+            toolChoice = "auto"
+        )
+        // tools 字段固定在请求体末尾：取它之后的全部内容做快照，避免受前面 messages 影响
+        val toolsJson = body.substring(body.indexOf("\"tools\":"))
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(toolsJson.encodeToByteArray())
+            .joinToString("") { "%02x".format(it) }
+        assertEquals(TOOLS_SHA256_SNAPSHOT, digest)
+    }
+
+    private companion object {
+        /** 见 [toolsArrayIsByteStableSnapshot]。 */
+        const val TOOLS_SHA256_SNAPSHOT = "614470f1c1fdbc018ca4e0bd8036ea2d497277229fdfd5ef6be96c18526066d1"
+    }
 }

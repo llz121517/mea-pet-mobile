@@ -3,6 +3,7 @@ package com.meapet.mobile.viewmodel
 import com.meapet.mobile.chat.ChatMessage
 import com.meapet.mobile.chat.ChatRole
 import com.meapet.mobile.chat.ChatService
+import com.meapet.mobile.chat.ConversationManager
 import com.meapet.mobile.chat.compaction.CompactionState
 import com.meapet.mobile.chat.ChatUndo
 import com.meapet.mobile.app.AppContainer
@@ -81,6 +82,8 @@ class ChatViewModelTest {
         wheneverBlocking { updateChecker.check() }.thenReturn(UpdateCheckResult.UpToDate("1.0.0"))
         wheneverBlocking { memoryManager.getStats() }.thenReturn(MemoryStats())
         wheneverBlocking { memoryManager.getAllMemories() }.thenReturn(emptyList())
+        // 成功收尾会取「本轮工具删除的墓碑」：默认无删除
+        whenever(memoryManager.takeRecentToolDeletions()).thenReturn(emptyList())
         // UI 首屏与撤销快照改读「完整历史」接口；测试里沿用各用例对 getHistory() 的 stub 作为完整历史
         wheneverBlocking { chatService.loadRecentForUi(any()) }.thenAnswer { chatService.getHistory() }
         wheneverBlocking { chatService.loadFullHistory() }.thenAnswer { chatService.getHistory() }
@@ -407,5 +410,195 @@ class ChatViewModelTest {
         // 新消息已产生：再撤销会把这条新消息一起抹掉，因此旧窗口必须作废
         assertNull("发送新消息后快照应作废", vm.state.value.pendingUndo)
         verify(chatService, never()).restoreHistory(any())
+    }
+
+    // ── 工具轮：连发片段 / 插队 / 工具删除撤销 ──────────
+
+    /**
+     * 工具循环每轮正文一回来就插入气泡并朗读（连发多条），不等整个循环结束。
+     *
+     * mock 的 `thenAnswer` 无法在挂起函数里正确恢复协程，这里用真实 [ChatService] +
+     * 脚本化引擎，让片段回调真实发生；Main 临时换成真实调度器（同插队用例）。
+     */
+    @Test
+    fun `工具轮每个片段都立即插入并朗读`() = kotlinx.coroutines.runBlocking {
+        Dispatchers.setMain(Dispatchers.Default)
+        try {
+            val responses = ArrayDeque(
+                listOf(
+                    toolFragmentResponse("先查一下"),
+                    toolFragmentResponse("查到了"),
+                    text("最终回复")
+                )
+            )
+            val engine = com.meapet.mobile.client.test.FakeHttpClientEngine { responses.removeFirst() }
+            val settings = mock<SettingsManager>().also {
+                whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
+                whenever(it.getModel()).thenReturn("m")
+                whenever(it.getTemperature()).thenReturn(0.7)
+                whenever(it.getMaxTokens()).thenReturn(1024)
+                whenever(it.getMemoryMode()).thenReturn(com.meapet.mobile.config.MemoryMode.AUTO)
+            }
+            val executor = com.meapet.mobile.memory.tools.MemoryToolExecutor(
+                search = object : com.meapet.mobile.memory.search.MemorySearch {
+                    override suspend fun search(query: com.meapet.mobile.memory.search.MemoryQuery) =
+                        emptyList<MemoryItem>()
+                }
+            )
+            val realService = ChatService(
+                clientProvider = {
+                    com.meapet.mobile.client.OpenAiCompatibleClient("k", "https://x/v1", engine)
+                },
+                conversationManager = ConversationManager(),
+                memoryManager = null,
+                settingsManager = settings,
+                postProcessScope = kotlinx.coroutines.CoroutineScope(Dispatchers.Default),
+                config = com.meapet.mobile.config.AppConfig.DEFAULT,
+                toolLoop = com.meapet.mobile.chat.tools.ChatToolLoop(
+                    clientProvider = {
+                        com.meapet.mobile.client.OpenAiCompatibleClient("k", "https://x/v1", engine)
+                    },
+                    executor = executor
+                ),
+                memoryTools = executor
+            )
+            Mockito.doReturn(realService).`when`(container).chatService
+
+            val vm = ChatViewModel(application)
+            vm.onEvent(ChatEvent.SendMessage("帮我查"))
+            kotlinx.coroutines.withTimeout(5_000) {
+                while (vm.state.value.messages.none { it.content == "最终回复" }) {
+                    kotlinx.coroutines.delay(10)
+                }
+            }
+
+            assertEquals(
+                "片段应按发生顺序排在最终回复之前",
+                listOf("先查一下", "查到了", "最终回复"),
+                vm.state.value.messages.filter { it.role == ChatRole.assistant }.map { it.content }
+            )
+            verify(ttsManager, org.mockito.kotlin.times(3)).speak(any(), any())
+        } finally {
+            Dispatchers.setMain(dispatcher)
+        }
+    }
+
+    private fun toolFragmentResponse(fragment: String): com.meapet.mobile.client.HttpResponse {
+        val body = """
+            {"choices":[{"message":{"role":"assistant","content":"$fragment",
+            "tool_calls":[{"id":"c-${fragment.hashCode()}","type":"function",
+            "function":{"name":"search_memory","arguments":"{\"query\":\"x\"}"}}]},
+            "finish_reason":"tool_calls"}]}
+        """.trimIndent()
+        return com.meapet.mobile.client.HttpResponse(200, body.encodeToByteArray(), "application/json")
+    }
+
+    private fun text(content: String): com.meapet.mobile.client.HttpResponse {
+        val body = """
+            {"choices":[{"message":{"role":"assistant","content":"$content"}}]}
+        """.trimIndent()
+        return com.meapet.mobile.client.HttpResponse(200, body.encodeToByteArray(), "application/json")
+    }
+
+    /**
+     * 插队：取消旧 turn（旧 turn 的收尾由它自己的协程完成）后再发新消息，不弹提示。
+     *
+     * mock 的 `thenAnswer` 不能挂起，无法模拟「旧 turn 卡在请求中」；这里换成真实
+     * [ChatService] + 可控引擎，并临时把 Main 换成真实调度器，让插队语义真实发生。
+     */
+    @Test
+    fun `插队发送会先取消在途 turn 再发新消息`() = kotlinx.coroutines.runBlocking {
+        Dispatchers.setMain(Dispatchers.Default)
+        try {
+            val firstStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val firstGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val calls = java.util.concurrent.atomic.AtomicInteger()
+            val fakeEngine = com.meapet.mobile.client.test.FakeHttpClientEngine {
+                if (calls.getAndIncrement() == 0) {
+                    firstStarted.complete(Unit)
+                    firstGate.await()
+                    com.meapet.mobile.client.HttpResponse(
+                        200,
+                        """{"choices":[{"message":{"role":"assistant","content":"第一条回复"}}]}"""
+                            .encodeToByteArray(),
+                        "application/json"
+                    )
+                } else {
+                    com.meapet.mobile.client.HttpResponse(
+                        200,
+                        """{"choices":[{"message":{"role":"assistant","content":"第二条回复"}}]}"""
+                            .encodeToByteArray(),
+                        "application/json"
+                    )
+                }
+            }
+            val realSettings = mock<SettingsManager>().also {
+                whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
+                whenever(it.getModel()).thenReturn("m")
+                whenever(it.getTemperature()).thenReturn(0.7)
+                whenever(it.getMaxTokens()).thenReturn(1024)
+                whenever(it.getMemoryMode()).thenReturn(com.meapet.mobile.config.MemoryMode.TEXT)
+            }
+            val realService = ChatService(
+                clientProvider = {
+                    com.meapet.mobile.client.OpenAiCompatibleClient("k", "https://x/v1", fakeEngine)
+                },
+                conversationManager = ConversationManager(),
+                memoryManager = null,
+                settingsManager = realSettings,
+                postProcessScope = kotlinx.coroutines.CoroutineScope(Dispatchers.Default)
+            )
+            Mockito.doReturn(realService).`when`(container).chatService
+
+            val vm = ChatViewModel(application)
+            vm.onEvent(ChatEvent.SendMessage("第一条"))
+            kotlinx.coroutines.withTimeout(5_000) { firstStarted.await() }
+
+            vm.onEvent(ChatEvent.SendMessage("第二条"))
+            kotlinx.coroutines.withTimeout(5_000) {
+                while (vm.state.value.messages.none { it.content == "第二条回复" }) {
+                    kotlinx.coroutines.delay(10)
+                }
+            }
+
+            assertEquals(
+                "旧 turn 无可见片段应整轮丢弃，只留新一轮",
+                listOf("第二条", "第二条回复"),
+                vm.state.value.messages.map { it.content }
+            )
+            assertEquals(com.meapet.mobile.chat.TurnPhase.IDLE, vm.state.value.turnPhase)
+        } finally {
+            Dispatchers.setMain(dispatcher)
+        }
+    }
+
+    /** 模型用工具删了记忆：turn 成功后给一次撤销窗口，撤销按墓碑快照原样写回。 */
+    @Test
+    fun `工具删除记忆后给出撤销窗口并可还原`() = runTest(dispatcher.scheduler) {
+        val tombstone = MemoryItem(id = "m1", content = "旧事实", type = MemoryType.FACTUAL)
+        whenever(memoryManager.takeRecentToolDeletions()).thenReturn(listOf(tombstone))
+        wheneverBlocking { chatService.sendMessage(any<ChatMessage>(), any<(ChatMessage) -> Unit>()) }
+            .thenReturn(
+                Result.success(
+                    ChatMessage(role = ChatRole.user, content = "忘掉我生日") to
+                        ChatMessage(role = ChatRole.assistant, content = "删掉了喵")
+                )
+            )
+
+        val vm = ChatViewModel(application)
+        vm.advance()
+        vm.onEvent(ChatEvent.SendMessage("忘掉我生日"))
+        // 只跑当前任务，不推进虚拟时间：推进会走到撤销窗口到期、把 pendingUndo 结算掉
+        dispatcher.scheduler.runCurrent()
+
+        val undo = vm.state.value.pendingUndo
+        assertTrue("删除记忆后应给撤销机会，实际: $undo", undo is ChatUndo.ToolDeletedMemories)
+        assertEquals(listOf(tombstone), (undo as ChatUndo.ToolDeletedMemories).snapshot)
+
+        vm.undoPending()
+        dispatcher.scheduler.runCurrent()
+
+        verifyBlocking(memoryManager) { restoreAll(listOf(tombstone)) }
+        assertNull(vm.state.value.pendingUndo)
     }
 }

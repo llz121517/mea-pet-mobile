@@ -115,7 +115,7 @@ class BigramMemorySearcher(
         val keywordScore = if (nonBlankKeywords.isEmpty()) 0.0 else matchedKeywords.toDouble() / nonBlankKeywords.size
 
         // 内容二元组重叠
-        val contentTokens = tokenize(item.content)
+        val contentTokens = contentTokens(item)
         val overlap = if (contentTokens.isEmpty() || queryTokens.isEmpty()) 0.0 else {
             val common = queryTokens.count { it in contentTokens }
             common.toDouble() / min(queryTokens.size, contentTokens.size).coerceAtLeast(1)
@@ -130,6 +130,31 @@ class BigramMemorySearcher(
             item.importance.toDouble() * W_IMPORTANCE * if (matchedKeywords > 0 || overlap > 0) 1.0 else 0.0 +
             recency * W_RECENCY * if (matchedKeywords > 0 || overlap > 0) 1.0 else 0.0
     }
+
+    // ── 内容 token 缓存 ──────────────────────────────
+    //
+    // 记忆库很小（几百条），但每次检索都为每条候选重新切词是纯浪费；切词结果只随
+    // content 变化，因此按 id 缓存并在 content 不一致时重算——写入（create/update）
+    // 改了 content，下一次检索自然失效，无需存储层发通知。删除的条目可能残留在缓存里，
+    // 但它已不在候选池，只占几条无关内存，随检索自然淘汰（上限 = 记忆库规模）。
+
+    private class ContentTokens(val content: String, val tokens: Set<String>)
+
+    private val contentTokenCache = HashMap<String, ContentTokens>()
+
+    private fun contentTokens(item: MemoryItem): Set<String> {
+        val cached = contentTokenCache[item.id]
+        if (cached != null && cached.content == item.content) return cached.tokens
+        val tokens = tokenize(item.content)
+        contentTokenCache[item.id] = ContentTokens(item.content, tokens)
+        return tokens
+    }
+
+    /** 当前缓存条目数（单测用）。 */
+    internal fun cachedTokenCount(): Int = contentTokenCache.size
+
+    /** 某条记忆当前缓存的 token（单测用；null = 未缓存）。 */
+    internal fun cachedTokens(id: String): Set<String>? = contentTokenCache[id]?.tokens
 
     /**
      * 切词：拉丁/数字按连续段整体作为一个词；CJK 连续段生成字符二元组（单字时保留单字）。

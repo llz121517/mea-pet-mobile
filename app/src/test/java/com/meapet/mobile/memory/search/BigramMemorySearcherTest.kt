@@ -8,6 +8,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BigramMemorySearcherTest {
@@ -179,5 +180,37 @@ class BigramMemorySearcherTest {
         assertTrue("毕业" in tokens)
         assertTrue("论文" in tokens)
         assertTrue("openai" in tokens)
+    }
+
+    /**
+     * 内容 token 按记忆 id 缓存：同一份内容不重复切词；写入改了 content 后下次检索
+     * 自动重算（缓存以 content 为键校验，不需要存储层发失效通知）。
+     */
+    @Test
+    fun `内容 token 缓存命中且 content 变化后失效`() = runTest {
+        val repo = store()
+        seed(repo)
+        val searcher = BigramMemorySearcher(repo)
+
+        searcher.search(MemoryQuery(text = "论文"))
+        // 候选池只含 SHORT_TERM + LONG_TERM 两条，FACTUAL 不参与检索
+        assertEquals(2, searcher.cachedTokenCount())
+        assertTrue(searcher.cachedTokens("mem_thesis")!!.contains("论文"))
+
+        // 修改内容：旧 token 必须失效
+        repo.save(
+            MemoryItem(
+                id = "mem_thesis",
+                content = "主人在准备毕业设计",
+                type = MemoryType.SHORT_TERM,
+                importance = 0.8f,
+                keywords = listOf("论文", "毕业")
+            )
+        )
+        searcher.search(MemoryQuery(text = "论文"))
+
+        assertEquals(2, searcher.cachedTokenCount(), "缓存条目数不应随重复检索增长")
+        assertTrue(searcher.cachedTokens("mem_thesis")!!.contains("设计"))
+        assertFalse(searcher.cachedTokens("mem_thesis")!!.contains("论文"), "旧内容的 bigram 应被替换")
     }
 }

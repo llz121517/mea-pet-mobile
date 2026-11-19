@@ -91,6 +91,13 @@ class ChatService(
     private val estimator: TokenEstimator = TokenEstimator(),
     private val budgetProvider: () -> Int = { CompactionConfig.COMPACT_HINT_TOKENS },
     /**
+     * 本轮输出上限（`max_tokens`）的上界，由容量适配器给出（容量约 25%）。
+     *
+     * 上下文窗口是输入输出合计：窗口很小时，用户设置的大 `max_tokens` 会把输入预算
+     * 吃穿、导致请求直接被服务端拒绝。默认 [Int.MAX_VALUE] = 不夹（测试/无容量信息时）。
+     */
+    private val maxTokensCapProvider: () -> Int = { Int.MAX_VALUE },
+    /**
      * 记忆工具循环（null = 未启用）。仅在 [AppConfig.enableMemoryTools] 为 true 时使用，
      * 否则走原来的单次请求 + 文本协议链路。
      */
@@ -110,7 +117,8 @@ class ChatService(
         internal const val MEMORY_TOOL_HINT: String =
             "【记忆工具】你不确定是否记过用户过去说过的事时，先调用 search_memory 检索；" +
                 "用户明确要求记住、忘记或纠正信息时，用 create_memory / update_memory / delete_memory。" +
-                "不要记录你自己的提议或猜测。"
+                "不要记录你自己的提议或猜测。" +
+                "调用工具前只说一句简短的话（不要长篇铺垫），最终回复不要重复前面说过的内容。"
 
         /** 端点「不支持 tools」的典型状态码（OpenAI 兼容网关多为 400，部分为 422）。 */
         private val TOOLS_UNSUPPORTED_STATUS = setOf(400, 404, 422, 501)
@@ -367,6 +375,8 @@ class ChatService(
     ): TurnExecution {
         onBeforeSend()
         if (config.enableMemoryTools) memoryTools?.discardPending()
+        // 上一轮的墓碑（若未被 UI 取走）属于旧 turn，不能混进本轮的撤销项
+        memoryManager?.clearRecentToolDeletions()
 
         // 用户消息先入史：apiMessages 由历史构建，当前消息必须已在其中。
         // 代价是任何失败路径都必须回滚（见 sendMessage 的 fail/timeout 分支），
@@ -375,13 +385,20 @@ class ChatService(
         val content = turnUser.content
 
         // 模式解析（需求 §5.2）：
-        // - 工具模式：stable = 固定工具说明，不再注入文本协议说明与关键词回忆
-        //   （两套协议同时存在会让模型在「输出围栏块」和「调用工具」之间摇摆）
+        // - 工具模式：stable = 固定工具说明 + **人设事实**（FACTUAL/CORE_TRAIT 仍全量注入，
+        //   与当前输入无关、轮间稳定；短期/长期相关回忆改由模型自己调用 search_memory）；
+        //   不再注入文本协议说明与关键词回忆（两套协议同时存在会让模型在「输出围栏块」
+        //   和「调用工具」之间摇摆）
         // - 非工具模式且记忆未关闭：走文本协议，stable + tail
         // - OFF：stable 为空，也不注入
         val textProtocol = !wantsTools && memoryMode != MemoryMode.OFF
         val memoryContext = if (textProtocol) memoryManager?.buildContext(content) else null
-        var stableContext = if (wantsTools) MEMORY_TOOL_HINT else (memoryContext?.stable ?: "")
+        var stableContext = if (wantsTools) {
+            val persona = memoryManager?.buildPersonaSection().orEmpty()
+            if (persona.isBlank()) MEMORY_TOOL_HINT else "$MEMORY_TOOL_HINT\n\n$persona"
+        } else {
+            memoryContext?.stable ?: ""
+        }
         var tailFragments = listOfNotNull(
             TimeContext.describe(),
             memoryContext?.tail?.takeIf { it.isNotBlank() }
@@ -393,7 +410,8 @@ class ChatService(
         val systemPrompt = settingsManager.getSystemPrompt()
         val model = settingsManager.getModel()
         val temperature = settingsManager.getTemperature()
-        val maxTokens = settingsManager.getMaxTokens()
+        // 输出上限按容量 25% 夹住：窗口很小时 max_tokens 会把输入预算吃穿
+        val maxTokens = settingsManager.getMaxTokens().coerceAtMost(maxTokensCapProvider())
 
         // 上下文压缩：先取状态与「已覆盖多少」，再判断是否需要硬触发兜底。
         // 折叠/丢弃切点由 compaction 包按 user 消息边界对齐，不会切在 turn 中间
@@ -411,7 +429,11 @@ class ChatService(
         if (budget > 0 && estimated > budget * CompactionConfig.HARD_TRIGGER_RATIO) {
             // 自动压缩只做兜底：小窗口直接放弃摘要，只截断
             if (budget > CompactionConfig.SMALL_WINDOW_TOKENS) {
-                val fold = foldCountFor(usable)
+                val fold = foldCountFor(
+                    usable,
+                    targetTokens = (budget * CompactionConfig.TARGET_RATIO).toInt(),
+                    estimator = estimator
+                )
                 val newSummary = if (fold > 0) compactor?.compact(usable, state.summary, fold) else null
                 if (newSummary != null) {
                     state = state.copy(
@@ -713,6 +735,9 @@ class ChatService(
             val window = conversationManager.getMessages().filter { it.role != ChatRole.system }
             val skip = resolveSkip(window, state)
             val usable = window.drop(skip)
+            // 手动压缩是用户明确要求「把前面的内容整理掉」：按最大可折量折叠（保留最近
+            // MIN_KEEP_TURNS 轮原文），不做目标比例裁剪——否则大窗口用户点一下只折 2 条，
+            // 等于没整理。目标比例只用于自动兜底压缩。
             val fold = foldCountFor(usable)
             if (fold <= 0) {
                 return@withContext Result.failure(
