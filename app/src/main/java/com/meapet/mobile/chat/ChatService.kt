@@ -114,11 +114,7 @@ class ChatService(
          * 必须**字节级稳定**：它属于请求前缀，含任何动态内容都会破坏缓存。
          * 只讲「何时用」，具体参数由 tools schema 承担。
          */
-        internal const val MEMORY_TOOL_HINT: String =
-            "【记忆工具】你不确定是否记过用户过去说过的事时，先调用 search_memory 检索；" +
-                "用户明确要求记住、忘记或纠正信息时，用 create_memory / update_memory / delete_memory。" +
-                "不要记录你自己的提议或猜测。" +
-                "调用工具前只说一句简短的话（不要长篇铺垫），最终回复不要重复前面说过的内容。"
+        internal const val MEMORY_TOOL_HINT: String = com.meapet.mobile.memory.tools.MemoryToolSchemas.HINT
 
         /** 端点「不支持 tools」的典型状态码（OpenAI 兼容网关多为 400，部分为 422）。 */
         private val TOOLS_UNSUPPORTED_STATUS = setOf(400, 404, 422, 501)
@@ -391,8 +387,11 @@ class ChatService(
         val textProtocol = !wantsTools && memoryMode != MemoryMode.OFF
         val memoryContext = if (textProtocol) memoryManager?.buildContext(content) else null
         var stableContext = if (wantsTools) {
+            // 工具说明来自已注册工具（registry.hint），人设段来自记忆模块；
+            // 拼接顺序与分隔符保持不变，前缀字节稳定
+            val toolHint = toolLoop?.hint.orEmpty()
             val persona = memoryManager?.buildPersonaSection().orEmpty()
-            if (persona.isBlank()) MEMORY_TOOL_HINT else "$MEMORY_TOOL_HINT\n\n$persona"
+            listOf(toolHint, persona).filter { it.isNotBlank() }.joinToString("\n\n")
         } else {
             memoryContext?.stable ?: ""
         }

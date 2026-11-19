@@ -16,6 +16,10 @@ import kotlinx.serialization.json.put
 interface Tool {
     val name: String
     val schema: JsonObject
+
+    /** 可选：拼进首条 system 的固定使用说明（必须字节稳定，不含动态内容）。 */
+    val hint: String? get() = null
+
     suspend fun execute(argumentsJson: String): String
 }
 
@@ -53,6 +57,11 @@ class ToolRegistry(
 
     /** 下发给模型的 tools 数组（构造时生成一次）。 */
     val schemas: JsonArray = buildJsonArray { tools.forEach { add(it.schema) } }
+
+    /** 各工具非空 hint 按注册顺序用换行连接；全无则为 null。 */
+    val hint: String? = tools.mapNotNull { it.hint?.takeIf { h -> h.isNotBlank() } }
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString("\n")
 
     suspend fun execute(name: String, argumentsJson: String): String =
         byName[name]?.execute(argumentsJson) ?: ToolEnvelope.error("unknown_tool", "未知工具：$name")

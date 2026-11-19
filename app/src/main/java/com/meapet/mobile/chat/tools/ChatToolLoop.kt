@@ -100,6 +100,9 @@ class ChatToolLoop(
     private val maxCallsPerRound: Int = MAX_TOOL_CALLS_PER_ROUND
 ) {
 
+    /** 已注册工具的固定使用说明（供调用方拼进首条 system）；无则为 null。 */
+    val hint: String? get() = registry.hint
+
     /**
      * 执行一次完整的工具循环。
      *

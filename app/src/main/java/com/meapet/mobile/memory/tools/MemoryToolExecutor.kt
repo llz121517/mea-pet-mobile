@@ -100,6 +100,9 @@ class MemoryToolExecutor(
             object : com.meapet.mobile.chat.tools.Tool {
                 override val name: String = toolName
                 override val schema: JsonObject = schema
+                // hint 只挂在第一个工具上，避免同一段说明被注册表重复拼接
+                override val hint: String? =
+                    if (toolName == MemoryToolSchemas.SEARCH_MEMORY) MemoryToolSchemas.HINT else null
                 override suspend fun execute(argumentsJson: String): String =
                     this@MemoryToolExecutor.execute(toolName, argumentsJson)
             }

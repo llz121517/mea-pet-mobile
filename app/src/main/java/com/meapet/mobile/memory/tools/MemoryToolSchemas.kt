@@ -33,6 +33,18 @@ object MemoryToolSchemas {
     const val UPDATE_MEMORY = "update_memory"
     const val DELETE_MEMORY = "delete_memory"
 
+    /**
+     * 记忆工具的固定使用说明（拼进首条 system）。
+     *
+     * 必须**字节级稳定**：它属于请求前缀，含任何动态内容都会破坏缓存。
+     * 只讲「何时用」，具体参数由 tools schema 承担。
+     */
+    const val HINT: String =
+        "【记忆工具】你不确定是否记过用户过去说过的事时，先调用 search_memory 检索；" +
+            "用户明确要求记住、忘记或纠正信息时，用 create_memory / update_memory / delete_memory。" +
+            "不要记录你自己的提议或猜测。" +
+            "调用工具前只说一句简短的话（不要长篇铺垫），最终回复不要重复前面说过的内容。"
+
     /** 可写入的记忆类型（LONG_TERM 只由摘要产生，模型不可直接创建）。 */
     private val WRITABLE_TYPES = listOf("SHORT_TERM", "CORE_TRAIT", "FACTUAL")
 
