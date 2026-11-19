@@ -1,6 +1,6 @@
 # 1.9 计划：记忆工具化 + 记忆检索工具（修订版）
 
-> 状态：**已实施（dev 分支，1.9.0）**。2026-11-19 完成 M1–M3 与 §10 全部改造，待真机验收与 M4 观察期数据。本版在 2026-11-18 调查报告基础上，按 M0 探针、已落地的存储层、多 system 兼容性调研及最新已确认决策修订。
+> 状态：**已实施（dev 分支，1.9.0）**。2026-11-19 完成 M1–M3 主体与 §10 改造，仍待：真机验收、M4 观察期数据、`SEPARATE_USER` 降级（见 TODO.md）。本版在 2026-11-18 调查报告基础上，按 M0 探针、已落地的存储层、多 system 兼容性调研及最新已确认决策修订。
 
 ## 实施状态（2026-11-19）
 
@@ -45,7 +45,7 @@
 ## 2. 与已落地存储层的关系
 
 - `MemoryStore` 接口已存在，`AppContainer` 已切到 `SqliteMemoryStore`；`MemoryManager`、`MemoryService` 已依赖 `MemoryStore`，无需再做抽象工作。
-- 本计划需要在接口上新增：`query(MemoryQuery)`（types、limit、sort，返回 items 与 totalMatched）。排序打分放在接口之上，召回在内存中完成（第 11 节）。
+- 实际实现：检索未放进 `MemoryStore`，而是独立的 `MemorySearch` 接口（`MemoryQuery`：types、limit、sort、candidates），默认实现 `BigramMemorySearcher` 在内存中打分（第 11 节）。信封里的 `total_matched` 等于返回条数，不是候选池命中数。
 
 ## 3. 工具集（4 个）
 
@@ -208,7 +208,7 @@ MERGE_USER 与 SEPARATE_USER 的消息构造、严格交替校验、tail 不进�
 - 打分：`0.3·关键词命中率 + 0.1·内容 bigram 重叠率 + 0.1·重要度 + 0.1·新近度（按 lastAccessedAt 衰减）`，权重放常量，起始值上线后按真实使用调整。**实施时已从 1.0/0.6/0.3/0.1 修订为上述值**：原权重让关键词命中一项就压过其余全部信号，实际检索几乎只回一条。
 - 相关度排序**不再丢弃零分候选**：按得分排序后取前 `limit` 条，命中不足时用未命中条目补齐（记忆库通常只有几条，严格过滤会导致「只返回一条」甚至空结果）；候选池 = 已落库 + 本 turn 暂存的合并视图，同一轮 create/update 之后立刻 search 也能看到。
 - 参数 `types`、`limit`、`sort`（relevance/recent/importance）；模型可多次换词检索。
-- bigram 集合按记忆 id 在内存缓存，写入时失效。
+- 内容 bigram 集合按记忆 id 在内存缓存，取用时按 content 校验，内容变化自动重算（不依赖写入方发失效通知）。
 - 本版不引入 FTS。记忆涨到几千条后再评估把候选召回换成 FTS4（须走 `user_version=2` 迁移并真机验证；JVM 的 sqlite-jdbc 带 FTS5 而 Android 框架 SQLite 没有），打分层不变。
 
 ### 11.2 多轮循环

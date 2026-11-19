@@ -21,9 +21,10 @@ import kotlinx.serialization.json.putJsonObject
  * - 一次构建后缓存复用（[ALL] 为 val）。
  *
  * ## 工具集
- * - `search_memory`：只读检索（本阶段已实现）
- * - `create_memory` / `update_memory` / `delete_memory`：下一阶段接入，schema 先定义好，
- *   避免后续增删工具导致缓存反复失效（提前稳定下来）。
+ * - `search_memory`：只读检索
+ * - `create_memory` / `update_memory` / `delete_memory`：写类工具（暂存，turn 成功后提交）
+ *
+ * 增删工具会改变 tools 数组，使前缀缓存整体失效一次，并需要更新字节快照测试。
  */
 object MemoryToolSchemas {
 
