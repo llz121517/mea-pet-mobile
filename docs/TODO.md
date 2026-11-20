@@ -51,16 +51,18 @@
 
 ## 📌 待办 E · 1.9 收尾（dev 分支）
 
-1.9.0 的功能开发已完成（记忆工具化、工具消息入历史、连发多条、插队发送、`memoryMode`、turn 超时、检索修复、压缩与 SQLite 存储，详见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) §实施状态与 [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md)）。剩余：
+1.9.0 的记忆工具、只读文本回退、联网工具、SQLite、历史分页与上下文压缩已接入。当前状态与行为见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)（记忆实现参考）、[`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) 与 [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md)。仍需处理：
 
-- [ ] **1.9 真机验收**（本轮按用户要求暂不操作设备）— 清单：连发多条气泡顺序与 TTS 逐条朗读、插队发送/「停止」、工具消息落库后重启续聊、记忆检索方式四档、检索返回多条、turn 超时提示、压缩分隔条与手动压缩、向上懒加载锚定。
-- [ ] **M4 观察期数据收集** — `adb logcat -s TurnMetrics` 攒 1~2 周：工具调用率、平均轮数、失败/取消/超时占比、`cacheHitRatio`；据此决定 1.10 是否删除文本围栏协议（`MemoryOpsProtocol`）与默认模式取舍。
-- [ ] **1.10：清除对话改软删除**（M3 遗留）— `conversations.state=cleared` + 新活跃会话 + 撤销只带 conversationId；单会话模型下需先让 `conversationId` 可切换（仓库/压缩状态/会话指针）。
-- [ ] **1.10：清理备胎代码** — `MemoryRepository`（JSON 实现）、`ConversationStore`、旧 JSON 内存仓库与相关单测；legacy 导入保留到 1.11（见 `legacy-compat.md`）。
+- [ ] **1.9 真机验收**（本轮按用户要求暂不操作设备）— 连续回复顺序与逐条 TTS、插队发送 /「停止」、工具消息落库后重启续聊、记忆检索四档、工具记忆写入 / 删除撤销、TEXT 模式无记忆内容变更、只读回退不触发文本写入或自动摘要、摘要触发范围、turn 超时、压缩分隔条与手动压缩、向上懒加载锚定。
+- [ ] **M4 观察期指标** — 收集 `TurnMetrics` 中的工具调用率、平均轮数、失败 / 取消 / 超时占比和 `cacheHitRatio`，评估运行质量与容量 / 摘要参数。
+- [ ] **记忆工具能力缓存与模型切换** — 只读审计发现 `ChatService.toolsUnsupported` 是进程级布尔值，未随 API 地址、模型或 Key 变化重置：某次 HTTP 400 / 404 / 422 / 501 后，记忆和联网工具会一直禁用到进程重启，即使切换到支持工具的端点也是如此。进一步调查并修正缓存键 / 失效时机及不支持判定范围；不要据此把尚未实现的修复记为完成。
+  - 还需验证工具循环中途被 HTTP 错误拒绝时的回退：可能在未写入待提交 transcript 的情况下，仍提交暂存记忆变更；明确复现与事务语义后再修复。
+- [ ] **1.10：清除对话改软删除**（M3 遗留）— `conversations.state=cleared` + 新活跃会话 + 撤销只带 conversationId；单会话模型下需先让 `conversationId` 可切换（仓库 / 压缩状态 / 会话指针）。
+- [ ] **1.10：清理备胎代码** — `MemoryRepository`（JSON 实现）、`ConversationStore` 与相关单测；legacy 导入保留到 1.11（见 `legacy-compat.md`）。
 - [ ] **被打断 turn 的 `interrupted` 落库标记** — 当前仅 `TurnMetrics` 日志记录，无消费方；等有「中断轮次分析」需求再补（`extra_json` 或 meta 记录，不改 schema）。
-- [ ] **备用 tail 模式（`SEPARATE_USER`）未接线** — 只有常量与单测，没有设置入口，也没有计划里的「返回 400/500 且正文命中模板报错 → 回退 MERGE_USER 并按 baseUrl+model 缓存」探测/降级逻辑；默认 MERGE_USER 兼容性最好，暂不启用，等确有端点需要连续 user 时再做（避免写永不执行的死代码）。
-- [ ] **S4 拆分 `ChatService.wantsTools`**（暂缓）— 当需要在记忆「文本」或「关闭」模式使用联网工具时，再拆分 `memoryUsesTools` 和 `useToolLoop`。需验证人设、文本协议、工具历史回放、端点拒绝 tools 时的降级以及观察指标。
-- [ ] **联网工具真机验收**（见 [联网工具方案](2026-11-19-web-search-plan.md)）— 两个工具已接入记忆「自动」和「工具」模式。真机验证 DeepSeek 官方 Key、AnySearch 匿名与 token、搜索后读取正文、设置切换、限流和额度提示。
+- [ ] **备用 tail 模式（`SEPARATE_USER`）未接线** — 只有常量与单测，没有设置入口，也没有计划里的「返回 400/500 且正文命中模板报错 → 回退 MERGE_USER 并按 baseUrl+model 缓存」探测 / 降级逻辑；默认 MERGE_USER 兼容性最好，暂不启用，等确有端点需要连续 user 时再做（避免写永不执行的死代码）。
+- [ ] **S4 范围调查：联网工具独立于记忆模式启用（已排队；暂不实现）** — 先梳理拆分记忆工具与联网工具开关所需的代码、请求历史与测试范围，特别核对工具消息回放、稳定人设、tail、只读关键词注入和端点拒绝工具时的降级；提交范围结论后再决定实施。旧文本记忆写入、echo 和历史协议兼容工作已不属于 S4。
+- [ ] **联网工具真机验收**（见 [联网工具方案](2026-11-19-web-search-plan.md)）— 验证 DeepSeek 官方 Key、AnySearch 匿名与 token、搜索后读取正文、设置切换、限流和额度提示。
 - [ ] **设备残留数据清理**（可选，下次接设备时）— 测试注入的长消息、重复记忆 `mem_ln3glfhc` / `mem_39ypzmxj`。
 
 ---

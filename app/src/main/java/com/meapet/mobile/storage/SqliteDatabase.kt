@@ -168,7 +168,6 @@ internal object Migrations {
             turn_id TEXT,
             role TEXT NOT NULL CHECK(role IN ('system','user','assistant','tool')),
             content TEXT NOT NULL,
-            memory_ops_block TEXT,
             tool_calls TEXT,
             tool_call_id TEXT,
             tool_name TEXT,

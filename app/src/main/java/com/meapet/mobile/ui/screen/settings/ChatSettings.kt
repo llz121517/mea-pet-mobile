@@ -99,8 +99,8 @@ internal fun MemorySection(
             ParamLabelWithHelp(
                 label = "记忆检索方式",
                 helpTitle = "记忆检索方式",
-                helpText = "自动/工具：让模型按需要调用记忆工具，端点不支持时会降级为文本协议。" +
-                    "文本：按关键词注入相关记忆，记忆写入通过回复中的文本协议完成。\n\n" +
+                helpText = "自动/工具：让模型按需要调用记忆工具，端点不支持时降级为只读关键词注入。" +
+                    "只读：保留关键词命中，将相关记忆追加到本轮发送消息；不会通过回复创建、修改或删除记忆。\n\n" +
                     "关闭：停止记忆注入和检索，不会删除已保存的记忆或对话历史。" +
                     "此选项与上方的记忆总开关不同。当前联网工具需要使用自动或工具模式。"
             )
@@ -127,7 +127,7 @@ internal fun MemorySection(
     }
     SettingsSwitchRow(
         label = "自动摘要",
-        description = "定期总结对话为长期记忆",
+        description = "仅工具模式：定期整理短期记忆为长期记忆",
         checked = state.enableAutoSummary,
         darkTheme = darkTheme,
         onCheckedChange = { viewModel.updateEnableAutoSummary(it) }
@@ -142,7 +142,7 @@ internal fun MemorySection(
             helpText = "控制自动整理长期记忆的对话间隔。数值越小，整理越频繁，" +
                 "也可能带来更多模型请求和费用。\n\n" +
                 "自动摘要与上下文压缩是两件事：前者整理记忆，后者缩短发送给模型的历史。" +
-                "关闭自动摘要后，这个间隔不生效。"
+                "仅成功的工具模式对话计数；只读、关闭和降级轮次不触发摘要。关闭自动摘要后，这个间隔不生效。"
         )
     }
     Slider(
@@ -165,14 +165,14 @@ internal fun MemorySection(
 private fun memoryModeLabel(mode: MemoryMode): String = when (mode) {
     MemoryMode.AUTO -> "自动"
     MemoryMode.TOOLS -> "工具"
-    MemoryMode.TEXT -> "文本"
+    MemoryMode.TEXT -> "只读"
     MemoryMode.OFF -> "关闭"
 }
 
 /** 记忆检索方式的一句话说明。 */
 private fun memoryModeHint(mode: MemoryMode): String = when (mode) {
-    MemoryMode.AUTO -> "自动：优先让模型自己调用检索工具，端点不支持时回退关键词注入"
+    MemoryMode.AUTO -> "自动：优先让模型调用记忆工具，端点不支持时回退只读关键词注入"
     MemoryMode.TOOLS -> "工具：模型主动检索/写入记忆（需要端点支持 function calling）"
-    MemoryMode.TEXT -> "文本：按关键词注入相关记忆，写入走文本协议（旧版行为，可能在后续版本移除支持）"
-    MemoryMode.OFF -> "关闭检索：不注入也不检索，记忆仍会保存"
+    MemoryMode.TEXT -> "只读：关键词命中的已有记忆追加到本轮消息，不创建、修改或删除记忆"
+    MemoryMode.OFF -> "关闭：本轮不使用或写入记忆，已保存的内容保留"
 }

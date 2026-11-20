@@ -15,9 +15,8 @@ import kotlin.math.max
  * - 加载策略：任意公共方法首次访问时惰性加载磁盘数据（[ensureLoadedLocked]），
  *   [loadFromDisk] 仅作为启动预热提前触发同一逻辑——保证"先写后载"不会
  *   用只含新条目的内存列表覆盖磁盘上的旧记忆；
- * - 淘汰策略：[MemoryType.FACTUAL]/[MemoryType.CORE_TRAIT] 永不参与自动淘汰
- *   （由大模型自己决定是否 update/delete，见 [MemoryOpsProtocol]）；
- *   超过 [maxItems] 时只在 SHORT_TERM/LONG_TERM 里淘汰 LRU + 低重要性条目。
+ * - 淘汰策略：[MemoryType.FACTUAL]/[MemoryType.CORE_TRAIT] 永不参与自动淘汰；超过
+ *   [maxItems] 时只在 SHORT_TERM/LONG_TERM 里淘汰 LRU + 低重要性条目。
  *
  * ## 低耦合
  * - 不依赖任何业务模块与 Android 组件，仅操作 [MemoryItem] 数据与文件，
@@ -86,9 +85,8 @@ class MemoryRepository(
     /**
      * 在一次持锁内应用一批新增/覆盖 + 删除，**整批只落盘一次**。
      *
-     * 模型一轮回复常声明多条记忆操作（[MemoryService.applyOps]），逐条
-     * [save]/[delete] 会把整个记忆库全量重写同样多次（写放大）。本方法先在内存
-     * 里应用完所有变更，再统一 [persistLocked] 一次。
+     * 工具 turn 提交会使用本方法；逐条 [save]/[delete] 会把整个记忆库全量重写同样多次。
+     * 本方法先在内存里应用完所有变更，再统一 [persistLocked] 一次。
      *
      * @param upserts 要新增或按 id 覆盖的条目（按入参顺序应用）
      * @param deleteIds 要删除的条目 id
@@ -205,8 +203,8 @@ class MemoryRepository(
      * 关键词是模型精选出的检索词，直接用 `input.contains(keyword)` 判断命中，
      * 中英文都适用。事实/特质不参与这里的检索——它们每轮全量注入，见 [getPersonaFacts]。
      *
-     * 命中条目的访问计数（LRU 权重）不在此更新：读写分离，由调用方在拿到结果后
-     * 显式调用 [markAccessed]，避免每次纯查询都整库落盘一次。
+     * 命中条目的访问计数（LRU 权重）不在此更新：检索本身保持纯读；需要记账的独立调用方
+     * 可在查询后显式调用 [markAccessed]。
      *
      * @param userInput 当前对话上下文/用户输入
      * @param maxCount 最大返回条数
@@ -231,10 +229,10 @@ class MemoryRepository(
     }
 
     /**
-     * 标记一批记忆被访问（更新 accessCount / lastAccessedAt 的 LRU 权重），整批只落盘一次。
+     * 显式更新一批记忆的访问时间与次数，整批只落盘一次。
      *
-     * 与 [getRelevant] 配对：查询是纯读，访问记账作为独立命令由调用方
-     * （[MemoryManager.buildContext]）在注入后显式触发。找不到的 id 静默跳过。
+     * 与 [getRelevant] 分离：查询始终纯读；只有需要更新 LRU 权重的独立调用方才使用此命令。
+     * 找不到的 id 静默跳过。
      */
     override suspend fun markAccessed(ids: Collection<String>) {
         if (ids.isEmpty()) return

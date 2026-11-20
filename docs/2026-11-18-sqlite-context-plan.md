@@ -15,16 +15,16 @@
   6. 私网地址与公网同样处理，不做特殊对待；仅回环地址保留独立常量（当前与云端同为 32K）。
   7. 容量获取原则：尽量用通用逻辑，不为各服务单独写 if；不设内置表、不设白名单、不做运行时学习，探测失败直接降级到兜底值。
   8. 压缩摘要并入首条 system 末尾（见 M5）。
-  9. tail 目前只含当前时间，并入最后一条 user，不进历史，不使用尾部 system（见 memory-tools-plan 第 9 节）。
-  10. 工具循环消息（role=tool）入历史并保留，同轮共用 turn_id，整轮回滚、重试、清除按 turn_id 处理（见 memory-tools-plan 第 10 节）。
+  9. tail 目前只含当前时间，并入最后一条 user，不进历史，不使用尾部 system（见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)）。
+  10. 工具循环消息（role=tool）入历史并保留，同轮共用 turn_id，整轮回滚、重试、清除按 turn_id 处理（见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)）。
 
 ## 1. 已落地（commit f2569a1）
 
 - [已完成] M0：依赖解析、JDBC 测试驱动、spike 测试（事务、外键级联、WAL、部分唯一索引、user_version、Unicode、keyset 分页）。
-- [已完成] M1：`storage/SqliteDatabase`（单连接 + Mutex、BEGIN IMMEDIATE 事务、`user_version` 迁移、V1 schema，已预留 tool_*、extra_json、compaction_summaries 等表位）；`ConversationRepository`（SQLite/内存实现）；`MemoryStore` 接口 + `SqliteMemoryStore`，`MemoryRepository`（JSON）实现同一接口作备胎；`ConversationManager` 改为内存窗口 + 有序异步写队列，完整历史留在仓库。
-- [已完成] M2：`LegacyJsonImporter`（单事务、幂等、读回校验、标记 meta.legacy_json_import 与数据同事务）。
+- [已完成] M1：`storage/SqliteDatabase`（单连接 + Mutex、BEGIN IMMEDIATE 事务、`user_version` 迁移、V1 schema，包含工具消息字段与压缩状态表位）；`ConversationRepository`（SQLite / 内存实现）；`MemoryStore` 接口 + `SqliteMemoryStore`，`MemoryRepository`（JSON）实现同一接口作备胎；`ConversationManager` 改为内存窗口 + 有序异步写队列，完整历史留在仓库。
+- [已完成] M2：`LegacyJsonImporter`（单事务、幂等、读回校验、标记 meta.legacy_json_import 与数据同事务）；历史 JSON 中废弃的记忆操作附加字段忽略，不参与导入后的请求或记忆处理。
 - [已完成] UI 解耦首版：首屏读仓库最近 50 条，向上 keyset 懒加载；清除对话的撤销快照改用仓库完整历史。
-- 测试：全量 JVM 单测 264 个通过，`assembleDebug` 成功。
+- 验证：已有 JVM 单测与 debug 构建覆盖存储和上下文功能；本轮代码变更后的最终验证待完成，暂不列测试数量。
 
 注意：旧 JSON 只含约 27 到 35 条消息，「完整历史」只能从升级后开始累积，发布说明需写明。
 
@@ -39,7 +39,7 @@
 
 ### M3 UI 解耦收尾
 - 清除对话改为软删除（conversations.state = cleared + 新建活跃会话），撤销只携带 conversationId，到期或下次启动物理清除；当前仍是内存快照方案，大历史下需替换。**[1.10 待做]**：单会话模型下要把 `conversationId` 变成可切换状态（仓库/压缩状态/当前会话指针），牵涉面大，1.9 保持现状（撤销快照已能工作）。
-- [已完成 2026-11-19] 失败回滚由「写后删」改为「成功后同事务写入」；retryMessage 按整轮处理：一个 turn 的 user + assistant 片段 + tool 消息收齐后经 `appendAll` **一个事务**落库，失败/超时不写，取消时按已完成部分提交；`retryMessage` 移除该 user 及其后全部消息（工具消息同轮入历史，见 memory-tools-plan 第 10 节）。
+- [已完成 2026-11-19] 失败回滚由「写后删」改为「成功后同事务写入」；retryMessage 按整轮处理：一个 turn 的 user + assistant 片段 + tool 消息收齐后经 `appendAll` **一个事务**落库，失败/超时不写，取消时按已完成部分提交；`retryMessage` 移除该 user 及其后全部消息（工具消息同轮入历史，见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)）。
 - [待做] 真机验证：向上懒加载的滚动锚定、悬浮窗与主界面同步、WAL 行为、工具消息往返、插队/停止、压缩分隔条（本轮按要求暂不操作设备）。
 - [已完成] 压缩分隔条：样式 `──────── 早些时候 ────────`（淡色），显示在 `seq == active_summary.covered_to_seq` 之后，即已压缩进摘要的消息与仍逐字发送给模型的消息之间；不提供点击展开摘要（已否决，见 M5 待办）。
   - 实现注记：为免迁移，压缩状态未写入 `compaction_summaries` 表，而是整份 JSON 存进 `meta` 表键 `context_compaction`（`MetaCompactionStore`）；分隔条按「已被覆盖的最后一条消息 id」定位（`ChatUiState.compactedUpToMessageId`）。
@@ -129,12 +129,13 @@ WAL 支持「一个写者 + 多个读者」并发，因此 `SqliteDatabase` 拆�
 - `PRAGMA foreign_keys` 是连接级开关，每条连接单独设置；迁移只在首次初始化写连接时执行一次。
 - 单测：`SqliteDatabaseConcurrencyTest`（4 读分页 + 2 读记忆 + 1 写记忆并发，最终一致）。
 
-## 5. 与记忆工具化计划的接口约束
+## 5. 与记忆系统的存储边界
 
-- `MemoryStore` 接口已落地，工具执行体只依赖接口；`applyChanges` 必须原子；`getPersonaFacts` 保持 createdAt 升序（SQLite 实现已加 id 作次级键）。
-- 会话表存储工具循环的中间消息（role=tool 及 assistant 的 tool_calls），使用 V1 已预留的 tool_* 与 extra_json 列，同轮共用 turn_id，在同一事务写入（见 memory-tools-plan 第 10 节）；无需新迁移。
-- 窗口裁剪与压缩切点按轮对齐，保证 tool_calls 与 tool 结果成对；压缩摘要输入中 tool 结果截断或概括。
-- 检索不依赖 FTS（见 memory-tools-plan 第 11 节）；若日后需 FTS 或新列，走 `user_version = 2`，由两边协调迁移归属。
+- `MemoryStore` 是记忆读写抽象；工具执行仅依赖接口，`applyChanges` 原子提交，`getPersonaFacts` 按创建时间稳定排序。
+- 会话历史保留工具循环中的 assistant `tool_calls` 与 role=tool 消息，按 `turn_id` 落库。只读关键词回退在构造请求时过滤工具消息，不改写已存的 SQLite 历史；具体记忆模式与写入边界见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)。
+- 新数据库不创建已废弃的记忆操作 nullable 列；已存在的开发期数据库可能仍有该列，读取和写入均忽略，保持原样，不做破坏性迁移。
+- 旧 JSON 会话的记忆操作附加字段不参与导入后的会话 / 记忆逻辑；legacy JSON 导入仍与迁移框架分开执行。
+- 检索不依赖 FTS；若日后需 FTS 或新列，走 `user_version = 2` 并协调迁移归属。
 
 ## 6. 风险与未核实项
 

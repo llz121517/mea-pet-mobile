@@ -18,7 +18,6 @@ package com.meapet.mobile.config
  * @property maxPersonaFacts 每轮注入 system prompt 的事实/特质条数上限。这两类永不自动
  *   淘汰又全量注入，不封顶的话用久了会无限撑大每次请求（只影响注入，不影响存储与展示）
  * @property minSummaryItems 触发摘要所需的最少短期记忆条数（不足则跳过本次，攒着下次再合）
- * @property memoryOpsEchoTurns 组装请求时，最近多少条助手消息要把记忆协议块贴回正文当格式范例
  * @property enableMemory 是否启用记忆系统
  * @property enableAutoSummary 是否自动摘要对话为长期记忆
  * @property appVersion 应用版本名
@@ -34,14 +33,13 @@ data class AppConfig(
     val maxContextMemories: Int = 5,
     val maxPersonaFacts: Int = 30,
     val minSummaryItems: Int = 3,
-    val memoryOpsEchoTurns: Int = 3,
     val enableMemory: Boolean = true,
     val enableAutoSummary: Boolean = true,
     /**
      * 是否启用「记忆工具调用」模式（function calling）。
      *
      * 开启后模型通过 `search_memory` / `create_memory` / `update_memory` / `delete_memory`
-     * 主动检索与写入记忆，替代文本围栏协议（不再注入协议说明与关键词回忆）。
+     * 主动检索与写入记忆；未使用工具时仅保留关键词只读注入。
      *
      * 端点不支持 tools（400/422）时，ChatService 会在本会话内自动回退到单次请求，
      * 保证聊天不中断。

@@ -79,13 +79,44 @@ class SqliteConversationRepositoryTest {
     }
 
     @Test
-    fun unicodeAndMemoryOpsBlockRoundTrip() = runBlocking {
+    fun unicodeAndTimestampRoundTrip() = runBlocking {
         val m = ChatMessage(
             ChatRole.assistant, "你好 \uD83D\uDE00 \"q\"\n换行",
-            memoryOpsBlock = "```memory-ops\n[]\n```", id = "u1", timestamp = 5
+            id = "u1", timestamp = 5
         )
         repo.append(m)
         assertEquals(m, repo.loadRecent(1).single())
+    }
+
+    @Test
+    fun existingDatabaseWithUnusedMemoryOpsColumnPreservesHistoryAndAcceptsWrites() = runBlocking {
+        val oldMessage = ChatMessage(ChatRole.assistant, "旧回复", id = "old", timestamp = 17)
+        repo.append(oldMessage)
+        db.transaction { c ->
+            val hasLegacyColumn = c.prepare("PRAGMA table_info(messages)").use { st ->
+                var found = false
+                while (st.step()) {
+                    if (st.getText(1) == "memory_ops_block") found = true
+                }
+                found
+            }
+            if (!hasLegacyColumn) c.exec("ALTER TABLE messages ADD COLUMN memory_ops_block TEXT")
+            c.exec("UPDATE messages SET memory_ops_block = 'legacy block' WHERE id = 'old'")
+        }
+        db.close()
+
+        assertEquals(listOf(oldMessage), repo.loadRecent(10))
+        val newTurn = toolTurn("new-turn", start = 21)
+        repo.appendAll(newTurn)
+        assertEquals(listOf(oldMessage) + newTurn, repo.loadRecent(10))
+        assertEquals(listOf(oldMessage), repo.pageBefore("u21", 10))
+        db.withConnection { c ->
+            c.prepare("SELECT memory_ops_block FROM messages WHERE id = 'old'").use { st ->
+                assertTrue(st.step())
+                assertEquals("legacy block", st.getText(0), "旧列保留原值，不执行破坏性迁移")
+            }
+            assertEquals(4L, c.queryLong("SELECT COUNT(*) FROM messages WHERE memory_ops_block IS NULL"))
+        }
     }
 
     @Test

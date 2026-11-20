@@ -200,11 +200,9 @@ class ConversationManager(
      *   并入最后一条 user 的发出副本，**不写入历史**；全部为空则不附加
      * @param tailMode tail 的发送方式，见 [TailMode]
      * @param maxMessages 最大消息数（滑动窗口，从末尾取）
-     * @param memoryOpsEchoTurns 最近多少条助手消息要把 [ChatMessage.memoryOpsBlock] 贴回正文
-     *   （0 = 不贴）。仅影响发给模型的副本，不改动会话历史本身
      * @param includeToolHistory 是否保留工具历史（`assistant.rawAssistantJson` 与 `role=tool`）。
      *   工具模式（端点支持 tools）为 true：原样回传 `tool_calls` / `reasoning_content`；
-     *   文本协议或端点不支持 tools 时为 false：过滤 tool 消息、assistant 只留正文
+     *   只读模式或端点不支持 tools 时为 false：过滤 tool 消息、assistant 只留正文
      *   （正文为空的纯 tool_calls 消息一并丢弃），保证请求序列合法。
      */
     fun buildApiMessages(
@@ -213,7 +211,6 @@ class ConversationManager(
         tailFragments: List<String> = emptyList(),
         tailMode: TailMode = DEFAULT_TAIL_MODE,
         maxMessages: Int = 30,
-        memoryOpsEchoTurns: Int = 0,
         summary: String = "",
         skipOldest: Int = 0,
         includeToolHistory: Boolean = true
@@ -250,7 +247,7 @@ class ConversationManager(
             add(ChatMessage(role = ChatRole.system, content = systemContent))
             addAll(
                 applyTail(
-                    echoMemoryOps(prepared, memoryOpsEchoTurns),
+                    prepared,
                     composeTail(tailFragments),
                     tailMode
                 )
@@ -296,7 +293,7 @@ class ConversationManager(
     }
 
     /**
-     * 文本协议窗口：去掉所有工具协议痕迹。
+     * 纯文本发送窗口：去掉结构化工具消息及字段，保留可见正文。
      *
      * TEXT 模式或端点不支持 tools 时，历史里既不能有 `role=tool`，也不能带 `tool_calls`
      * 的 assistant 原始 JSON（端点会尝试解析不存在的能力）。纯 tool_calls 的 assistant
@@ -413,28 +410,6 @@ class ConversationManager(
     /** 必须在持有 [lock] 时调用，保证入队顺序与内存变更顺序一致。 */
     private fun enqueue(op: PersistOp) {
         if (persistEnabled) persistQueue.trySend(op)
-    }
-
-    /**
-     * 把最近 [turns] 条助手消息的 [ChatMessage.memoryOpsBlock] 贴回正文，
-     * 让模型在历史里能看到自己写过的协议块正例。
-     *
-     * 只回贴**真实**存过的块；没有块的轮次保持原样，不注入合成 few-shot。
-     * 只影响发给模型的副本，不改动会话历史本身。
-     */
-    private fun echoMemoryOps(msgs: List<ChatMessage>, turns: Int): List<ChatMessage> {
-        if (turns <= 0) return msgs
-
-        val echoIds = msgs.asReversed()
-            .filter { it.role == ChatRole.assistant && !it.memoryOpsBlock.isNullOrBlank() }
-            .take(turns)
-            .mapTo(mutableSetOf()) { it.id }
-
-        if (echoIds.isEmpty()) return msgs
-
-        return msgs.map { msg ->
-            if (msg.id in echoIds) msg.copy(content = "${msg.content}\n\n${msg.memoryOpsBlock}") else msg
-        }
     }
 
     /**

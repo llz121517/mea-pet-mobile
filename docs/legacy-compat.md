@@ -75,3 +75,9 @@ adb logcat -s LegacyMigration
 
 - 单测：`app/src/test/java/com/meapet/mobile/legacy/`（目录清理、幂等、开关联动）；
 - 真机模拟升级：把旧 `enc_p.onnx` 推到 `files/tts_model/` 后启动，确认目录被清空、两个开关关闭、设置页显示未下载（详见 `docs/archive/checklists/2026-11-15-tts-device-test-1.8.0.md` 升级迁移用例）。
+
+## 7. 1.9 记忆数据兼容（不属于迁移 step）
+
+记忆 / 会话 JSON 导入由 `LegacyJsonImporter` 在 SQLite 可用后执行，不注册到上述 `LegacyMigration.STEPS`。历史 JSON 记录里的废弃记忆操作附加字段会被忽略，不会被重放或写入记忆。
+
+开发期旧 SQLite 数据库可能保留 nullable 的旧记忆操作列。运行时不读取、不写入该列，也不通过破坏性迁移清除它；新建数据库不包含该列。记忆数据、会话历史与稳定人设引用不因这一兼容处理而删除。当前模式行为见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)。

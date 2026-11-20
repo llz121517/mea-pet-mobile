@@ -75,11 +75,11 @@ class MemoryManagerTest {
         val count = CountHolder()
         val mgr = manager(settings.build(), service, count)
 
-        repeat(2) { mgr.onExchangeComplete(emptyList()) }
+        repeat(2) { mgr.onExchangeComplete() }
         verifyBlocking(service, never()) { summarizeShortTermMemories() }
         assertEquals(2, count.value)
 
-        mgr.onExchangeComplete(emptyList())
+        mgr.onExchangeComplete()
         verifyBlocking(service, times(1)) { summarizeShortTermMemories() }
         assertEquals(0, count.value, "触发后计数应清零重新攒")
     }
@@ -91,11 +91,11 @@ class MemoryManagerTest {
         val count = CountHolder()
 
         // 第一次「启动」聊 2 轮
-        repeat(2) { manager(settings.build(), service, count).onExchangeComplete(emptyList()) }
+        repeat(2) { manager(settings.build(), service, count).onExchangeComplete() }
         verifyBlocking(service, never()) { summarizeShortTermMemories() }
 
         // 冷启动后再聊 1 轮，应接着数到 3 而不是从头开始
-        manager(settings.build(), service, count).onExchangeComplete(emptyList())
+        manager(settings.build(), service, count).onExchangeComplete()
         verifyBlocking(service, times(1)) { summarizeShortTermMemories() }
     }
 
@@ -106,12 +106,12 @@ class MemoryManagerTest {
         val count = CountHolder()
         val mgr = manager(long.build(), service, count)
 
-        repeat(4) { mgr.onExchangeComplete(emptyList()) }
+        repeat(4) { mgr.onExchangeComplete() }
         assertEquals(4, count.value)
 
         // 用户把间隔从 10 调到 3：已攒的 4 轮应立刻满足，而不是被取模逻辑跳过、再等一整个周期
         val short = FakeSettings(interval = 3)
-        manager(short.build(), service, count).onExchangeComplete(emptyList())
+        manager(short.build(), service, count).onExchangeComplete()
         verifyBlocking(service, times(1)) { summarizeShortTermMemories() }
         assertEquals(0, count.value)
     }
@@ -126,40 +126,111 @@ class MemoryManagerTest {
     )
 
     @Test
-    fun stablePartHoldsProtocolAndPersonaFacts() = runTest {
+    fun stablePartContainsReadonlyGuidanceAndPersonaFacts() = runTest {
         val repo = MemoryRepository(tmp.newFolder())
         repo.save(MemoryItem(id = "f1", content = "用户叫小明", type = MemoryType.FACTUAL))
 
         val ctx = contextManager(repo).buildContext("你好")
 
-        assertTrue(ctx.stable.startsWith("【记忆协议】"), "协议说明应在最前")
+        assertTrue(ctx.stable.startsWith("【记忆只读】"), "稳定段应简短说明只读边界")
+        assertTrue(ctx.stable.contains("不可增删改"), "应明确当前模式不能写入记忆")
+        assertTrue(ctx.stable.contains("不要声称已记录或保存"), "应避免模型承诺保存新信息")
         assertTrue(ctx.stable.contains("用户叫小明"), "事实应注入稳定段")
+        assertFalse(ctx.stable.contains("memory-ops"), "不应包含已移除的文本协议")
+        assertFalse(ctx.stable.contains("可引用 id 更新/删除"), "只读上下文不应指示通过 id 写入")
         assertFalse(ctx.tail.contains("用户叫小明"), "事实不该同时出现在尾部段")
     }
 
     @Test
-    fun tailPartHoldsRecollectionsAndEndsWithReminder() = runTest {
+    fun tailContainsOnlyKeywordMatchedRecollections() = runTest {
         val repo = MemoryRepository(tmp.newFolder())
+        repo.save(MemoryItem(id = "fact", content = "用户叫小明", type = MemoryType.FACTUAL))
         repo.save(
             MemoryItem(
-                id = "m1",
+                id = "hit",
                 content = "用户喜欢吃酸的水果",
                 type = MemoryType.SHORT_TERM,
                 keywords = listOf("水果")
             )
         )
+        repo.save(
+            MemoryItem(
+                id = "miss",
+                content = "用户喜欢看电影",
+                type = MemoryType.LONG_TERM,
+                keywords = listOf("电影")
+            )
+        )
 
         val ctx = contextManager(repo).buildContext("今天买了点水果")
 
-        assertTrue(ctx.tail.contains("用户喜欢吃酸的水果"), "命中的回忆应进尾部段")
-        // 提醒必须是整个请求的最后一段
-        assertTrue(ctx.tail.trimEnd().endsWith(MemoryOpsProtocol.reminder()), "收尾提醒应在最末")
+        assertEquals(
+            "【相关回忆】（关键词匹配，仅供参考）\n- [hit] (短期) 用户喜欢吃酸的水果\n",
+            ctx.tail.replace("\r\n", "\n")
+        )
+        assertTrue(ctx.stable.contains("用户叫小明"), "人设事实应留在稳定段")
+        assertFalse(ctx.tail.contains("用户叫小明"), "事实不应重复进入检索尾段")
+        assertFalse(ctx.tail.contains("用户喜欢看电影"), "未命中关键词的回忆不应注入")
     }
 
     @Test
-    fun tailStillCarriesReminderWithoutRecollections() = runTest {
+    fun tailIsEmptyWhenThereAreNoKeywordHits() = runTest {
         val ctx = contextManager(MemoryRepository(tmp.newFolder())).buildContext("你好")
-        assertEquals(MemoryOpsProtocol.reminder(), ctx.tail)
+
+        assertEquals("", ctx.tail)
+    }
+
+    @Test
+    fun toolPersonaSectionRemainsByteForByteUnchanged() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        repo.save(
+            MemoryItem(
+                id = "f1",
+                content = "用户叫小明",
+                type = MemoryType.FACTUAL,
+                createdAt = 100
+            )
+        )
+        repo.save(
+            MemoryItem(
+                id = "t1",
+                content = "喜欢简短回复",
+                type = MemoryType.CORE_TRAIT,
+                createdAt = 200
+            )
+        )
+
+        val persona = contextManager(repo).buildPersonaSection()
+
+        assertEquals(
+            "【用户人设】（永久，可引用 id 更新/删除）\n- [f1] (事实) 用户叫小明\n- [t1] (特质) 喜欢简短回复",
+            persona.replace("\r\n", "\n")
+        )
+    }
+
+    @Test
+    fun repeatedContextReadsPreserveMemoryContentAndAccessMetadata() = runTest {
+        val dir = tmp.newFolder()
+        val repo = MemoryRepository(dir)
+        val stored = MemoryItem(
+            id = "m1",
+            content = "用户喜欢吃酸的水果",
+            type = MemoryType.SHORT_TERM,
+            createdAt = 100,
+            lastAccessedAt = 123,
+            accessCount = 7,
+            keywords = listOf("水果")
+        )
+        repo.save(stored)
+        val manager = contextManager(repo)
+
+        val first = manager.buildContext("今天买了点水果")
+        val second = manager.buildContext("今天买了点水果")
+
+        assertEquals(first, second, "相同输入应得到稳定的只读上下文")
+        assertTrue(first.tail.contains("用户喜欢吃酸的水果"), "关键词命中仍应注入相关回忆")
+        assertEquals(listOf(stored), repo.getAll(), "构建上下文不能修改记忆或访问计数")
+        assertEquals(listOf(stored), MemoryRepository(dir).getAll(), "读取上下文后持久化内容也必须不变")
     }
 
     @Test
@@ -199,7 +270,7 @@ class MemoryManagerTest {
         val service = mock<MemoryService>()
         val count = CountHolder()
 
-        manager(settings.build(), service, count).onExchangeComplete(emptyList())
+        manager(settings.build(), service, count).onExchangeComplete()
 
         verifyBlocking(service, never()) { summarizeShortTermMemories() }
         assertEquals(0, count.value, "开关关闭时不应计数")

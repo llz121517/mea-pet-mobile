@@ -15,7 +15,6 @@ import com.meapet.mobile.client.model.ApiResponse
 import com.meapet.mobile.config.AppConfig
 import com.meapet.mobile.config.MemoryMode
 import com.meapet.mobile.memory.MemoryManager
-import com.meapet.mobile.memory.MemoryOpsProtocol
 import com.meapet.mobile.settings.SettingsManager
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -40,7 +39,7 @@ import kotlinx.serialization.json.jsonObject
  * - 发送消息 → 调用 [OpenAiCompatibleClient] → 解析响应；
  * - 与 [MemoryManager] 协作注入记忆上下文；
  * - 将对话记录交给 [ConversationManager] 管理；
- * - 每次对话后触发记忆提取；
+ * - 成功工具轮次后触发独立的记忆摘要计数；只读模式不改写记忆；
  * - 上下文压缩：把较早轮次折叠成滚动摘要，摘要并入首条 system 末尾。
  *
  * ## 一次 turn 的完整模型
@@ -70,7 +69,7 @@ import kotlinx.serialization.json.jsonObject
  * @param conversationManager 会话管理器
  * @param memoryManager 记忆管理器（null = 禁用记忆）
  * @param settingsManager 设置管理器
- * @param postProcessScope 事后处理（记忆提取/摘要）用的应用级作用域
+ * @param postProcessScope 成功工具轮次的记忆摘要处理使用的应用级作用域
  * @param config 应用配置
  * @param compactionStore 压缩状态存储（null = 不启用压缩）
  * @param compactor 上下文压缩器（null = 只做窗口丢弃兜底）
@@ -121,7 +120,7 @@ class ChatService(
 
     /**
      * 当前端点是否已被判定为不支持 tools（会话内缓存，避免每轮都先失败一次）。
-     * 一旦置位，本进程内退回单次请求（文本协议）。
+     * 一旦置位，本进程内退回单次请求；记忆仅保留只读关键词注入。
      */
     @Volatile
     private var toolsUnsupported = false
@@ -221,13 +220,10 @@ class ChatService(
                         )
                     }
 
-                    // 1) 解析最终回复：先剥离可能以文本形式泄漏的工具调用标记，再剥离记忆协议块
-                    val parsed = MemoryOpsProtocol.extract(execution.content)
+                    // 1) 最终回复按正文保存，不再解析或执行文本中的记忆写入声明
                     val finalAssistant = ChatMessage(
                         role = ChatRole.assistant,
-                        content = parsed.visibleReply,
-                        // 块留在消息上（不展示），下一轮贴回历史当格式范例，见 ConversationManager
-                        memoryOpsBlock = parsed.rawBlock,
+                        content = execution.content,
                         turnId = turnId,
                         // 原始回包（含 reasoning_content 等）供下一轮原样透传
                         rawAssistantJson = execution.finalRaw
@@ -241,16 +237,18 @@ class ChatService(
                         memoryTools?.onTurnSuccess()
                     }
 
-                    // 4) 事后处理：应用记忆操作/触发摘要转后台，不阻塞本次回复返回
+                    // 4) 仅成功工具模式轮次推进记忆摘要；只读/OFF/降级不产生后台记忆写入
                     //   （摘要是一次额外 LLM 请求，同步等它会让 UI 在拿到回复后仍长时间显示加载中）
-                    memoryManager?.let { mm ->
-                        postProcessScope.launch {
-                            try {
-                                mm.onExchangeComplete(parsed.ops)
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Memory post-processing failed", e)
+                    if (execution.toolsUsed) {
+                        memoryManager?.let { mm ->
+                            postProcessScope.launch {
+                                try {
+                                    mm.onExchangeComplete()
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Memory post-processing failed", e)
+                                }
                             }
                         }
                     }
@@ -265,7 +263,7 @@ class ChatService(
                         promptTokens = execution.promptTokens,
                         cacheHitTokens = execution.cacheHitTokens
                     )
-                    Log.d(TAG, "Response received (${parsed.visibleReply.length} chars)")
+                    Log.d(TAG, "Response received (${execution.content.length} chars)")
                     Result.success(turnUser to finalAssistant)
                 } catch (e: TimeoutCancellationException) {
                     // 单独先于 CancellationException 捕获：超时是失败，不是用户取消
@@ -338,7 +336,7 @@ class ChatService(
         val rawEstimate: Int
     )
 
-    /** 一轮执行的结果（尚未解析记忆协议块）。 */
+    /** 一轮执行的结果；文本正文不再承担记忆写入协议。 */
     private data class TurnExecution(
         val content: String,
         val finalRaw: String?,
@@ -380,12 +378,11 @@ class ChatService(
         // 模式解析（需求 §5.2）：
         // - 工具模式：stable = 固定工具说明 + **人设事实**（FACTUAL/CORE_TRAIT 仍全量注入，
         //   与当前输入无关、轮间稳定；短期/长期相关回忆改由模型自己调用 search_memory）；
-        //   不再注入文本协议说明与关键词回忆（两套协议同时存在会让模型在「输出围栏块」
-        //   和「调用工具」之间摇摆）
-        // - 非工具模式且记忆未关闭：走文本协议，stable + tail
+        //   相关回忆由工具按需检索，不再做关键词注入
+        // - 非工具模式且记忆未关闭：只读关键词注入，stable + tail
         // - OFF：stable 为空，也不注入
-        val textProtocol = !wantsTools && memoryMode != MemoryMode.OFF
-        val memoryContext = if (textProtocol) memoryManager?.buildContext(content) else null
+        val readOnlyMemory = !wantsTools && memoryMode != MemoryMode.OFF
+        val memoryContext = if (readOnlyMemory) memoryManager?.buildContext(content) else null
         var stableContext = if (wantsTools) {
             // 工具说明来自已注册工具（registry.hint），人设段来自记忆模块；
             // 拼接顺序与分隔符保持不变，前缀字节稳定
@@ -399,9 +396,6 @@ class ChatService(
             TimeContext.describe(),
             memoryContext?.tail?.takeIf { it.isNotBlank() }
         )
-        // 记忆关闭时 stable 为空（模型压根没收到协议说明），历史里也不该回贴协议块
-        var memoryOpsEchoTurns =
-            if (stableContext.isNotBlank() && !wantsTools) config.memoryOpsEchoTurns else 0
 
         val systemPrompt = settingsManager.getSystemPrompt()
         val model = settingsManager.getModel()
@@ -470,15 +464,13 @@ class ChatService(
         fun buildLocalRequest(
             includeToolHistory: Boolean,
             stable: String,
-            tail: List<String>,
-            echo: Int
+            tail: List<String>
         ): LocalRequest {
             val apiMessages = conversationManager.buildApiMessages(
                 systemPrompt = systemPrompt,
                 stableContext = stable,
                 tailFragments = tail,
                 maxMessages = maxMessages,
-                memoryOpsEchoTurns = echo,
                 summary = state.summary,
                 skipOldest = skipOldest,
                 includeToolHistory = includeToolHistory
@@ -517,8 +509,7 @@ class ChatService(
         var local = buildLocalRequest(
             includeToolHistory = wantsTools,
             stable = stableContext,
-            tail = tailFragments,
-            echo = memoryOpsEchoTurns
+            tail = tailFragments
         )
         Log.d(
             TAG,
@@ -558,9 +549,9 @@ class ChatService(
             } catch (e: Exception) {
                 val status = (e as? ApiException)?.statusCode
                 if (status == null || status !in TOOLS_UNSUPPORTED_STATUS) throw e
-                // 端点明确不支持 tools：本 turn 立即降级为文本协议重发，聊天不中断；
+                // 端点拒绝 tools：本 turn 立即降级为只读关键词上下文重发，聊天不中断；
                 // 之后本会话不再尝试 tools（toolsUnsupported 已置位）
-                Log.w(TAG, "Endpoint rejected tools (HTTP $status), falling back to text protocol")
+                Log.w(TAG, "Endpoint rejected tools (HTTP $status), falling back to read-only memory context")
                 toolsUnsupported = true
                 val fallbackContext =
                     if (memoryMode != MemoryMode.OFF) memoryManager?.buildContext(content) else null
@@ -569,14 +560,11 @@ class ChatService(
                     TimeContext.describe(),
                     fallbackContext?.tail?.takeIf { it.isNotBlank() }
                 )
-                memoryOpsEchoTurns =
-                    if (stableContext.isNotBlank()) config.memoryOpsEchoTurns else 0
                 local = buildLocalRequest(
-                    // 文本协议不能带工具历史：端点连 tools 都不支持，tool_calls 更解析不了
+                    // 不支持工具的端点只接收纯文本历史副本，不回放结构化工具消息
                     includeToolHistory = false,
                     stable = stableContext,
-                    tail = tailFragments,
-                    echo = memoryOpsEchoTurns
+                    tail = tailFragments
                 )
                 finalContent = requestOnce(local)
                 finalRaw = null
@@ -593,8 +581,7 @@ class ChatService(
             val fallback = buildLocalRequest(
                 includeToolHistory = false,
                 stable = stableContext,
-                tail = tailFragments,
-                echo = 0
+                tail = tailFragments
             )
             reply = requestOnce(fallback)
             finalRaw = null

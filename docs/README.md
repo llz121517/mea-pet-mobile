@@ -14,6 +14,7 @@
 | 安装 / 编译 / 配置 App，了解功能 | [`README.md`](../README.md) |
 | 知道某个版本改了什么 | [`CHANGELOG.md`](../CHANGELOG.md)；1.6.0 及更早见 [`archive/changelog/`](archive/changelog/) |
 | 接手续做代码审查遗留项 | [`TODO.md`](TODO.md) ← **唯一在维护的待办清单** |
+| 了解记忆工具、只读回退、自动摘要与数据兼容 | [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) |
 | 了解 TTS 的设计、发音规则与已知边界 | [`tts/architecture.md`](tts/architecture.md) |
 | 复现 / 重新打包 TTS 模型包与词表 | [`tts/model-package.md`](tts/model-package.md)、[`tts/g2p-pipeline.md`](tts/g2p-pipeline.md)、[`tools/tts/README.md`](../tools/tts/README.md) |
 | 查 1.8.0 真机验收记录（已通过，归档） | [`archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](archive/checklists/2026-11-15-tts-device-test-1.8.0.md) |
@@ -28,8 +29,8 @@
 
 | 文件 | 内容 | 更新时机 |
 |---|---|---|
-| [`TODO.md`](TODO.md) | 代码审查遗留项（A 稳定性 / B 架构 / C 异味规范工程）+ 待办 E 1.9 收尾（含 1.10 / 1.11 计划项）+ 发布收尾。**全项目唯一待办清单**，勾掉或新增条目时同步 `CHANGELOG.md`（用户可见改动） | 每次修/发现一个问题 |
-| [`legacy-compat.md`](legacy-compat.md) | 旧版本迁移框架的引用点、当前 3 个 TTS step（预计 1.11.0 移除）、删除步骤、升级行为与验证方式 | 新增 / 删除任一迁移 step 时 |
+| [`TODO.md`](TODO.md) | 代码审查遗留项、1.9 发布前验收与真机验证、架构和工程待办。**全项目唯一待办清单**，用户可见改动同步 `CHANGELOG.md` | 每次修复或发现一个问题 |
+| [`legacy-compat.md`](legacy-compat.md) | 版本迁移框架引用点、当前迁移步骤、升级行为与验证方式 | 新增 / 删除迁移 step 时 |
 
 ### 2.2 TTS（语音合成）文档组
 
@@ -49,13 +50,13 @@
 | [`rules.md`](rules.md) | 项目规则（通用逻辑优先 / 过时文档直接删除） | 新增 / 修改规则时 |
 | [`adr/0001-tool-round-limit-interception.md`](adr/0001-tool-round-limit-interception.md) | ADR：工具轮次用尽时在工具执行端拦截，不发送 `tool_choice="none"` | 新决策按编号追加 |
 
-### 2.4 活跃计划文档
+### 2.4 活跃实现参考
 
 | 文件 | 内容 |
 |---|---|
-| [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) | 1.9 记忆工具化：工具循环、4 个记忆工具、工具消息入历史、插队发送、检索打分 |
-| [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) | 1.9 SQLite 存储、上下文压缩、容量探测 |
-| [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) | web 搜索工具：通用映射 + 适配器层（DeepSeek Search API、AnySearch 匿名/token），待实施 |
+| [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) | 1.9 记忆系统当前实现：工具写入、只读关键词注入、自动摘要边界、历史与旧数据兼容 |
+| [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) | 1.9 SQLite 存储、上下文压缩、容量探测及遗留决策 / 待验收项 |
+| [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) | 联网搜索与抓取的已接入行为、适配器配置与待真机验收项 |
 
 ## 3. 历史归档（只读，不再维护）
 

@@ -8,23 +8,9 @@ import kotlin.test.assertTrue
 /**
  * ConversationManager 组装 API 请求的单元测试。
  *
- * 重点是记忆协议块的回贴：历史里存的是剥离过块的可见正文，直接发出去，
- * 模型看到的就是「我过去每轮都没输出这个块」，会照着自己漏掉。
+ * 覆盖稳定前缀、请求尾部只读信息、窗口裁剪与工具历史的发送副本清洗。
  */
 class ConversationManagerTest {
-
-    private fun block(json: String) = "```memory-ops\n$json\n```"
-
-    private fun managerWith(vararg turns: Pair<String, String?>): ConversationManager {
-        val mgr = ConversationManager()
-        turns.forEachIndexed { i, (reply, ops) ->
-            mgr.addMessage(ChatMessage(role = ChatRole.user, content = "问题$i"))
-            mgr.addMessage(
-                ChatMessage(role = ChatRole.assistant, content = reply, memoryOpsBlock = ops)
-            )
-        }
-        return mgr
-    }
 
     // ── 消息分层（静态前缀 + 尾部易变块）────────────────
 
@@ -35,13 +21,13 @@ class ConversationManagerTest {
 
         val sent = mgr.buildApiMessages(
             systemPrompt = "你是梅尔",
-            stableContext = "【记忆协议】…",
+            stableContext = "【只读记忆】…",
             tailFragments = listOf("【当前时间】现在")
         )
 
         assertEquals(2, sent.size)
         assertEquals(ChatRole.system, sent[0].role)
-        assertEquals("你是梅尔\n\n【记忆协议】…", sent[0].content)
+        assertEquals("你是梅尔\n\n【只读记忆】…", sent[0].content)
         assertEquals(ChatRole.user, sent[1].role)
         // 每轮都变的内容必须排在历史之后，否则它之后的一切都无法命中 prefix cache
         assertEquals(1, sent.count { it.role == ChatRole.system })
@@ -85,83 +71,6 @@ class ConversationManagerTest {
         mgr.addMessage(ChatMessage(role = ChatRole.user, content = "m12"))
         assertEquals(8, mgr.size)
         assertEquals(prefixAfterTrim, mgr.getMessages().take(prefixAfterTrim.size).map { it.content })
-    }
-
-    @Test
-    fun memoryOpsBlockIsAppendedBackToRecentAssistantTurns() {
-        val mgr = managerWith("回复A" to block("[]"), "回复B" to block("""[{"op":"create"}]"""))
-
-        val sent = mgr.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 5)
-        val assistants = sent.filter { it.role == ChatRole.assistant }
-
-        assertEquals("回复A\n\n${block("[]")}", assistants[0].content)
-        assertEquals("回复B\n\n${block("""[{"op":"create"}]""")}", assistants[1].content)
-    }
-
-    @Test
-    fun echoIsLimitedToMostRecentTurns() {
-        val mgr = managerWith(
-            "最旧" to block("[1]"),
-            "中间" to block("[2]"),
-            "最新" to block("[3]")
-        )
-
-        val assistants = mgr.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 2)
-            .filter { it.role == ChatRole.assistant }
-
-        assertEquals("最旧", assistants[0].content, "超出回贴条数的旧消息应保持原样")
-        assertTrue(assistants[1].content.endsWith(block("[2]")))
-        assertTrue(assistants[2].content.endsWith(block("[3]")))
-    }
-
-    @Test
-    fun echoDisabledLeavesHistoryUntouched() {
-        val mgr = managerWith("回复A" to block("[]"))
-
-        val assistant = mgr.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 0)
-            .first { it.role == ChatRole.assistant }
-
-        assertEquals("回复A", assistant.content)
-    }
-
-    @Test
-    fun echoDoesNotMutateStoredHistory() {
-        val mgr = managerWith("回复A" to block("[]"))
-
-        mgr.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 5)
-
-        val stored = mgr.getMessages().first { it.role == ChatRole.assistant }
-        assertEquals("回复A", stored.content, "回贴只作用于发出去的副本，不能污染会话历史")
-        assertFalse(mgr.getMessages().any { it.content.contains("```") })
-    }
-
-    @Test
-    fun turnsWithoutBlockAreLeftAloneAndDoNotConsumeQuota() {
-        // 中间那轮模型漏了块：不该凭空补，也不该占掉回贴名额
-        val mgr = managerWith("有块1" to block("[1]"), "漏了" to null, "有块2" to block("[2]"))
-
-        val assistants = mgr.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 2)
-            .filter { it.role == ChatRole.assistant }
-
-        assertTrue(assistants[0].content.endsWith(block("[1]")))
-        assertEquals("漏了", assistants[1].content)
-        assertTrue(assistants[2].content.endsWith(block("[2]")))
-    }
-
-    @Test
-    fun noSyntheticSeedWhenHistoryHasNoRealBlocks() {
-        // 冷启动 / 前几轮全漏：不再注入合成 few-shot，只回贴真实块
-        val cold = ConversationManager()
-        cold.addMessage(ChatMessage(role = ChatRole.user, content = "你好"))
-        val coldSent = cold.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 3)
-        assertEquals(2, coldSent.size)
-        assertEquals("你好", coldSent[1].content)
-        assertFalse(coldSent.any { it.content.contains("```") })
-
-        val leaked = managerWith("漏了1" to null, "漏了2" to null)
-        val assistants = leaked.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 3)
-            .filter { it.role == ChatRole.assistant }
-        assertEquals(listOf("漏了1", "漏了2"), assistants.map { it.content })
     }
 
     // ── 工具历史窗口 ──────────────────────────────────

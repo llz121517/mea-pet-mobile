@@ -50,7 +50,8 @@ class LegacyJsonImporterTest {
         assertEquals(LegacyJsonImporter.Outcome.IMPORTED, outcome)
         val msgs = SqliteConversationRepository(db).loadRecent(10)
         assertEquals(listOf("b", "a"), msgs.map { it.id }, "按文件顺序，重复 id 去重")
-        assertEquals("blk", msgs[1].memoryOpsBlock)
+        assertEquals("回复", msgs[1].content)
+        assertEquals(1L, msgs[1].timestamp)
         assertEquals(ChatRole.user, msgs[0].role)
 
         val store = SqliteMemoryStore(db)
@@ -60,6 +61,35 @@ class LegacyJsonImporterTest {
 
         assertTrue(File(dir, LegacyJsonImporter.CONVERSATION_FILE).exists())
         assertTrue(File(dir, LegacyJsonImporter.MEMORY_FILE).exists())
+    }
+
+    @Test
+    fun ignoresOldMemoryOpsFieldWhilePreservingToolHistory() = runBlocking {
+        val history = """[
+            {"role":"assistant","content":"","id":"assistant","timestamp":37,"turnId":"turn-1",
+             "rawAssistantJson":"{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call-1\"}]}",
+             "memoryOpsBlock":"legacy block"},
+            {"role":"tool","content":"工具结果 🐱","id":"tool","timestamp":12,"turnId":"turn-1",
+             "toolCallId":"call-1","toolName":"search_memory","memoryOpsBlock":null}
+        ]"""
+        val oldFile = File(dir, LegacyJsonImporter.CONVERSATION_FILE)
+        oldFile.writeText(history)
+
+        assertEquals(LegacyJsonImporter.Outcome.IMPORTED, LegacyJsonImporter(db, dir).importIfNeeded())
+        assertEquals(
+            listOf(
+                ChatMessage(
+                    ChatRole.assistant, "", id = "assistant", timestamp = 37, turnId = "turn-1",
+                    rawAssistantJson = """{"role":"assistant","content":"","tool_calls":[{"id":"call-1"}]}"""
+                ),
+                ChatMessage(
+                    ChatRole.tool, "工具结果 🐱", id = "tool", timestamp = 12, turnId = "turn-1",
+                    toolCallId = "call-1", toolName = "search_memory"
+                )
+            ),
+            SqliteConversationRepository(db).loadRecent(10)
+        )
+        assertEquals(history, oldFile.readText())
     }
 
     @Test

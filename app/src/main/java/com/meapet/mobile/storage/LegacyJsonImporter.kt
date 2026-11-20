@@ -132,16 +132,24 @@ class LegacyJsonImporter(
     /** 按文件列表顺序写入（seq 自增），不据 timestamp 排序；origin 标记为 import。 */
     private fun insertMessage(c: SQLiteConnection, m: ChatMessage) {
         c.prepare(
-            "INSERT OR IGNORE INTO messages(id, conversation_id, role, content, memory_ops_block, origin, created_at) " +
-                "VALUES(?, ?, ?, ?, ?, 'import', ?)"
+            "INSERT OR IGNORE INTO messages(" +
+                "id, conversation_id, role, content, origin, created_at, " +
+                "turn_id, tool_call_id, tool_name, extra_json) " +
+                "VALUES(?, ?, ?, ?, 'import', ?, ?, ?, ?, ?)"
         ).use { st ->
             st.bindText(1, m.id)
             st.bindText(2, conversationId)
             st.bindText(3, m.role.name)
             st.bindText(4, m.content)
-            val block = m.memoryOpsBlock
-            if (block == null) st.bindNull(5) else st.bindText(5, block)
-            st.bindLong(6, m.timestamp)
+            st.bindLong(5, m.timestamp)
+            val turnId = m.turnId
+            if (turnId == null) st.bindNull(6) else st.bindText(6, turnId)
+            val toolCallId = m.toolCallId
+            if (toolCallId == null) st.bindNull(7) else st.bindText(7, toolCallId)
+            val toolName = m.toolName
+            if (toolName == null) st.bindNull(8) else st.bindText(8, toolName)
+            val raw = m.rawAssistantJson
+            if (raw == null) st.bindNull(9) else st.bindText(9, raw)
             st.step()
         }
     }

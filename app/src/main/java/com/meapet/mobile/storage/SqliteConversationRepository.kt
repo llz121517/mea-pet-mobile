@@ -77,7 +77,7 @@ class SqliteConversationRepository(
             // tool 行也是历史的一部分（发给模型需要），这里不能像旧版那样跳过；
             // 展示层用 ChatMessage.forUi() 过滤，读取层保持完整。
             val columns =
-                "id, role, content, memory_ops_block, created_at, turn_id, tool_call_id, tool_name, extra_json"
+                "id, role, content, created_at, turn_id, tool_call_id, tool_name, extra_json"
             val sql = if (beforeId == null) {
                 "SELECT $columns FROM messages " +
                     "WHERE conversation_id = ? ORDER BY seq DESC LIMIT ?"
@@ -104,13 +104,12 @@ class SqliteConversationRepository(
                             ChatMessage(
                                 role = role,
                                 content = st.getText(2),
-                                memoryOpsBlock = if (st.isNull(3)) null else st.getText(3),
                                 id = st.getText(0),
-                                timestamp = st.getLong(4),
-                                turnId = if (st.isNull(5)) null else st.getText(5),
-                                toolCallId = if (st.isNull(6)) null else st.getText(6),
-                                toolName = if (st.isNull(7)) null else st.getText(7),
-                                rawAssistantJson = if (st.isNull(8)) null else st.getText(8)
+                                timestamp = st.getLong(3),
+                                turnId = if (st.isNull(4)) null else st.getText(4),
+                                toolCallId = if (st.isNull(5)) null else st.getText(5),
+                                toolName = if (st.isNull(6)) null else st.getText(6),
+                                rawAssistantJson = if (st.isNull(7)) null else st.getText(7)
                             )
                         )
                     }
@@ -143,25 +142,23 @@ class SqliteConversationRepository(
         // 只存 extra_json 一份，避免两份数据不一致时不知道该信谁
         c.prepare(
             "INSERT OR IGNORE INTO messages(" +
-                "id, conversation_id, role, content, memory_ops_block, created_at, " +
+                "id, conversation_id, role, content, created_at, " +
                 "turn_id, tool_call_id, tool_name, extra_json) " +
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).use { st ->
             st.bindText(1, m.id)
             st.bindText(2, conversationId)
             st.bindText(3, m.role.name)
             st.bindText(4, m.content)
-            val block = m.memoryOpsBlock
-            if (block == null) st.bindNull(5) else st.bindText(5, block)
-            st.bindLong(6, m.timestamp)
+            st.bindLong(5, m.timestamp)
             val turnId = m.turnId
-            if (turnId == null) st.bindNull(7) else st.bindText(7, turnId)
+            if (turnId == null) st.bindNull(6) else st.bindText(6, turnId)
             val toolCallId = m.toolCallId
-            if (toolCallId == null) st.bindNull(8) else st.bindText(8, toolCallId)
+            if (toolCallId == null) st.bindNull(7) else st.bindText(7, toolCallId)
             val toolName = m.toolName
-            if (toolName == null) st.bindNull(9) else st.bindText(9, toolName)
+            if (toolName == null) st.bindNull(8) else st.bindText(8, toolName)
             val raw = m.rawAssistantJson
-            if (raw == null) st.bindNull(10) else st.bindText(10, raw)
+            if (raw == null) st.bindNull(9) else st.bindText(9, raw)
             st.step()
         }
     }

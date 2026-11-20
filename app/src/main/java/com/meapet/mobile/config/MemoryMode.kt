@@ -3,12 +3,12 @@ package com.meapet.mobile.config
 /**
  * 记忆检索模式（用户设置项，见 `SettingsManager.getMemoryMode`）。
  *
- * 记忆的**存储与摘要**由「启用记忆」开关控制；本枚举只决定模型如何**检索/写入**记忆：
+ * 「启用记忆」控制记忆功能；本枚举决定如何读取记忆，以及是否开放工具读写：
  * - [AUTO]：优先工具调用（function calling）。端点明确不支持 tools 时，本会话自动降级为
- *   [TEXT]（不打断聊天，也不反复用必然失败的请求去试）；
+ *   [TEXT] 的只读注入（不打断聊天，也不反复用必然失败的请求去试）；
  * - [TOOLS]：只用工具调用。端点不支持时同样会降级（否则完全无法聊天），但会在日志中明确记录；
- * - [TEXT]：把检索结果按关键词注入上下文，写操作走文本围栏协议（1.8 及更早的行为）；
- * - [OFF]：不向模型注入任何记忆上下文，也不提供工具（记忆仍然存储，仅本轮不用）。
+ * - [TEXT]：只读模式，把关键词命中的已有记忆追加到本轮发送消息，不写入或触发记忆摘要；
+ * - [OFF]：不向模型注入记忆，也不提供工具；已保存的记忆保留，本轮不写入或触发摘要。
  *
  * 默认 [AUTO]：能力探测与降级自动化，用户通常无需关心。
  */
@@ -20,9 +20,6 @@ enum class MemoryMode {
 
     /** 该模式是否允许发起工具调用请求。 */
     val usesTools: Boolean get() = this == AUTO || this == TOOLS
-
-    /** 该模式下端点不支持 tools 时是否允许自动降级为文本协议（[TOOLS] 也降级，只是日志更明确）。 */
-    val allowsTextFallback: Boolean get() = this != OFF
 
     companion object {
         val DEFAULT = AUTO

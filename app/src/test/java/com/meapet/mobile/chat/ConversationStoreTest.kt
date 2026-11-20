@@ -4,6 +4,9 @@ import com.meapet.mobile.storage.InMemoryConversationRepository
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -17,6 +20,7 @@ import kotlin.test.assertTrue
  * 依赖 build.gradle.kts 中 `unitTests.isReturnDefaultValues = true`，
  * 使 android.util.Log 调用在 JVM 上返回默认值。
  */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ConversationStoreTest {
 
     @get:Rule
@@ -38,6 +42,39 @@ class ConversationStoreTest {
 
         val loaded = ConversationStore(dir, backgroundScope).load()
         assertEquals(messages, loaded)
+    }
+
+    @Test
+    fun oldMemoryOpsFieldIsIgnoredAndNotWrittenBack() = runTest {
+        val dir = tmp.newFolder()
+        val file = File(dir, "meapet_conversation.json")
+        file.writeText("""[
+            {"role":"assistant","content":"保留正文 🐱","memoryOpsBlock":"legacy block",
+             "id":"assistant","timestamp":37,"turnId":"turn-1",
+             "rawAssistantJson":"{\"role\":\"assistant\",\"content\":\"保留正文 🐱\"}"},
+            {"role":"tool","content":"工具结果","memoryOpsBlock":null,"id":"tool","timestamp":12,
+             "turnId":"turn-1","toolCallId":"call-1","toolName":"search_memory"}
+        ]""")
+        val store = ConversationStore(dir, backgroundScope)
+
+        val loaded = store.load()
+        assertEquals(
+            listOf(
+                ChatMessage(
+                    ChatRole.assistant, "保留正文 🐱", id = "assistant", timestamp = 37, turnId = "turn-1",
+                    rawAssistantJson = """{"role":"assistant","content":"保留正文 🐱"}"""
+                ),
+                ChatMessage(
+                    ChatRole.tool, "工具结果", id = "tool", timestamp = 12, turnId = "turn-1",
+                    toolCallId = "call-1", toolName = "search_memory"
+                )
+            ),
+            loaded
+        )
+        store.persist(loaded)
+        val saved = Json.parseToJsonElement(file.readText()).jsonArray
+        assertTrue(saved.all { "memoryOpsBlock" !in it.jsonObject })
+        assertEquals(loaded, store.load())
     }
 
     @Test

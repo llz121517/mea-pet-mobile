@@ -83,7 +83,7 @@ object SettingsKeys {
         const val TEMPERATURE = 0.7
         const val MAX_TOKENS = 4096
         const val ENABLE_MEMORY = true
-        /** 默认自动：优先工具调用，端点不支持时本会话降级文本协议。 */
+        /** 默认自动：优先工具调用，端点不支持时本进程降级只读关键词注入。 */
         const val MEMORY_MODE = "AUTO"
         const val ENABLE_AUTO_SUMMARY = true
         const val SUMMARY_INTERVAL = 10
