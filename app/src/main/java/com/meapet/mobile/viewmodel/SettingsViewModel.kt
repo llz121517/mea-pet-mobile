@@ -14,6 +14,7 @@ import com.meapet.mobile.core.undoWindowMs
 import com.meapet.mobile.app.MeaPetApplication
 import com.meapet.mobile.settings.SettingsKeys
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.config.WebSearchProviderId
 import com.meapet.mobile.tts.model.TtsModelManager
 import com.meapet.mobile.tts.model.TtsModelState
 import com.meapet.mobile.update.UpdateCheckResult
@@ -48,6 +49,8 @@ data class SettingsUiState(
     val model: String = SettingsKeys.Defaults.MODEL,
     val temperature: Double = SettingsKeys.Defaults.TEMPERATURE,
     val maxTokens: Int = SettingsKeys.Defaults.MAX_TOKENS,
+    val webSearchEnabled: Boolean = false,
+    val webSearchProvider: WebSearchProviderId = WebSearchProviderId.AUTO,
     val systemPrompt: String = SettingsKeys.Defaults.SYSTEM_PROMPT,
     val enableMemory: Boolean = SettingsKeys.Defaults.ENABLE_MEMORY,
     /** 记忆检索模式（AUTO/TOOLS/TEXT/OFF）。 */
@@ -155,6 +158,8 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
             model = settingsManager.getModel(),
             temperature = settingsManager.getTemperature(),
             maxTokens = settingsManager.getMaxTokens(),
+            webSearchEnabled = settingsManager.getWebSearchEnabled(),
+            webSearchProvider = settingsManager.getWebSearchProvider(),
             systemPrompt = settingsManager.getSystemPrompt(),
             enableMemory = settingsManager.isMemoryEnabled(),
             memoryMode = settingsManager.getMemoryMode(),
@@ -182,6 +187,8 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
         subscribe(settingsManager.modelFlow) { s, m -> s.copy(model = m) }
         subscribe(settingsManager.temperatureFlow) { s, t -> s.copy(temperature = t) }
         subscribe(settingsManager.maxTokensFlow) { s, t -> s.copy(maxTokens = t) }
+        subscribe(settingsManager.webSearchEnabledFlow) { s, enabled -> s.copy(webSearchEnabled = enabled) }
+        subscribe(settingsManager.webSearchProviderFlow) { s, provider -> s.copy(webSearchProvider = provider) }
         subscribe(settingsManager.systemPromptFlow) { s, p -> s.copy(systemPrompt = p) }
         subscribe(settingsManager.enableMemoryFlow) { s, e -> s.copy(enableMemory = e) }
         subscribe(settingsManager.memoryModeFlow) { s, m -> s.copy(memoryMode = m) }
@@ -343,6 +350,28 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
 
     fun updateMaxTokens(tokens: Int) {
         viewModelScope.launch { settingsManager.setMaxTokens(tokens) }
+    }
+
+    val webSearchAnySearchKeyFlow get() = settingsManager.webSearchAnySearchKeyFlow
+
+    /** Raw AnySearch key for the local masked editor; never logged or included in UI state. */
+    fun currentWebSearchAnySearchKey(): String = settingsManager.getWebSearchAnySearchKey()
+    fun currentWebSearchDeepSeekKey(): String = settingsManager.getWebSearchDeepSeekKey()
+
+    fun updateWebSearchEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsManager.setWebSearchEnabled(enabled) }
+    }
+
+    fun updateWebSearchProvider(provider: WebSearchProviderId) {
+        viewModelScope.launch { settingsManager.setWebSearchProvider(provider) }
+    }
+
+    fun saveWebSearchDeepSeekKey(key: String) {
+        viewModelScope.launch { settingsManager.setWebSearchDeepSeekKey(key) }
+    }
+
+    fun saveWebSearchAnySearchKey(key: String) {
+        viewModelScope.launch { settingsManager.setWebSearchAnySearchKey(key) }
     }
 
     fun updateEnableMemory(enabled: Boolean) {

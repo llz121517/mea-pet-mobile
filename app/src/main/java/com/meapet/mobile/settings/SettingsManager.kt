@@ -2,6 +2,7 @@ package com.meapet.mobile.settings
 
 import android.content.Context
 import android.util.Log
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
@@ -9,6 +10,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.meapet.mobile.config.WebSearchProviderId
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +19,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+
+internal class ApiConnection(val url: String, val key: String)
 
 /**
  * 应用设置管理器。
@@ -34,15 +38,18 @@ import kotlinx.coroutines.launch
  *
  * @param context Application Context
  */
-class SettingsManager(context: Context) {
-
-    private val dataStore = context.appDataStore
+class SettingsManager internal constructor(
+    private val dataStore: DataStore<Preferences>,
+    cacheScope: CoroutineScope
+) {
+    constructor(context: Context) : this(
+        context.appDataStore,
+        CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    )
 
     /** 设置项内存快照（跟随 DataStore 变更；null = 尚未完成首次加载）。 */
     @Volatile
     private var cachedPrefs: Preferences? = null
-
-    private val cacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** 首次快照就绪信号；预热失败或流结束时同样完成，避免等待方永久挂起。 */
     private val loadedSignal = CompletableDeferred<Unit>()
@@ -68,6 +75,10 @@ class SettingsManager(context: Context) {
 
     private val KEY_API_KEY = stringPreferencesKey(SettingsKeys.API_KEY)
     private val KEY_API_URL = stringPreferencesKey(SettingsKeys.API_URL)
+    private val KEY_WEB_SEARCH_ENABLED = booleanPreferencesKey(SettingsKeys.WEB_SEARCH_ENABLED)
+    private val KEY_WEB_SEARCH_PROVIDER = stringPreferencesKey(SettingsKeys.WEB_SEARCH_PROVIDER)
+    private val KEY_WEB_SEARCH_ANYSEARCH_KEY = stringPreferencesKey(SettingsKeys.WEB_SEARCH_ANYSEARCH_KEY)
+    private val KEY_WEB_SEARCH_DEEPSEEK_KEY = stringPreferencesKey(SettingsKeys.WEB_SEARCH_DEEPSEEK_KEY)
     private val KEY_MODEL = stringPreferencesKey(SettingsKeys.MODEL)
     private val KEY_TEMPERATURE = doublePreferencesKey(SettingsKeys.TEMPERATURE)
     private val KEY_MAX_TOKENS = intPreferencesKey(SettingsKeys.MAX_TOKENS)
@@ -101,6 +112,26 @@ class SettingsManager(context: Context) {
     /** API URL 流。 */
     val apiUrlFlow: Flow<String> = dataStore.data.map { prefs ->
         prefs[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL
+    }
+
+    /** 联网搜索开关流（默认关闭）。 */
+    val webSearchEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_WEB_SEARCH_ENABLED] ?: false
+    }
+
+    /** 联网搜索服务商流（默认自动）。 */
+    val webSearchProviderFlow: Flow<WebSearchProviderId> = dataStore.data.map { prefs ->
+        WebSearchProviderId.parse(prefs[KEY_WEB_SEARCH_PROVIDER])
+    }
+
+    /** 独立 DeepSeek Key；空值保留官方聊天端点的 Key 复用行为。 */
+    val webSearchDeepSeekKeyFlow: Flow<String> = dataStore.data.map { prefs ->
+        prefs[KEY_WEB_SEARCH_DEEPSEEK_KEY].orEmpty()
+    }
+
+    /** AnySearch key flow，空值表示匿名档。 */
+    val webSearchAnySearchKeyFlow: Flow<String> = dataStore.data.map { prefs ->
+        prefs[KEY_WEB_SEARCH_ANYSEARCH_KEY].orEmpty()
     }
 
     /** 模型流。 */
@@ -225,6 +256,22 @@ class SettingsManager(context: Context) {
 
     fun getApiKey(): String = currentPrefs()[KEY_API_KEY] ?: ""
     fun getApiUrl(): String = currentPrefs()[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL
+
+    /** Read endpoint and credential from one preferences snapshot. */
+    internal fun getApiConnection(): ApiConnection {
+        val prefs = currentPrefs()
+        return ApiConnection(
+            url = prefs[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL,
+            key = prefs[KEY_API_KEY].orEmpty()
+        )
+    }
+
+    fun getWebSearchEnabled(): Boolean = currentPrefs()[KEY_WEB_SEARCH_ENABLED] ?: false
+    fun getWebSearchProvider(): WebSearchProviderId =
+        WebSearchProviderId.parse(currentPrefs()[KEY_WEB_SEARCH_PROVIDER])
+    fun getWebSearchAnySearchKey(): String = currentPrefs()[KEY_WEB_SEARCH_ANYSEARCH_KEY].orEmpty()
+    fun getWebSearchDeepSeekKey(): String = currentPrefs()[KEY_WEB_SEARCH_DEEPSEEK_KEY].orEmpty()
+
     fun getModel(): String = currentPrefs()[KEY_MODEL] ?: SettingsKeys.Defaults.MODEL
     fun getTemperature(): Double = currentPrefs()[KEY_TEMPERATURE] ?: SettingsKeys.Defaults.TEMPERATURE
     fun getMaxTokens(): Int = currentPrefs()[KEY_MAX_TOKENS] ?: SettingsKeys.Defaults.MAX_TOKENS
@@ -306,6 +353,30 @@ class SettingsManager(context: Context) {
     suspend fun setApiUrl(url: String) {
         cachedPrefs = dataStore.edit { prefs -> prefs[KEY_API_URL] = url }
         Log.d(TAG, "API URL updated: $url")
+    }
+
+    suspend fun setWebSearchEnabled(enabled: Boolean) {
+        cachedPrefs = dataStore.edit { it[KEY_WEB_SEARCH_ENABLED] = enabled }
+    }
+
+    suspend fun setWebSearchProvider(provider: WebSearchProviderId) {
+        cachedPrefs = dataStore.edit { it[KEY_WEB_SEARCH_PROVIDER] = provider.id }
+    }
+
+    suspend fun setWebSearchDeepSeekKey(key: String) {
+        val trimmed = key.trim()
+        cachedPrefs = dataStore.edit { prefs ->
+            if (trimmed.isEmpty()) prefs.remove(KEY_WEB_SEARCH_DEEPSEEK_KEY)
+            else prefs[KEY_WEB_SEARCH_DEEPSEEK_KEY] = trimmed
+        }
+    }
+
+    suspend fun setWebSearchAnySearchKey(key: String) {
+        val trimmed = key.trim()
+        cachedPrefs = dataStore.edit { prefs ->
+            if (trimmed.isEmpty()) prefs.remove(KEY_WEB_SEARCH_ANYSEARCH_KEY)
+            else prefs[KEY_WEB_SEARCH_ANYSEARCH_KEY] = trimmed
+        }
     }
 
     suspend fun setModel(model: String) {

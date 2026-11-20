@@ -454,12 +454,14 @@ class ChatViewModelTest {
                 settingsManager = settings,
                 postProcessScope = kotlinx.coroutines.CoroutineScope(Dispatchers.Default),
                 config = com.meapet.mobile.config.AppConfig.DEFAULT,
-                toolLoop = com.meapet.mobile.chat.tools.ChatToolLoop(
-                    clientProvider = {
-                        com.meapet.mobile.client.OpenAiCompatibleClient("k", "https://x/v1", engine)
-                    },
-                    registry = com.meapet.mobile.chat.tools.ToolRegistry(executor.asTools())
-                ),
+                toolLoopProvider = {
+                    com.meapet.mobile.chat.tools.ChatToolLoop(
+                        clientProvider = {
+                            com.meapet.mobile.client.OpenAiCompatibleClient("k", "https://x/v1", engine)
+                        },
+                        registry = com.meapet.mobile.chat.tools.ToolRegistry(executor.asTools())
+                    )
+                },
                 memoryTools = executor
             )
             Mockito.doReturn(realService).`when`(container).chatService

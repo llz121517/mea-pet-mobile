@@ -14,6 +14,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import com.meapet.mobile.config.MemoryMode
 import com.meapet.mobile.settings.SettingsKeys
@@ -92,27 +93,37 @@ internal fun MemorySection(
     )
 
     // 记忆检索方式：只影响「模型怎么找到记忆」，与是否记忆无关
-    if (state.enableMemory) {
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            MemoryMode.entries.forEach { mode ->
-                FilterChipLike(
-                    label = memoryModeLabel(mode),
-                    selected = state.memoryMode == mode,
-                    enabled = true,
-                    onClick = { viewModel.updateMemoryMode(mode) }
-                )
+    SettingsExpandableContent(visible = state.enableMemory) {
+        Column {
+            Spacer(Modifier.height(8.dp))
+            ParamLabelWithHelp(
+                label = "记忆检索方式",
+                helpTitle = "记忆检索方式",
+                helpText = "自动/工具：让模型按需要调用记忆工具，端点不支持时会降级为文本协议。" +
+                    "文本：按关键词注入相关记忆，记忆写入通过回复中的文本协议完成。\n\n" +
+                    "关闭：停止记忆注入和检索，不会删除已保存的记忆或对话历史。" +
+                    "此选项与上方的记忆总开关不同。当前联网工具需要使用自动或工具模式。"
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MemoryMode.entries.forEach { mode ->
+                    FilterChipLike(
+                        label = memoryModeLabel(mode),
+                        selected = state.memoryMode == mode,
+                        enabled = true,
+                        onClick = { viewModel.updateMemoryMode(mode) }
+                    )
+                }
             }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = memoryModeHint(state.memoryMode),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
         }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = memoryModeHint(state.memoryMode),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-        )
     }
     SettingsSwitchRow(
         label = "自动摘要",
@@ -124,13 +135,16 @@ internal fun MemorySection(
 
     Spacer(Modifier.height(8.dp))
 
-    Text(
-        text = "摘要轮次: 每 ${local.summaryInterval.toInt()} 轮对话总结一次",
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-            alpha = if (state.enableAutoSummary) 1f else 0.5f
+    Column(Modifier.alpha(if (state.enableAutoSummary) 1f else 0.5f)) {
+        ParamLabelWithHelp(
+            label = "摘要轮次: 每 ${local.summaryInterval.toInt()} 轮对话总结一次",
+            helpTitle = "自动摘要间隔",
+            helpText = "控制自动整理长期记忆的对话间隔。数值越小，整理越频繁，" +
+                "也可能带来更多模型请求和费用。\n\n" +
+                "自动摘要与上下文压缩是两件事：前者整理记忆，后者缩短发送给模型的历史。" +
+                "关闭自动摘要后，这个间隔不生效。"
         )
-    )
+    }
     Slider(
         value = local.summaryInterval,
         onValueChange = { local.summaryInterval = it },

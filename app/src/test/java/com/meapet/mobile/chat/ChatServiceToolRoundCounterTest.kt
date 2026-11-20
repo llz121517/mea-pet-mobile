@@ -106,7 +106,7 @@ class ChatServiceToolRoundCounterTest {
             settingsManager = settings(),
             postProcessScope = CoroutineScope(Dispatchers.Unconfined),
             config = AppConfig.DEFAULT,
-            toolLoop = loop,
+            toolLoopProvider = { loop },
             memoryTools = executor
         )
     }

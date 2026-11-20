@@ -8,6 +8,9 @@ import com.meapet.mobile.client.KtorHttpClientEngine
 import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.chat.ChatService
 import com.meapet.mobile.chat.tools.ChatToolLoop
+import com.meapet.mobile.chat.tools.ToolRegistry
+import com.meapet.mobile.client.JsonHttpClient
+import com.meapet.mobile.search.WebToolFactory
 import com.meapet.mobile.memory.search.BigramMemorySearcher
 import com.meapet.mobile.memory.tools.MemoryToolExecutor
 import com.meapet.mobile.chat.compaction.ContextCompactor
@@ -179,13 +182,30 @@ class AppContainer(
         }
     }
 
-    /** 记忆工具循环（仅 enableMemoryTools 开启时创建）。 */
-    private val chatToolLoop: ChatToolLoop? by lazy {
+    private val webHttp: JsonHttpClient by lazy {
+        JsonHttpClient(KtorHttpClientEngine(followRedirects = false))
+    }
+
+    /** 关闭联网时沿用同一份记忆工具注册表，保留现有请求前缀。 */
+    private val memoryToolLoop: ChatToolLoop? by lazy {
         val executor = memoryToolExecutor ?: return@lazy null
-        ChatToolLoop(
-            clientProvider = { apiClient },
-            registry = com.meapet.mobile.chat.tools.ToolRegistry(executor.asTools())
+        ChatToolLoop({ apiClient }, ToolRegistry(executor.asTools()))
+    }
+
+    /** 在现有工具模式下按轮固定服务商、密钥和工具集合。 */
+    private fun createTurnToolLoop(): ChatToolLoop? {
+        val executor = memoryToolExecutor ?: return null
+        if (!settingsManager.getWebSearchEnabled()) return memoryToolLoop
+
+        val chat = settingsManager.getApiConnection()
+        val webTools = WebToolFactory(webHttp).create(
+            selectedId = settingsManager.getWebSearchProvider().id,
+            chatBaseUrl = chat.url,
+            chatApiKey = chat.key,
+            anySearchKey = settingsManager.getWebSearchAnySearchKey(),
+            deepSeekKey = settingsManager.getWebSearchDeepSeekKey()
         )
+        return ChatToolLoop({ apiClient }, ToolRegistry(executor.asTools() + webTools))
     }
 
     /** 聊天服务（核心业务逻辑）。 */
@@ -202,7 +222,7 @@ class AppContainer(
             compactor = contextCompactor,
             budgetProvider = { contextCapacity.budget() },
             maxTokensCapProvider = { contextCapacity.effectiveMaxTokens() },
-            toolLoop = chatToolLoop,
+            toolLoopProvider = ::createTurnToolLoop,
             memoryTools = memoryToolExecutor
         )
     }

@@ -11,6 +11,10 @@ object SettingsKeys {
     const val MODEL = "model"
     const val TEMPERATURE = "temperature"
     const val MAX_TOKENS = "max_tokens"
+    const val WEB_SEARCH_ENABLED = "web_search_enabled"
+    const val WEB_SEARCH_PROVIDER = "web_search_provider"
+    const val WEB_SEARCH_ANYSEARCH_KEY = "web_search_anysearch_key"
+    const val WEB_SEARCH_DEEPSEEK_KEY = "web_search_deepseek_key"
 
     /** 用户手动填写的上下文窗口（原始容量，token）。无此键 = 自动；有值则优先于探测缓存。 */
     const val CONTEXT_WINDOW = "context_window"

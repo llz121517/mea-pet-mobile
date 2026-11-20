@@ -105,7 +105,7 @@ fun SettingsScreen(
 
     // 本地编辑状态（进入设置时取一次已存值，失焦/离开设置时才写回）。
     // 提到根页持有，这样在子页之间来回切不会丢掉正在编辑的内容。
-    val local = rememberSettingsLocalState(state)
+    val local = rememberSettingsLocalState(state, settingsViewModel)
 
     // ── 可撤销操作的撤销条 ──
     // 快照与到期定时器都在 SettingsViewModel 里：转屏、切子页都不影响窗口，
@@ -204,6 +204,7 @@ fun SettingsScreen(
                         SettingsCard {
                             ModelParamsSection(state, settingsViewModel, local, darkTheme)
                         }
+                        SettingsCard { WebSearchSection(state, settingsViewModel, local, darkTheme) }
                     }
 
                     SettingsPage.CHAT -> {
@@ -265,7 +266,8 @@ private fun RootPage(
         SettingsEntry(
             page = SettingsPage.PROVIDER,
             iconRes = R.drawable.ic_settings_provider,
-            summary = state.model.ifBlank { "未设置模型" }
+            summary = state.model.ifBlank { "未设置模型" } +
+                if (state.webSearchEnabled) " · 联网已开启" else " · 联网已关闭"
         ),
         SettingsEntry(
             page = SettingsPage.CHAT,

@@ -98,11 +98,10 @@ class ChatService(
      */
     private val maxTokensCapProvider: () -> Int = { Int.MAX_VALUE },
     /**
-     * 记忆工具循环（null = 未启用）。仅在 [AppConfig.enableMemoryTools] 为 true 时使用，
-     * 否则走原来的单次请求 + 文本协议链路。
+     * 现有工具模式每轮选定一个工具循环，使设置变更从下一轮起生效。
      */
-    private val toolLoop: com.meapet.mobile.chat.tools.ChatToolLoop? = null,
-    /** 工具执行器（与 [toolLoop] 共用同一实例：暂存写入需要从它身上取回）。 */
+    private val toolLoopProvider: () -> com.meapet.mobile.chat.tools.ChatToolLoop? = { null },
+    /** 记忆工具执行器，负责每轮的写入暂存与提交。 */
     private val memoryTools: com.meapet.mobile.chat.tools.TurnScoped? = null
 ) {
     companion object {
@@ -376,6 +375,7 @@ class ChatService(
         // 否则留下从未发出的「幽灵消息」污染后续上下文并被持久化
         conversationManager.addMessage(turnUser)
         val content = turnUser.content
+        val loop = if (wantsTools) toolLoopProvider() else null
 
         // 模式解析（需求 §5.2）：
         // - 工具模式：stable = 固定工具说明 + **人设事实**（FACTUAL/CORE_TRAIT 仍全量注入，
@@ -389,7 +389,7 @@ class ChatService(
         var stableContext = if (wantsTools) {
             // 工具说明来自已注册工具（registry.hint），人设段来自记忆模块；
             // 拼接顺序与分隔符保持不变，前缀字节稳定
-            val toolHint = toolLoop?.hint.orEmpty()
+            val toolHint = loop?.hint.orEmpty()
             val persona = memoryManager?.buildPersonaSection().orEmpty()
             listOf(toolHint, persona).filter { it.isNotBlank() }.joinToString("\n\n")
         } else {
@@ -514,7 +514,6 @@ class ChatService(
             return ApiResponse.chatCompletionContent(responseJson).orEmpty()
         }
 
-        val loop = if (wantsTools) toolLoop else null
         var local = buildLocalRequest(
             includeToolHistory = wantsTools,
             stable = stableContext,
