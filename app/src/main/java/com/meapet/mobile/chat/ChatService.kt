@@ -98,9 +98,10 @@ class ChatService(
      */
     private val maxTokensCapProvider: () -> Int = { Int.MAX_VALUE },
     /**
-     * 现有工具模式每轮选定一个工具循环，使设置变更从下一轮起生效。
+     * 每轮按实际资格组合工具：`(记忆工具, 联网工具)`。设置变更从下一轮生效。
      */
-    private val toolLoopProvider: () -> com.meapet.mobile.chat.tools.ChatToolLoop? = { null },
+    private val toolLoopProvider: (includeMemoryTools: Boolean, includeWebTools: Boolean) -> com.meapet.mobile.chat.tools.ChatToolLoop? =
+        { _, _ -> null },
     /** 记忆工具执行器，负责每轮的写入暂存与提交。 */
     private val memoryTools: com.meapet.mobile.chat.tools.TurnScoped? = null
 ) {
@@ -242,7 +243,11 @@ class ChatService(
             currentToolEndpoint = endpoint
             toolsUnsupported = false
         }
-        val wantsTools = config.enableMemoryTools && memoryMode.usesTools && !toolsUnsupported
+        // 记忆工具资格：总开关 + 记忆设置 + 模式 + 工具能力配置；
+        // 联网工具资格独立于记忆，只受自己的开关控制。
+        val memoryToolEligible = config.enableMemoryTools && memoryMode.usesTools
+        val webToolEligible = settingsManager.getWebSearchEnabled()
+        val wantsTools = !toolsUnsupported && (memoryToolEligible || webToolEligible)
 
         turnActive.set(true)
         activeTurnJob.set(coroutineContext[Job])
@@ -258,6 +263,8 @@ class ChatService(
                             memoryMode = memoryMode,
                             model = model,
                             endpoint = endpoint,
+                            memoryToolEligible = memoryToolEligible,
+                            webToolEligible = webToolEligible,
                             wantsTools = wantsTools,
                             transcript = transcript,
                             onVisibleFragment = onFragment
@@ -276,14 +283,14 @@ class ChatService(
                     //    纯 tool_calls 的空 assistant 与 tool 消息也必须落库（下一轮请求需要）。
                     conversationManager.addMessages(transcript + finalAssistant)
 
-                    // 3) 工具模式：整个 turn 成功后才提交暂存写入（失败/取消已在各 catch 中丢弃）
-                    if (execution.toolsUsed) {
+                    // 3) 仅本轮真正下发过记忆工具时，才提交暂存写入
+                    if (execution.memoryToolsUsed) {
                         memoryTools?.onTurnSuccess()
                     }
 
-                    // 4) 仅成功工具模式轮次推进记忆摘要；只读/OFF/降级不产生后台记忆写入
+                    // 4) 仅成功的记忆工具轮次推进记忆摘要；web-only / 只读 / OFF / 降级都不产生后台记忆写入
                     //   （摘要是一次额外 LLM 请求，同步等它会让 UI 在拿到回复后仍长时间显示加载中）
-                    if (execution.toolsUsed) {
+                    if (execution.memoryToolsUsed) {
                         memoryManager?.let { mm ->
                             postProcessScope.launch {
                                 try {
@@ -387,6 +394,8 @@ class ChatService(
         val rounds: Int,
         val toolCalls: Int,
         val toolsUsed: Boolean,
+        /** 本轮是否真的下发了记忆工具（决定提交暂存与推进摘要，web-only 轮次必须为 false）。 */
+        val memoryToolsUsed: Boolean = false,
         /** 服务端报告的首轮输入 token（缺 usage 时为 null，仅观察用）。 */
         val promptTokens: Int? = null,
         /** 服务端报告的前缀缓存命中 token（缺字段时为 null，仅观察用）。 */
@@ -405,12 +414,17 @@ class ChatService(
         memoryMode: MemoryMode,
         model: String,
         endpoint: ToolEndpoint,
+        memoryToolEligible: Boolean,
+        webToolEligible: Boolean,
         wantsTools: Boolean,
         transcript: MutableList<ChatMessage>,
         onVisibleFragment: (ChatMessage) -> Unit
     ): TurnExecution {
         onBeforeSend()
-        if (config.enableMemoryTools) memoryTools?.onTurnStart()
+        // 先按本轮资格组合工具循环，后面所有判断都以「实际拿到的循环」为准
+        val loop = if (wantsTools) toolLoopProvider(memoryToolEligible, webToolEligible) else null
+        val memoryToolsActive = memoryToolEligible && loop != null
+        if (memoryToolsActive) memoryTools?.onTurnStart()
         // 上一轮的墓碑（若未被 UI 取走）属于旧 turn，不能混进本轮的撤销项
         memoryManager?.clearRecentToolDeletions()
 
@@ -419,24 +433,22 @@ class ChatService(
         // 否则留下从未发出的「幽灵消息」污染后续上下文并被持久化
         conversationManager.addMessage(turnUser)
         val content = turnUser.content
-        val loop = if (wantsTools) toolLoopProvider() else null
 
-        // 模式解析（需求 §5.2）：
-        // - 工具模式：stable = 固定工具说明 + **人设事实**（FACTUAL/CORE_TRAIT 仍全量注入，
-        //   与当前输入无关、轮间稳定；短期/长期相关回忆改由模型自己调用 search_memory）；
-        //   相关回忆由工具按需检索，不再做关键词注入
-        // - 非工具模式且记忆未关闭：只读关键词注入，stable + tail
-        // - OFF：stable 为空，也不注入
-        val readOnlyMemory = !wantsTools && memoryMode != MemoryMode.OFF
+        // 模式解析（需求 §5.2 / S4）：
+        // - 记忆走工具：stable = 固定工具说明 + 人设事实，相关回忆由模型自己检索；
+        // - 记忆只读（TEXT，或端点不支持工具）：stable = 只读说明 + 人设，tail 带关键词命中；
+        // - OFF / 记忆总开关关闭：stable 为空，不注入；
+        // - 联网工具与记忆互不影响：web-only 轮次只带工具说明，不注入记忆工具说明。
+        val readOnlyMemory = memoryMode != MemoryMode.OFF && !memoryToolsActive
         val memoryContext = if (readOnlyMemory) memoryManager?.buildContext(content) else null
-        var stableContext = if (wantsTools) {
-            // 工具说明来自已注册工具（registry.hint），人设段来自记忆模块；
-            // 拼接顺序与分隔符保持不变，前缀字节稳定
+        var stableContext = run {
             val toolHint = loop?.hint.orEmpty()
-            val persona = memoryManager?.buildPersonaSection().orEmpty()
-            listOf(toolHint, persona).filter { it.isNotBlank() }.joinToString("\n\n")
-        } else {
-            memoryContext?.stable ?: ""
+            val memoryPart = if (memoryToolsActive) {
+                memoryManager?.buildPersonaSection().orEmpty()
+            } else {
+                memoryContext?.stable.orEmpty()
+            }
+            listOf(toolHint, memoryPart).filter { it.isNotBlank() }.joinToString("\n\n")
         }
         var tailFragments = listOfNotNull(
             TimeContext.describe(),
@@ -552,7 +564,8 @@ class ChatService(
         }
 
         var local = buildLocalRequest(
-            includeToolHistory = wantsTools,
+            // 历史回放跟随「本轮是否真的发工具协议」，与记忆模式无关
+            includeToolHistory = loop != null,
             stable = stableContext,
             tail = tailFragments
         )
@@ -640,6 +653,8 @@ class ChatService(
             rounds = rounds,
             toolCalls = toolCalls,
             toolsUsed = toolsUsed,
+            // 端点拒绝工具后走的是纯文本回退，本轮并未真正使用记忆工具 → 不提交、不推进摘要
+            memoryToolsUsed = memoryToolsActive && toolsUsed,
             promptTokens = usagePromptTokens,
             cacheHitTokens = usageCacheHitTokens
         )

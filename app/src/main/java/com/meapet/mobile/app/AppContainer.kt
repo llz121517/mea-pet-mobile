@@ -191,26 +191,41 @@ class AppContainer(
         JsonHttpClient(KtorHttpClientEngine(followRedirects = false))
     }
 
-    /** 关闭联网时沿用同一份记忆工具注册表，保留现有请求前缀。 */
+    /** 只有记忆工具时复用同一注册表，保留现有请求前缀（tools 数组字节稳定）。 */
     private val memoryToolLoop: ChatToolLoop? by lazy {
         val executor = memoryToolExecutor ?: return@lazy null
         ChatToolLoop({ apiClient }, ToolRegistry(executor.asTools()))
     }
 
-    /** 在现有工具模式下按轮固定服务商、密钥和工具集合。 */
-    private fun createTurnToolLoop(): ChatToolLoop? {
-        val executor = memoryToolExecutor ?: return null
-        if (!settingsManager.getWebSearchEnabled()) return memoryToolLoop
-
+    /** 按当前设置组装联网工具；服务商与凭据在这一轮内固定。 */
+    private fun createWebTools(): List<com.meapet.mobile.chat.tools.Tool> {
         val chat = settingsManager.getApiConnection()
-        val webTools = WebToolFactory(webHttp).create(
+        return WebToolFactory(webHttp).create(
             selectedId = settingsManager.getWebSearchProvider().id,
             chatBaseUrl = chat.url,
             chatApiKey = chat.key,
             anySearchKey = settingsManager.getWebSearchAnySearchKey(),
             deepSeekKey = settingsManager.getWebSearchDeepSeekKey()
         )
-        return ChatToolLoop({ apiClient }, ToolRegistry(executor.asTools() + webTools))
+    }
+
+    /**
+     * 每轮按实际资格组合工具：记忆与联网互不依赖。
+     *
+     * 资格由 ChatService 按本轮设置算好后传进来，这里只负责拼注册表；
+     * 不缓存在字段里，避免动态设置（关记忆、关联网）被 lazy 捕获成过期值。
+     */
+    private fun createTurnToolLoop(includeMemoryTools: Boolean, includeWebTools: Boolean): ChatToolLoop? {
+        val webTools = if (includeWebTools) createWebTools() else emptyList()
+        val executor = if (includeMemoryTools) memoryToolExecutor else null
+        val tools = buildList {
+            if (executor != null) addAll(executor.asTools())
+            addAll(webTools)
+        }
+        if (tools.isEmpty()) return null
+        // 只开记忆时复用缓存注册表，避免每轮重建（tools 数组内容一致，但少一次分配）
+        if (executor != null && webTools.isEmpty()) return memoryToolLoop
+        return ChatToolLoop({ apiClient }, ToolRegistry(tools))
     }
 
     /** 聊天服务（核心业务逻辑）。 */

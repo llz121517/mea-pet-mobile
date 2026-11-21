@@ -60,11 +60,19 @@ class ChatServiceWebToolTest {
             whenever(it.getMemoryMode()).thenReturn(MemoryMode.AUTO)
             whenever(it.getTemperature()).thenReturn(0.7)
             whenever(it.getMaxTokens()).thenReturn(4096)
+            // 每轮开始时读一次：第一轮联网开，回包过程中关掉，第二轮起只剩记忆工具
+            whenever(it.getWebSearchEnabled()).thenAnswer { enabled }
         }
         val service = ChatService(
             clientProvider = { client }, conversationManager = ConversationManager(), memoryManager = null,
             settingsManager = settings, postProcessScope = backgroundScope, memoryTools = memory,
-            toolLoopProvider = { if (enabled) webLoop else memoryLoop }
+            toolLoopProvider = { memoryTools, webTools ->
+                when {
+                    memoryTools && webTools -> webLoop
+                    memoryTools -> memoryLoop
+                    else -> null
+                }
+            }
         )
 
         assertTrue(service.sendMessage("读取网页").isSuccess)
@@ -82,23 +90,24 @@ class ChatServiceWebToolTest {
     }
 
     @Test
-    fun `text and off modes keep the existing non tool request`() = runTest {
+    fun `text and off modes without web keep the non tool request`() = runTest {
         for (mode in listOf(MemoryMode.TEXT, MemoryMode.OFF)) {
             val chat = FakeHttpClientEngine { response("""{"choices":[{"message":{"role":"assistant","content":"正常回复"}}]}""") }
             val client = OpenAiCompatibleClient("fake-key", "https://chat.example.org/v1", chat)
             val settings = mock<SettingsManager>().also {
-            whenever(it.getApiConnection()).thenReturn(ApiConnection("https://example.org/v1", "fixture-key"))
-            whenever(it.isMemoryEnabled()).thenReturn(true)
+                whenever(it.getApiConnection()).thenReturn(ApiConnection("https://example.org/v1", "fixture-key"))
+                whenever(it.isMemoryEnabled()).thenReturn(true)
                 whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
                 whenever(it.getModel()).thenReturn("model")
                 whenever(it.getMemoryMode()).thenReturn(mode)
                 whenever(it.getTemperature()).thenReturn(0.7)
                 whenever(it.getMaxTokens()).thenReturn(4096)
+                whenever(it.getWebSearchEnabled()).thenReturn(false)
             }
             val service = ChatService(
                 clientProvider = { client }, conversationManager = ConversationManager(), memoryManager = null,
                 settingsManager = settings, postProcessScope = backgroundScope,
-                toolLoopProvider = { error("Deferred S4 modes must not activate web tools") }
+                toolLoopProvider = { _, _ -> error("联网关闭时不应组合工具循环") }
             )
             assertTrue(service.sendMessage("你好").isSuccess)
             val request = Json.parseToJsonElement((chat.requests.single().body as RequestBody.Json).content).jsonObject

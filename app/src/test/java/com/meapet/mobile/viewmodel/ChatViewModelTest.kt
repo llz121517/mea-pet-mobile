@@ -457,7 +457,7 @@ class ChatViewModelTest {
                 settingsManager = settings,
                 postProcessScope = kotlinx.coroutines.CoroutineScope(Dispatchers.Default),
                 config = com.meapet.mobile.config.AppConfig.DEFAULT,
-                toolLoopProvider = {
+                toolLoopProvider = { _, _ ->
                     com.meapet.mobile.chat.tools.ChatToolLoop(
                         clientProvider = {
                             com.meapet.mobile.client.OpenAiCompatibleClient("k", "https://x/v1", engine)

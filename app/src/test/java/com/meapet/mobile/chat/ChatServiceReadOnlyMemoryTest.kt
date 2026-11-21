@@ -267,7 +267,7 @@ class ChatServiceReadOnlyMemoryTest {
         val executor = toolStore?.let { MemoryToolExecutor(BigramMemorySearcher(it), it, commit = manager::applyToolChanges) }
         return ChatService(clientProvider = { client }, conversationManager = history, memoryManager = manager,
             settingsManager = settings, postProcessScope = scope,
-            toolLoopProvider = { executor?.let { ChatToolLoop({ client }, ToolRegistry(it.asTools())) } }, memoryTools = executor)
+            toolLoopProvider = { _, _ -> executor?.let { ChatToolLoop({ client }, ToolRegistry(it.asTools())) } }, memoryTools = executor)
     }
 
     private fun settings(mode: MemoryMode) = mock<SettingsManager>().also {

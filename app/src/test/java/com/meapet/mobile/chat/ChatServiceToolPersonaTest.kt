@@ -77,7 +77,7 @@ class ChatServiceToolPersonaTest {
             postProcessScope = CoroutineScope(Dispatchers.Unconfined),
             config = AppConfig.DEFAULT,
             maxTokensCapProvider = { maxTokensCap },
-            toolLoopProvider = {
+            toolLoopProvider = { _, _ ->
                 ChatToolLoop(clientProvider = {
                     OpenAiCompatibleClient("sk-test", "https://api.example.com/v1", engine)
                 }, registry = com.meapet.mobile.chat.tools.ToolRegistry(executor.asTools()))

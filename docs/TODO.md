@@ -42,7 +42,6 @@
 - [ ] **1.10：清理备胎代码** — `MemoryRepository`（JSON 实现）、`ConversationStore` 与相关单测；legacy 导入保留到 1.11（见 `legacy-compat.md`）。
 - [ ] **被打断 turn 的 `interrupted` 落库标记** — 当前仅 `TurnMetrics` 日志记录，无消费方；等有「中断轮次分析」需求再补（`extra_json` 或 meta 记录，不改 schema）。
 - [ ] **备用 tail 模式（`SEPARATE_USER`）未接线** — 只有常量与单测，没有设置入口，也没有计划里的「返回 400/500 且正文命中模板报错 → 回退 MERGE_USER 并按 baseUrl+model 缓存」探测 / 降级逻辑；默认 MERGE_USER 兼容性最好，暂不启用，等确有端点需要连续 user 时再做（避免写永不执行的死代码）。
-- [ ] **S4：联网工具独立于记忆模式启用（已排队；范围调查完成，尚未实施）** — 详见[改动范围](2026-11-19-web-search-plan.md)。主要涉及 ChatService 的工具资格、上下文/历史与记忆副作用门控，AppContainer 的独立工具组装，以及模式组合回归和设置说明。记忆总开关门控已修复；仍需防止 web-only 轮次推进记忆摘要。旧文本写入、echo、存储重构不在范围内。
 - [ ] **联网工具真机验收**（见 [联网工具方案](2026-11-19-web-search-plan.md)）— 验证 DeepSeek 官方 Key、AnySearch 匿名与 token、搜索后读取正文、设置切换、限流和额度提示。
 - [ ] **设备残留数据清理**（可选，下次接设备时）— 测试注入的长消息、重复记忆 `mem_ln3glfhc` / `mem_39ypzmxj`。
 

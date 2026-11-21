@@ -356,8 +356,8 @@ internal fun WebSearchSection(
                     "DeepSeek 优先使用独立 Key；留空时，会尝试复用「API 配置」中的 Key。" +
                     "AnySearch 留空使用匿名档，有 Key 时使用该 Key。\n\n" +
                     "查询词和网页地址会发送给实际使用的服务商，自动切换也可能将同一请求发送给下一家。" +
-                    "服务可能有额度、限速或收费。当前需要记忆处于自动/工具模式，且聊天端点支持 function calling。" +
-                    "设置修改从下一轮对话生效。"
+                    "服务可能有额度、限速或收费。联网工具与记忆设置相互独立，" +
+                    "只需聊天端点支持 function calling；设置修改从下一轮对话生效。"
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -429,7 +429,7 @@ internal fun WebSearchSection(
 
     Spacer(Modifier.height(8.dp))
     Text(
-        text = "需记忆「自动/工具」模式；联网会发送查询或网址，可能产生费用。",
+        text = "联网与记忆相互独立；联网会发送查询或网址，可能产生费用。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
