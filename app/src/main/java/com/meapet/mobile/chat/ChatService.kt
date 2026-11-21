@@ -31,6 +31,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * 聊天业务服务。
@@ -209,7 +210,7 @@ class ChatService(
                 try {
                     // 整个 turn（多轮工具请求 + tools 不支持降级 + 空回复兜底）共用一个总超时：
                     // 移动网络下工具循环最坏是 maxRounds 次请求叠加，没有总超时用户只能强杀
-                    val execution = withTimeout(config.turnTimeoutMs) {
+                    val execution = withTimeout(config.turnTimeoutMs.milliseconds) {
                         runTurn(
                             turnUser = turnUser,
                             turnId = turnId,

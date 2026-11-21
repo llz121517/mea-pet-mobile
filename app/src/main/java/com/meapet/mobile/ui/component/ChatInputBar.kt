@@ -48,6 +48,8 @@ fun ChatInputBar(
     isLoading: Boolean = false,
     placeholder: String = "给 Mea 发个消息...",
     enabled: Boolean = true,
+    /** 不透明度直接取「聊天气泡透明度」设置值（1.0 = 完全不透明）。 */
+    alpha: Float = 1f,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -58,7 +60,7 @@ fun ChatInputBar(
         tonalElevation = 8.dp,
         // 保持 0：投影会渗过半透明填充，在浅色模式下形成一条亮带
         shadowElevation = 0.dp,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha)
     ) {
         Row(
             modifier = Modifier

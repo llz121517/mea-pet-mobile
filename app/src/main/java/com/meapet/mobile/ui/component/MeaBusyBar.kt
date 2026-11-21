@@ -19,6 +19,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 /**
+ * 状态条底色的不透明度底数。
+ *
+ * 它是覆盖在聊天流上的一条，比输入胶囊更需要一点遮罩感，所以不直接用设置值，
+ * 而是在其之上乘 0.9：设置 1.0 ≈ 90% 不透明，调低时同步变淡。
+ */
+private const val FILL_ALPHA = 0.9f
+
+/** 顶部分割线的不透明度（随设置值衰减，比底色更淡）。 */
+private const val DIVIDER_ALPHA = 0.4f
+
+/**
  * 「Mea 还在…」轻提示条。
  *
  * 固定贴在输入栏上方、随输入栏一起移动的**细长条**（不是悬浮按钮，也不遮挡消息列表）：
@@ -40,16 +51,18 @@ fun MeaBusyBar(
     text: String,
     modifier: Modifier = Modifier,
     actionLabel: String? = null,
-    onAction: (() -> Unit)? = null
+    onAction: (() -> Unit)? = null,
+    /** 在「聊天气泡透明度」设置之上再乘一个底数：设置 1.0 时约 90% 不透明。 */
+    alpha: Float = 1f
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         HorizontalDivider(
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = DIVIDER_ALPHA * alpha)
         )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.06f))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = FILL_ALPHA * alpha))
                 .padding(horizontal = 16.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {

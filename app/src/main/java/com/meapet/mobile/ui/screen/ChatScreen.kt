@@ -3,6 +3,8 @@ package com.meapet.mobile.ui.screen
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -47,9 +50,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -76,6 +82,12 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.flow.distinctUntilChanged
+
+/** 列表底部留白相对底部栏高度额外留出的间隙。 */
+private val BOTTOM_BAR_GAP = 4.dp
+
+/** 底部栏尚未测量到时的兜底留白（输入胶囊约 96dp + 间隙）。 */
+private val FALLBACK_BOTTOM_INSET = 100.dp
 
 /** 内部页面导航。 */
 private enum class Page { CHAT, SETTINGS }
@@ -270,14 +282,39 @@ private fun ChatPage(
         chatViewModel.onEvent(ChatEvent.DismissCompactionNotice)
     }
 
+    // 消息列表底部留白跟随底部栏实际高度：状态条出现时自动把它让出来，
+    // 避免列表和「Mea 还在说…」打架。首帧尚未测量到时用兜底值。
+    var bottomBarHeight by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
+    val bottomInset by animateDpAsState(
+        targetValue = if (bottomBarHeight > 0.dp) bottomBarHeight + BOTTOM_BAR_GAP
+                      else FALLBACK_BOTTOM_INSET,
+        animationSpec = tween(durationMillis = 180),
+        label = "messageListBottomInset"
+    )
+
+    // 留白变化时把列表内容同步平移同样的距离：状态条顶上来后会盖住最后一条，
+    // 单纯加 padding 不会移动已显示的内容（滚动锚点不变），必须自己补这一段位移。
+    // 只做等量平移，不滚到底——用户可能正在上面读历史，不能把视野强行拽回底部。
+    var previousInset by remember { mutableStateOf(bottomInset) }
+    LaunchedEffect(bottomInset) {
+        val delta = bottomInset - previousInset
+        previousInset = bottomInset
+        // scrollBy 正值 = 内容上移；列表还没内容时不动，避免空态被顶
+        if (delta.value != 0f && listState.layoutInfo.totalItemsCount > 0) {
+            listState.scrollBy(with(density) { delta.toPx() })
+        }
+    }
+
     // 整页躲开软键盘：输入栏、撤销条、消息列表都随键盘收窄（窗口不再替我们
     // resize/pan，见 MainActivity 的 edge-to-edge 说明）
     Box(modifier = Modifier.fillMaxSize().imePadding()) {
-        // ── Layer 1: 消息列表 ──
+        // ── Layer 1: 消息列表（越界效果走系统默认拉伸）──
         MessageList(
             state = state,
             listState = listState,
             bubbleAlpha = bubbleAlpha,
+            bottomInset = bottomInset,
             contentReady = initialScrollApplied || (state.initialLoadDone && state.messages.isEmpty()),
             onDismissError = { chatViewModel.onEvent(ChatEvent.DismissError) },
             onRetry = { chatViewModel.onEvent(ChatEvent.RetryLastMessage) }
@@ -301,7 +338,13 @@ private fun ChatPage(
         )
 
         // ── Layer 3: 底部输入栏（turn 状态条 / 压缩中状态条）──
-        Column(modifier = Modifier.align(Alignment.BottomCenter)) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .onSizeChanged { size ->
+                    bottomBarHeight = with(density) { size.height.toDp() }
+                }
+        ) {
             // 「Mea 还在…」只在**出现第一条回复后**才出现：等待首条期间输入栏发送键转圈即可，
             // 不再提前弹状态条（还没看到任何输出就显示「还在说」既不准确也让人以为卡住）。
             // 渐入/渐出避免出现、消失时跳变。
@@ -313,6 +356,7 @@ private fun ChatPage(
                 MeaBusyBar(
                     text = "Mea 还在说…",
                     actionLabel = "停止",
+                    alpha = bubbleAlpha,
                     onAction = { chatViewModel.onEvent(ChatEvent.StopTurn) }
                 )
             }
@@ -322,7 +366,7 @@ private fun ChatPage(
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
-                MeaBusyBar(text = "Mea 还在整理前面的内容…")
+                MeaBusyBar(text = "Mea 还在整理前面的内容…", alpha = bubbleAlpha)
             }
             // 等待首条回复期间保持原禁用/转圈表现；已出第一条气泡后恢复输入，发送即插队
             val waitingFirstReply = state.turnPhase == TurnPhase.WAITING_FIRST_REPLY
@@ -332,6 +376,7 @@ private fun ChatPage(
                 onSend = { chatViewModel.onEvent(ChatEvent.SendMessage(state.inputText)) },
                 isLoading = waitingFirstReply,
                 enabled = !waitingFirstReply,
+                alpha = bubbleAlpha,
                 modifier = Modifier
             )
         }
@@ -368,6 +413,8 @@ private fun MessageList(
     state: ChatUiState,
     listState: LazyListState,
     bubbleAlpha: Float,
+    /** 底部内容留白：跟随输入栏（含状态条）实测高度，保证最后一条不被遮住 */
+    bottomInset: Dp,
     /** 首屏定位是否已完成；未完成时列表透明，避免闪一下空态或顶部内容 */
     contentReady: Boolean,
     onDismissError: () -> Unit,
@@ -386,10 +433,11 @@ private fun MessageList(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(bottom = 88.dp)
-            .padding(horizontal = 4.dp, vertical = 8.dp)
+            .padding(horizontal = 4.dp)
             .alpha(if (contentReady) 1f else 0f),
-        contentPadding = PaddingValues(vertical = 8.dp),
+        // 视口铺满整屏（消息可以从悬浮输入栏后面滚过去），底部留白改用内容内边距：
+        // 具体高度由底部栏实测值给出（见 ChatPage），状态条出现时会自动变高。
+        contentPadding = PaddingValues(top = 16.dp, bottom = bottomInset),
         verticalArrangement = Arrangement.Bottom
     ) {
         if (state.initialLoadDone && uniqueMessages.isEmpty()) {
