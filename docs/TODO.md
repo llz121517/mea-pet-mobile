@@ -25,35 +25,18 @@
 
 ---
 
-## ✅ 已完成(1.7.2 / 1.8.0,逐条细节见 CHANGELOG)
+## 📌 待办 0 · 1.8.0 引入收尾
 
-- **P0 批**(2026-08-31, `8371c3b`):#4 清空对话误清弹窗 · #7 persistAsync 静默丢数据 · #3 消息裁剪乱序 · #5 Markwon 缓存键 · #2+#46 吞 CancellationException;顺手 #39 Markdown 重复解析、#40 重试过滤 O(n²)→O(n)、#1 线程约束注释加固。
-- **小改动高收益批 = 旧「批次 1」**(PR #18, `34d8a29`):新-1 系统气泡「挤旧反延长」(改绝对 deadline + `BubbleLife`)、#18 网关错误详情可见、新-4 `onResume` 等悬浮窗停止加 2s 超时、#38 `LogExporter.waitFor` 加超时、新-6 TTS attn 护栏改内存封顶、新-7/#32 修正 `ConversationManager` 文档、新-10 重试边界守卫。附 `SystemBubblePolicy`/`ApiResponse` 回归单测。
-- **用户反馈批**(PR #20, `6eb4311`):发送失败回滚防「幽灵消息」、乐观/入史同 id、`mergeWithHistory` 按时间戳过滤、`retryLastMessage`→`retryMessage`(目标由 UI 按 id 指定,防重发旧消息 + LazyColumn 重复 key 崩溃)、分界丢失不再清空全部回复、`MessageList` 加 `distinctBy` 兜底、宽表格按段渲染 + 横向滚动 + 气泡宽度放开。附 14 条单测(全绿)。
-- **复核定案剔除**:#6(合法 Compose 用法)、#43、#44(理由见「不做」)。
-- **1.8.0 TTS 迁移批**(2026-11-01, `fc70902`..`aed66e6`):推理链整体换成 sherpa-onnx,连带作废本清单两条旧项——**#41 失效**(`DurationExpander` 连同旧 G2P/四模块引擎整体删除,无优化对象)、**「无 CI」失效**(`.github/workflows/ci.yml` 已上线:`:app:testDebugUnitTest` + PR 构建 debug APK)。新-6 的 attention 内存护栏代码与测试也随旧引擎删除。详见 [`archive/reports/2026-11-15-migration-report-1.8.0.md`](archive/reports/2026-11-15-migration-report-1.8.0.md)。
-- **英文数字读法**(真机验收期修复, 2026-11-15):英文句中的阿拉伯数字在 App 归一化层预转换为英文数词(`3`→three、`12`→twelve),不再被 sherpa 中文 `ruleFsts` 读成 sān/shí èr;中文/日文上下文数字保持原路径;`3.5`/`10:30`/电话等复合或长数字不转换。补 3 组单测。日文数字读法见「待办 D」。
-- **逐句流式播放**(2026-11-15):`TtsEngine.synthesizeStreaming` 走 `OfflineTts.generateWithConfigAndCallback`,每句合成完即回调;`TtsManager` 首块到达才点亮/停触摸语音并开播,后续分块进 `TtsAudioPlayer` 队列、由专用写线程写 AudioTrack;打断时回调返回 0 让原生推理中止剩余句子(不再白算完)。桌面 4 句首块 ~1.1s(整段 3.8s);补 `TtsManagerTest` 流式契约 8 条(含迟到分块中止、releaseEngine 串行)。并行(`maxNumSentences>1`)实测只快 ~8%,不启用;JNI 回调必须用 Java 适配器 `TtsStreamCallback`(sherpa 按 `invoke([F)Ljava/lang/Integer;` 查方法,Kotlin indy lambda 没这个签名,直接传会 CheckJNI SIGABRT,已加 `TtsStreamCallbackTest` 反射守护)。
-- **稳定性批残留项**(2026-11-15, `199da5d`/`ee88462`):#37 设置同步 getter 不再主线程 `runBlocking`(快照未预热返回 `emptyPreferences()`,判定型读取走 `awaitLoaded()`)· #42 记忆写放大收敛(`applyChanges` 整批落盘;永久类存储层无硬顶见待办 A)· #19 `getRelevant` 读写分离 + `markAccessed` 显式记账 · #7 残留 `onStop` 调 `flush()` 补写。细节见 CHANGELOG `[1.8.0]`。
-
----
-
-## 📌 待办 0 · 1.8.0 发布收尾(阻塞 v1.8.0 发布)
-
-- [x] **真机验收** 按 [`archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](archive/checklists/2026-11-15-tts-device-test-1.8.0.md) 逐条执行(21 条试听 + SIGILL/内存/打断/悬浮窗/删除重导入/1.7.x 升级迁移),结论回填清单 §3。**已完成(2026-11-15)**:清单全部勾选、§3 结论回填(设备 Xiaomi 22041216UC / MT6895Z / Android 14);自动化记录见清单 §A。当天修复并复验:英文数字读法、流式回调 JNI 签名崩溃、≤2s 短片段无声。
-- [x] **模型包 `lexicon.txt` 重传确认** — **已实测确认(2026-11-15)**:App 只校验字节数;`artifacts.json` 把 `lexicon.txt` 标为 `content-identical`,发布包 `97e2b4fb…`(打包型行序)与本地 `tools/tts/dist` 的 `261ee0a7…`(生成型行序)`content_sha256` 相同、字节不同。设备当前为本地 zip 导入版本(`261ee0a7…`),功能与发布包一致。**结论:Release 上的包即最终版,无需重传**;双 sha 口径记录在 [`tts/g2p-pipeline.md`](tts/g2p-pipeline.md) 与 [`../tools/tts/README.md`](../tools/tts/README.md)(`tts/model-package.md` 只记发布包 sha)。
-- [y] **打 tag `v1.8.0` 前先做 signed release 冒烟(本轮构建精简后新增门禁)** — 1.8.0 打包剔除了未使用的 sherpa `c-api`/`cxx-api` so 并启用 `-allowaccessmodification`,`assembleRelease` 现在直出已签名包(**实测 v8a 33.71MB / 双 ABI 51.83MB**,1.7.2 为 61.64MB)。**构建侧冒烟已完成(2026-11-15)**:`tools/build-release.ps1` 产出并验签(证书与线上 1.7.2 同一 SHA-256)、`zipalign -P 16` 通过、ABI 正确。**设备侧仍待做**:装一次 release(需先卸载 debug,会清掉本地 84MB 模型,记得重新导入),验证冷启动、TTS 试听、Live2D 与悬浮窗。
-- [y] **打 tag `v1.8.0`** 走 `.github/workflows/release.yml`(须在 `main` 上且与 `versionName` 一致)。**前置:先把 `dev` 合并到 `main`**——`main` 落后 60 个提交,`release.yml` 的 `--require-main` 会拒掉 dev 上的 tag;当前最新 tag 仍为 `v1.7.2`。
 - [] **1.11.0:删除 legacy TTS 迁移步骤** — 按 [`legacy-compat.md`](legacy-compat.md) §3/§4 删 3 个 step + 注册项 + 测试,保留迁移框架本身。
-- [ ] **1.9.0:观察 TTS 合成后 native 内存增长** — 真机复测(2026-11-15):前台冷启动未合成 TOTAL PSS 381MB / Native 110MB;10 条合成后 TOTAL PSS 690MB / Native 408MB(增量约 +300MB,超出清单预期的 100~250MB)。待确认是 ORT arena 缓存(长文本大张量)还是泄漏:继续合成是否持续增长、删除模型后是否回落(清单 §2.3)。
+- [ ] **后续 Patch 版本:观察 TTS 合成后 native 内存增长** — 真机复测(2026-11-15):前台冷启动未合成 TOTAL PSS 381MB / Native 110MB;10 条合成后 TOTAL PSS 690MB / Native 408MB(增量约 +300MB,超出清单预期的 100~250MB)。待确认是 ORT arena 缓存(长文本大张量)还是泄漏:继续合成是否持续增长、删除模型后是否回落(清单 §2.3)。
 
 ---
 
-## 📌 待办 E · 1.9 收尾（dev 分支）
+## 📌 待办 E · 1.9 收尾
 
 1.9.0 的记忆工具、只读文本回退、联网工具、SQLite、历史分页与上下文压缩已接入。当前状态与行为见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)（记忆实现参考）、[`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) 与 [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md)。仍需处理：
 
-- [ ] **1.9 真机验收**（本轮按用户要求暂不操作设备）— 连续回复顺序与逐条 TTS、插队发送 /「停止」、工具消息落库后重启续聊、记忆检索四档、工具记忆写入 / 删除撤销、TEXT 模式无记忆内容变更、只读回退不触发文本写入或自动摘要、摘要触发范围、turn 超时、压缩分隔条与手动压缩、向上懒加载锚定。
+- [ ] **1.9 真机验收** — 连续回复顺序与逐条 TTS、插队发送 /「停止」、工具消息落库后重启续聊、记忆检索四档、工具记忆写入 / 删除撤销、TEXT 模式无记忆内容变更、只读回退不触发文本写入或自动摘要、摘要触发范围、turn 超时、压缩分隔条与手动压缩、向上懒加载锚定。
 - [ ] **M4 观察期指标** — 收集 `TurnMetrics` 中的工具调用率、平均轮数、失败 / 取消 / 超时占比和 `cacheHitRatio`，评估运行质量与容量 / 摘要参数。
 - [ ] **记忆工具能力缓存与模型切换** — 只读审计发现 `ChatService.toolsUnsupported` 是进程级布尔值，未随 API 地址、模型或 Key 变化重置：某次 HTTP 400 / 404 / 422 / 501 后，记忆和联网工具会一直禁用到进程重启，即使切换到支持工具的端点也是如此。进一步调查并修正缓存键 / 失效时机及不支持判定范围；不要据此把尚未实现的修复记为完成。
   - 还需验证工具循环中途被 HTTP 错误拒绝时的回退：可能在未写入待提交 transcript 的情况下，仍提交暂存记忆变更；明确复现与事务语义后再修复。
@@ -137,19 +120,9 @@
 
 ---
 
-## ⛔ 不做 / 已剔除(复核定案)
-
-- ~~#6 条件分支内 `collectAsState`~~ — 合法 Compose 用法,非缺陷(该段真正的问题是 #13)。
-- ~~#44 `ensureDict` 双重检查锁~~ — 该链路(`PinyinDict` / 旧 G2P)已随 1.8.0 整体删除,无优化对象。
-- ~~#43 `WallpaperStore` 三次开流~~ — content 流不可回绕,测尺寸 + 解码天然两次;只有 EXIF 那次可省,不划算。
-- ~~#3 继续深挖 `trimWindow`~~ — 已修,且 `ConversationManager` 里从不存 system 消息,原缺陷路径本就走不到。
-
----
-
 ## 验证要求与提交约定
 
 - 批次 A / B 的每一项都要能独立编过(`./gradlew assembleDebug`,bisect safe)。
 - **运行时行为必须真机验证**(容器无设备):气泡寿命、黑屏恢复、授权开关一致性(#15)、报错文案。
-- 提交信息沿用 `Fix:` / `Update:` / `Add:` 分段,长解释写进 commit message。
 - 提交前 `git status` 确认 `gradle.properties` / `local.properties` / `gradlew` 不在暂存区。
-- ⚠️ 全局免责:本文行号是归档核对时点的引用,后续改动会漂移,以符号名为准。
+- 本文行号是归档核对时点的引用,后续改动会漂移,以符号名为准。
