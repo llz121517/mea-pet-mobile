@@ -13,6 +13,7 @@ import com.meapet.mobile.memory.search.MemoryQuery
 import com.meapet.mobile.memory.search.MemorySearch
 import com.meapet.mobile.memory.tools.MemoryToolExecutor
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.settings.ApiConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -42,6 +43,8 @@ class ChatServiceToolRoundCounterTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     private fun settings(): SettingsManager = mock<SettingsManager>().also {
+        whenever(it.getApiConnection()).thenReturn(ApiConnection("https://example.org/v1", "fixture-key"))
+        whenever(it.isMemoryEnabled()).thenReturn(true)
         whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
         whenever(it.getModel()).thenReturn("gpt-4o-mini")
         whenever(it.getTemperature()).thenReturn(0.8)

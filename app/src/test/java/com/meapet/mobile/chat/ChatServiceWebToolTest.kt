@@ -13,6 +13,7 @@ import com.meapet.mobile.search.AnySearchWebProvider
 import com.meapet.mobile.search.WebFetchTool
 import com.meapet.mobile.search.WebSearchTool
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.settings.ApiConnection
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -52,6 +53,8 @@ class ChatServiceWebToolTest {
             WebSearchTool({ provider }), WebFetchTool({ provider })
         )))
         val settings = mock<SettingsManager>().also {
+            whenever(it.getApiConnection()).thenReturn(ApiConnection("https://example.org/v1", "fixture-key"))
+            whenever(it.isMemoryEnabled()).thenReturn(true)
             whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
             whenever(it.getModel()).thenReturn("model")
             whenever(it.getMemoryMode()).thenReturn(MemoryMode.AUTO)
@@ -84,6 +87,8 @@ class ChatServiceWebToolTest {
             val chat = FakeHttpClientEngine { response("""{"choices":[{"message":{"role":"assistant","content":"正常回复"}}]}""") }
             val client = OpenAiCompatibleClient("fake-key", "https://chat.example.org/v1", chat)
             val settings = mock<SettingsManager>().also {
+            whenever(it.getApiConnection()).thenReturn(ApiConnection("https://example.org/v1", "fixture-key"))
+            whenever(it.isMemoryEnabled()).thenReturn(true)
                 whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
                 whenever(it.getModel()).thenReturn("model")
                 whenever(it.getMemoryMode()).thenReturn(mode)

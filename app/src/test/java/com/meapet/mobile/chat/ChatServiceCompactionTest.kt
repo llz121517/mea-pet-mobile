@@ -8,6 +8,7 @@ import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.client.RequestBody
 import com.meapet.mobile.client.test.FakeHttpClientEngine
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.settings.ApiConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -24,6 +25,8 @@ class ChatServiceCompactionTest {
     private val summaryMarker = "对话历史摘要助手"
 
     private fun settings(): SettingsManager = mock<SettingsManager>().also {
+        whenever(it.getApiConnection()).thenReturn(ApiConnection("https://example.org/v1", "fixture-key"))
+        whenever(it.isMemoryEnabled()).thenReturn(true)
         whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
         whenever(it.getModel()).thenReturn("m")
         whenever(it.getTemperature()).thenReturn(0.7)

@@ -41,8 +41,8 @@ data class AppConfig(
      * 开启后模型通过 `search_memory` / `create_memory` / `update_memory` / `delete_memory`
      * 主动检索与写入记忆；未使用工具时仅保留关键词只读注入。
      *
-     * 端点不支持 tools（400/422）时，ChatService 会在本会话内自动回退到单次请求，
-     * 保证聊天不中断。
+     * 首次工具请求被明确拒绝为不支持工具能力时，ChatService 会自动回退到单次请求；
+     * API 地址、Key 或模型变化后重新尝试。
      */
     val enableMemoryTools: Boolean = true,
     /**

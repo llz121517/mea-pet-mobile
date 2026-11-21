@@ -72,7 +72,9 @@ class MemoryToolExecutor(
      * turn 成功后提交暂存变更的回调（生产环境由容器传入 `memoryManager::applyToolChanges`）。
      * 为 null 时 [onTurnSuccess] 只清空暂存，不提交。
      */
-    private val commit: (suspend (PendingMemoryChanges) -> Unit)? = null
+    private val commit: (suspend (PendingMemoryChanges) -> Unit)? = null,
+    /** 动态总开关：执行与提交时读取，防止在途轮次绕过用户关闭记忆的操作。 */
+    private val isMemoryEnabled: () -> Boolean = { true }
 ) : com.meapet.mobile.chat.tools.TurnScoped {
 
     // ── turn 生命周期（TurnScoped）──────────────────────
@@ -81,7 +83,7 @@ class MemoryToolExecutor(
 
     override suspend fun onTurnSuccess() {
         val pending = drainPending()
-        if (!pending.isEmpty) commit?.invoke(pending)
+        if (isMemoryEnabled() && !pending.isEmpty) commit?.invoke(pending)
     }
 
     override fun onTurnAbort() = discardPending()
@@ -164,7 +166,10 @@ class MemoryToolExecutor(
      * @return tool 消息的 content（字符串化 JSON 信封）
      */
     suspend fun execute(name: String, argumentsJson: String): String = try {
-        when (name) {
+        if (!isMemoryEnabled()) {
+            discardPending()
+            errorEnvelope("memory_disabled", "记忆已关闭，不能检索或修改记忆")
+        } else when (name) {
             MemoryToolSchemas.SEARCH_MEMORY -> searchMemory(argumentsJson)
             MemoryToolSchemas.CREATE_MEMORY -> createMemory(argumentsJson)
             MemoryToolSchemas.UPDATE_MEMORY -> updateMemory(argumentsJson)

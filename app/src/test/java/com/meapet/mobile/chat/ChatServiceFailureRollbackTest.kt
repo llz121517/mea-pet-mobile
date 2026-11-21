@@ -5,6 +5,7 @@ import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.client.RequestBody
 import com.meapet.mobile.client.test.FakeHttpClientEngine
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.settings.ApiConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -31,6 +32,8 @@ class ChatServiceFailureRollbackTest {
 
     private fun settings(mode: com.meapet.mobile.config.MemoryMode = com.meapet.mobile.config.MemoryMode.TEXT): SettingsManager =
         mock<SettingsManager>().also {
+            whenever(it.getApiConnection()).thenReturn(ApiConnection("https://example.org/v1", "fixture-key"))
+            whenever(it.isMemoryEnabled()).thenReturn(true)
             whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
             whenever(it.getModel()).thenReturn("gpt-4o-mini")
             whenever(it.getTemperature()).thenReturn(0.8)

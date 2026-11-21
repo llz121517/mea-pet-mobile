@@ -177,7 +177,12 @@ class AppContainer(
             MemoryToolExecutor(
                 search = BigramMemorySearcher(memoryRepository),
                 store = memoryRepository,
-                commit = { changes -> memoryManager.applyToolChanges(changes) }
+                commit = { changes -> memoryManager.applyToolChanges(changes) },
+                // 执行与提交时动态门控：只读总开关（config + 用户开关）。
+                // 模式切换走下一轮生效（本轮工具集合已快照），避免「执行停了但摘要还计数」的不一致。
+                isMemoryEnabled = {
+                    config.enableMemory && settingsManager.isMemoryEnabled()
+                }
             )
         }
     }

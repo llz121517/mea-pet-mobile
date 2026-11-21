@@ -35,6 +35,57 @@ class MemoryToolWriteTest {
     private fun str(raw: String, key: String) = obj(raw)[key]!!.jsonPrimitive.content
 
     @Test
+    fun `关闭记忆时所有工具返回禁用且不读取存储`() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        var searches = 0
+        val executor = MemoryToolExecutor(
+            search = object : com.meapet.mobile.memory.search.MemorySearch {
+                override suspend fun search(query: com.meapet.mobile.memory.search.MemoryQuery): List<MemoryItem> {
+                    searches++
+                    return listOf(MemoryItem(id = "secret", content = "不能读取", type = MemoryType.SHORT_TERM))
+                }
+            },
+            store = repo,
+            isMemoryEnabled = { false }
+        )
+        for ((name, args) in listOf(
+            "search_memory" to """{"query":"秘密"}""",
+            "create_memory" to """{"content":"不能创建"}""",
+            "update_memory" to """{"id":"missing","content":"不能修改"}""",
+            "delete_memory" to """{"id":"missing"}"""
+        )) {
+            val result = executor.execute(name, args)
+            assertEquals("false", str(result, "ok"))
+            assertEquals("memory_disabled", str(result, "error"))
+        }
+        assertEquals(0, searches)
+        assertTrue(executor.drainPending().isEmpty)
+        assertTrue(repo.getAll().isEmpty())
+    }
+
+    @Test
+    fun `暂存后关闭记忆则成功轮次也不落库且重新开启不泄漏暂存`() = runTest {
+        val repo = MemoryRepository(tmp.newFolder())
+        var enabled = true
+        val executor = MemoryToolExecutor(
+            search = BigramMemorySearcher(repo), store = repo,
+            commit = { repo.applyChanges(it.upserts, it.deletes) },
+            isMemoryEnabled = { enabled }
+        )
+        executor.onTurnStart()
+        assertEquals("true", str(executor.execute("create_memory", """{"content":"不能提交"}"""), "ok"))
+        enabled = false
+        executor.onTurnSuccess()
+        assertTrue(repo.getAll().isEmpty())
+        enabled = true
+        executor.onTurnSuccess()
+        assertTrue(repo.getAll().isEmpty())
+        assertEquals("true", str(executor.execute("create_memory", """{"content":"重新开启后允许"}"""), "ok"))
+        executor.onTurnSuccess()
+        assertEquals(listOf("重新开启后允许"), repo.getAll().map { it.content })
+    }
+
+    @Test
     fun `create 只暂存，commit 前不落库`() = runTest {
         val (executor, repo) = setup()
 

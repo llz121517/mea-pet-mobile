@@ -14,6 +14,7 @@ import com.meapet.mobile.memory.MemoryManager
 import com.meapet.mobile.memory.MemoryStats
 import com.meapet.mobile.memory.MemoryType
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.settings.ApiConnection
 import com.meapet.mobile.tts.TtsManager
 import com.meapet.mobile.update.UpdateCheckResult
 import com.meapet.mobile.update.UpdateChecker
@@ -433,6 +434,8 @@ class ChatViewModelTest {
             )
             val engine = com.meapet.mobile.client.test.FakeHttpClientEngine { responses.removeFirst() }
             val settings = mock<SettingsManager>().also {
+                whenever(it.getApiConnection()).thenReturn(ApiConnection("https://example.org/v1", "fixture-key"))
+                whenever(it.isMemoryEnabled()).thenReturn(true)
                 whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
                 whenever(it.getModel()).thenReturn("m")
                 whenever(it.getTemperature()).thenReturn(0.7)
@@ -535,6 +538,8 @@ class ChatViewModelTest {
                 }
             }
             val realSettings = mock<SettingsManager>().also {
+                whenever(it.getApiConnection()).thenReturn(ApiConnection("https://example.org/v1", "fixture-key"))
+                whenever(it.isMemoryEnabled()).thenReturn(true)
                 whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
                 whenever(it.getModel()).thenReturn("m")
                 whenever(it.getTemperature()).thenReturn(0.7)

@@ -119,12 +119,43 @@ class ChatService(
         private val TOOLS_UNSUPPORTED_STATUS = setOf(400, 404, 422, 501)
     }
 
-    /**
-     * 当前端点是否已被判定为不支持 tools（会话内缓存，避免每轮都先失败一次）。
-     * 一旦置位，本进程内退回单次请求；记忆仅保留只读关键词注入。
-     */
-    @Volatile
+    /** 仅保留当前连接的负缓存；任何连接参数变化都重新尝试工具，不记录或输出凭据。 */
+    private data class ToolEndpoint(val url: String?, val key: String?, val model: String)
+    private var currentToolEndpoint: ToolEndpoint? = null
     private var toolsUnsupported = false
+
+    /** 提到「工具/函数调用」的词。 */
+    private val toolMention = Regex("\\b(tools?|tool_choice|function[_ -]?call(?:ing|s)?)\\b")
+
+    /** 「能力上不提供」一类措辞。 */
+    private val capabilityDenial = listOf(
+        "not support", "unsupported", "not available", "not allowed", "not permitted",
+        "unknown parameter", "unrecognized", "not implemented", "extra inputs are not permitted"
+    )
+
+    /**
+     * 具体到 schema / 字段的请求错误：`tools[0].function.parameters`、`invalid schema` 之类。
+     *
+     * 这类错误说明**我们发的内容**有问题（或该模型该字段不合法），不代表端点没有工具能力，
+     * 绝不能据此把工具永久关掉。
+     */
+    private val nestedRequestError = Regex("tools\\s*\\[|\\.function\\b|\\.parameters\\b|\\bschema\\b")
+
+    private fun rejectsToolSupport(error: Exception): Boolean {
+        val api = error as? ApiException ?: return false
+        if (api.statusCode !in TOOLS_UNSUPPORTED_STATUS) return false
+        val detail = ApiResponse.errorMessage(api.responseBody).orEmpty().lowercase()
+        if (detail.isBlank()) return false
+        // schema/参数级错误一律当作普通请求失败，不缓存「不支持工具」
+        if (nestedRequestError.containsMatchIn(detail)) return false
+        val rejectedParameter = Regex("(?:unsupported|unknown|unrecognized)\\s+parameter\\s*:\\s*['\"]?([\\w.-]+)")
+            .find(detail)?.groupValues?.get(1)
+        if (rejectedParameter != null && rejectedParameter !in setOf("tools", "tool_choice", "functions", "function_call")) {
+            return false
+        }
+        // 能力拒绝：泛化文案（“does not support tools”）或顶层参数被拒（“unknown parameter: tools”）
+        return toolMention.containsMatchIn(detail) && capabilityDenial.any { it in detail }
+    }
 
     /** 压缩状态（内存缓存，首次访问时从存储加载）。 */
     @Volatile
@@ -200,7 +231,17 @@ class ChatService(
         val transcript = mutableListOf<ChatMessage>()
 
         // 模式解析放在最前：失败路径也要把本轮模式记进观察指标
-        val memoryMode = if (config.enableMemory) settingsManager.getMemoryMode() else MemoryMode.OFF
+        val memoryMode = if (config.enableMemory && settingsManager.isMemoryEnabled()) settingsManager.getMemoryMode() else MemoryMode.OFF
+        // 端点「能力负缓存」的身份与 model 按轮快照：本轮后续请求与工具循环都用这个 model，
+        // 避免在途轮次里设置被改导致「模型变了但请求还发旧模型」。
+        // 注：实际 HTTP 客户端仍由 clientProvider 每轮现取（url/key 变更即时生效）。
+        val connection = settingsManager.getApiConnection()
+        val model = settingsManager.getModel()
+        val endpoint = ToolEndpoint(connection.url, connection.key, model)
+        if (endpoint != currentToolEndpoint) {
+            currentToolEndpoint = endpoint
+            toolsUnsupported = false
+        }
         val wantsTools = config.enableMemoryTools && memoryMode.usesTools && !toolsUnsupported
 
         turnActive.set(true)
@@ -215,6 +256,8 @@ class ChatService(
                             turnUser = turnUser,
                             turnId = turnId,
                             memoryMode = memoryMode,
+                            model = model,
+                            endpoint = endpoint,
                             wantsTools = wantsTools,
                             transcript = transcript,
                             onVisibleFragment = onFragment
@@ -234,7 +277,7 @@ class ChatService(
                     conversationManager.addMessages(transcript + finalAssistant)
 
                     // 3) 工具模式：整个 turn 成功后才提交暂存写入（失败/取消已在各 catch 中丢弃）
-                    if (config.enableMemoryTools) {
+                    if (execution.toolsUsed) {
                         memoryTools?.onTurnSuccess()
                     }
 
@@ -360,6 +403,8 @@ class ChatService(
         turnUser: ChatMessage,
         turnId: String,
         memoryMode: MemoryMode,
+        model: String,
+        endpoint: ToolEndpoint,
         wantsTools: Boolean,
         transcript: MutableList<ChatMessage>,
         onVisibleFragment: (ChatMessage) -> Unit
@@ -399,7 +444,6 @@ class ChatService(
         )
 
         val systemPrompt = settingsManager.getSystemPrompt()
-        val model = settingsManager.getModel()
         val temperature = settingsManager.getTemperature()
         // 输出上限按容量 25% 夹住：窗口很小时 max_tokens 会把输入预算吃穿
         val maxTokens = settingsManager.getMaxTokens().coerceAtMost(maxTokensCapProvider())
@@ -548,12 +592,12 @@ class ChatService(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                val status = (e as? ApiException)?.statusCode
-                if (status == null || status !in TOOLS_UNSUPPORTED_STATUS) throw e
-                // 端点拒绝 tools：本 turn 立即降级为只读关键词上下文重发，聊天不中断；
-                // 之后本会话不再尝试 tools（toolsUnsupported 已置位）
+                // 已接受并执行过工具时，后续错误属于整轮失败，由上层统一回滚暂存。
+                if (transcript.isNotEmpty() || !rejectsToolSupport(e)) throw e
+                val status = (e as ApiException).statusCode
                 Log.w(TAG, "Endpoint rejected tools (HTTP $status), falling back to read-only memory context")
-                toolsUnsupported = true
+                // 负缓存只归本轮端点：期间设置被改过就不要标记，否则会误伤新连接
+                if (currentToolEndpoint == endpoint) toolsUnsupported = true
                 val fallbackContext =
                     if (memoryMode != MemoryMode.OFF) memoryManager?.buildContext(content) else null
                 stableContext = fallbackContext?.stable ?: ""

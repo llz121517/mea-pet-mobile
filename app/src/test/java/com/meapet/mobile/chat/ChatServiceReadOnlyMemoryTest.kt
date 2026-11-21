@@ -15,6 +15,7 @@ import com.meapet.mobile.memory.MemoryType
 import com.meapet.mobile.memory.search.BigramMemorySearcher
 import com.meapet.mobile.memory.tools.MemoryToolExecutor
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.settings.ApiConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runCurrent
@@ -97,7 +98,7 @@ class ChatServiceReadOnlyMemoryTest {
             ChatMessage(role = ChatRole.assistant, content = "以前的回复", id = "old-final", turnId = "old")
         ))
         var calls = 0
-        val engine = FakeHttpClientEngine { if (calls++ == 0) HttpResponse(400, "{}".encodeToByteArray(), "application/json") else text("普通回复") }
+        val engine = FakeHttpClientEngine { if (calls++ == 0) rejectedTools() else text("普通回复") }
         val service = service(engine, settings, manager, history, backgroundScope, repository)
 
         assertTrue(service.sendMessage("再聊炸鸡").isSuccess)
@@ -143,6 +144,124 @@ class ChatServiceReadOnlyMemoryTest {
         assertEquals(1, repository.getExchangeCount())
     }
 
+    @Test
+    fun `changing model endpoint or key retries tools after a rejection`() = runTest {
+        for (changed in listOf("model", "url", "key")) {
+            val repository = MemoryRepository(temp.newFolder())
+            val settings = settings(MemoryMode.AUTO)
+            whenever(settings.getApiConnection())
+                .thenReturn(ApiConnection("https://example.org/v1", "first-key"))
+            val manager = MemoryManager(MemoryService(repository, { null }, settings), repository, settings)
+            var calls = 0
+            val engine = FakeHttpClientEngine { if (calls++ == 0) rejectedTools() else text("回复") }
+            val service = service(engine, settings, manager, ConversationManager(), backgroundScope, repository)
+            assertTrue(service.sendMessage("第一轮").isSuccess)
+            assertTrue(service.sendMessage("同一配置").isSuccess)
+            assertFalse(request(engine, 2).containsKey("tools"))
+            // 端点快照读的是 getApiConnection 一次取回的 url/key
+            when (changed) {
+                "model" -> whenever(settings.getModel()).thenReturn("other-model")
+                "url" -> whenever(settings.getApiConnection())
+                    .thenReturn(ApiConnection("https://other.example/v1", "first-key"))
+                "key" -> whenever(settings.getApiConnection())
+                    .thenReturn(ApiConnection("https://example.org/v1", "second-key"))
+            }
+            assertTrue(service.sendMessage("切换配置").isSuccess)
+            assertTrue(request(engine, 3).containsKey("tools"), changed)
+        }
+    }
+
+    @Test
+    fun `ordinary HTTP errors do not disable tools or retry silently`() = runTest {
+        for (status in listOf(400, 404, 422, 501)) {
+            val repository = MemoryRepository(temp.newFolder())
+            val settings = settings(MemoryMode.AUTO)
+            val manager = MemoryManager(MemoryService(repository, { null }, settings), repository, settings)
+            var calls = 0
+            val engine = FakeHttpClientEngine {
+                if (calls++ == 0) HttpResponse(status, """{"error":{"message":"Invalid model or context length"}}""".encodeToByteArray(), "application/json") else text("回复")
+            }
+            val service = service(engine, settings, manager, ConversationManager(), backgroundScope, repository)
+            assertTrue(service.sendMessage("第一轮").isFailure)
+            assertEquals(1, engine.requests.size)
+            assertTrue(service.sendMessage("重试").isSuccess)
+            assertTrue(request(engine, 1).containsKey("tools"))
+        }
+    }
+
+    @Test
+    fun `disabled memory never advertises tools or advances summary count`() = runTest {
+        val repository = MemoryRepository(temp.newFolder())
+        val settings = settings(MemoryMode.AUTO)
+        whenever(settings.isMemoryEnabled()).thenReturn(false)
+        val manager = MemoryManager(MemoryService(repository, { null }, settings), repository, settings)
+        val engine = FakeHttpClientEngine { text("回复") }
+        val service = service(engine, settings, manager, ConversationManager(), backgroundScope, repository)
+        assertTrue(service.sendMessage("你好").isSuccess)
+        runCurrent()
+        assertFalse(request(engine, 0).containsKey("tools"))
+        assertEquals(0, repository.getExchangeCount())
+    }
+
+    @Test
+    fun `HTTP rejection after a memory write aborts the turn without committing changes`() = runTest {
+        val repository = MemoryRepository(temp.newFolder())
+        val settings = settings(MemoryMode.AUTO)
+        val manager = MemoryManager(MemoryService(repository, { null }, settings), repository, settings)
+        val history = ConversationManager()
+        var calls = 0
+        val engine = FakeHttpClientEngine {
+            when (calls++) {
+                0 -> response(Json.parseToJsonElement("""{"role":"assistant","content":"","tool_calls":[{"id":"write","type":"function","function":{"name":"create_memory","arguments":"{\"content\":\"不应落库\"}"}}]}""").jsonObject)
+                1 -> rejectedTools()
+                else -> text("重试成功")
+            }
+        }
+        val service = service(engine, settings, manager, history, backgroundScope, repository)
+        assertTrue(service.sendMessage("记一下").isFailure)
+        assertTrue(history.getMessages().isEmpty())
+        assertTrue(repository.getAll().isEmpty())
+        assertEquals(2, engine.requests.size)
+        assertTrue(service.sendMessage("再试").isSuccess)
+        assertTrue(request(engine, 2).containsKey("tools"))
+    }
+
+    @Test
+    fun `unsupported top level tools parameter falls back and caches rejection`() = runTest {
+        val repository = MemoryRepository(temp.newFolder())
+        val settings = settings(MemoryMode.AUTO)
+        val manager = MemoryManager(MemoryService(repository, { null }, settings), repository, settings)
+        var calls = 0
+        val engine = FakeHttpClientEngine {
+            if (calls++ == 0) HttpResponse(422, """{"error":{"message":"This model does not support parameters: ['tools']"}}""".encodeToByteArray(), "application/json") else text("回复")
+        }
+        val service = service(engine, settings, manager, ConversationManager(), backgroundScope, repository)
+        assertTrue(service.sendMessage("第一轮").isSuccess)
+        assertTrue(service.sendMessage("下一轮").isSuccess)
+        assertEquals(3, engine.requests.size)
+        assertTrue(request(engine, 0).containsKey("tools"))
+        assertFalse(request(engine, 1).containsKey("tools"))
+        assertFalse(request(engine, 2).containsKey("tools"))
+    }
+
+    @Test
+    fun `rejecting another parameter while mentioning tools does not disable tools`() = runTest {
+        val repository = MemoryRepository(temp.newFolder())
+        val settings = settings(MemoryMode.AUTO)
+        val manager = MemoryManager(MemoryService(repository, { null }, settings), repository, settings)
+        var calls = 0
+        val engine = FakeHttpClientEngine {
+            if (calls++ == 0) HttpResponse(400, """{"error":{"message":"Unsupported parameter: temperature when tools are enabled"}}""".encodeToByteArray(), "application/json") else text("回复")
+        }
+        val service = service(engine, settings, manager, ConversationManager(), backgroundScope, repository)
+        assertTrue(service.sendMessage("第一轮").isFailure)
+        assertEquals(1, engine.requests.size)
+        assertTrue(service.sendMessage("下一轮").isSuccess)
+        assertTrue(request(engine, 1).containsKey("tools"))
+    }
+
+    private fun rejectedTools() = HttpResponse(400, """{"error":{"message":"This model does not support tools"}}""".encodeToByteArray(), "application/json")
+
     private fun service(engine: FakeHttpClientEngine, settings: SettingsManager, manager: MemoryManager, history: ConversationManager, scope: CoroutineScope, toolStore: MemoryRepository? = null): ChatService {
         val client = OpenAiCompatibleClient("fixture", "https://example.org/v1", engine)
         val executor = toolStore?.let { MemoryToolExecutor(BigramMemorySearcher(it), it, commit = manager::applyToolChanges) }
@@ -152,6 +271,7 @@ class ChatServiceReadOnlyMemoryTest {
     }
 
     private fun settings(mode: MemoryMode) = mock<SettingsManager>().also {
+        whenever(it.getApiConnection()).thenReturn(ApiConnection("https://example.org/v1", "fixture-key"))
         whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
         whenever(it.getModel()).thenReturn("model")
         whenever(it.getTemperature()).thenReturn(0.7)
