@@ -5,7 +5,7 @@
 ## 当前范围
 
 - 两个独立的 function tool：`web_search(query, limit)` 搜索公开网页；`web_fetch(url)` 读取已知网页正文。
-- 设置位于「提供商 → 联网搜索」，排在「模型参数」之后，默认关闭。可选自动、DeepSeek、AnySearch。两家均可填写独立 Key；DeepSeek 留空时保留官方聊天 Key 的安全复用，AnySearch 留空时使用匿名模式。
+- 设置位于「提供商 → 联网搜索」，排在「模型参数」之后，默认关闭。可选自动、DeepSeek、AnySearch。两家均可填写独立 Key；DeepSeek 留空时，在「复用聊天 Key」开关开启（默认）且聊天地址为官方 DeepSeek 的前提下复用聊天 Key，关闭该开关后不再复用、必须单独填写；AnySearch 留空时使用匿名模式。
 - 联网开关独立于记忆设置：记忆「自动 / 工具 / 只读 / 关闭」以及记忆总开关的任意组合下，只要联网开关打开且聊天端点支持 function calling，就下发 `web_search` / `web_fetch`。记忆「只读」模式仍注入关键词命中；「关闭」或记忆总开关关闭时不注入记忆。
 - 一轮开始时按当轮资格组合工具（记忆与联网互不依赖），设置变化从下一轮生效。Auto 的每次搜索/抓取调用都从候选列表头开始，失败时按顺序尝试下一家，不缓存故障状态。
 - 关闭联网时，服务商和 Key 配置使用与动态取色相同的垂直动画收起；页底保留精简提示，详细的选择规则、凭据、隐私与计费说明放进「服务商」问号。上下文窗口、最大 Token、记忆检索方式、摘要间隔也提供问号帮助。
@@ -46,7 +46,7 @@
 
 ## 适配器与配置
 
-- DeepSeek：固定 `https://api.deepseek.com/v1/tools/search` 与 `/fetch`。优先使用可选的独立 Key；独立 Key 留空时，仅在聊天连接使用官方 HTTPS host、默认或 443 端口且不含用户信息时复用聊天 Key。URL 与聊天 Key 从同一份设置快照读取，避免跨配置组合凭据。
+- DeepSeek：固定 `https://api.deepseek.com/v1/tools/search` 与 `/fetch`。优先使用可选的独立 Key；独立 Key 留空时，只有在「复用聊天 Key」开关开启（设置项 `web_search_reuse_chat_key`，默认开启）**且**聊天连接使用官方 HTTPS host、默认或 443 端口且不含用户信息时，才复用聊天 Key。开关关闭后一律只用独立 Key，未填写则 DeepSeek 服务商不可用——这样「把中转/聚合服务的 Key 发给 DeepSeek」必须由用户显式同意。URL 与聊天 Key 从同一份设置快照读取，避免跨配置组合凭据。
 - AnySearch：固定 `https://api.anysearch.com/v1/search` 与 `/extract`。Key 为空时不带 Authorization，有 Key 时发 Bearer，鉴权失败不回落匿名。
 - Auto 先列出 `endpointHost` 匹配聊天 host 的可用适配器，再按装配顺序列出其余可用适配器。每次搜索/抓取失败或超时会尝试下一家；参数错误直接返回、用户取消继续传播。成功即停止，空搜索结果也算成功；全部失败则返回最后一个规范化错误。显式选择不切换服务商，不可用时返回 `not_configured`。
 - 持久设置：`web_search_enabled`（默认 false）、`web_search_provider`（默认 auto）、`web_search_anysearch_key`（默认空）、`web_search_deepseek_key`（默认空）。

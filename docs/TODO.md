@@ -39,7 +39,7 @@
 - [ ] **1.9 真机验收** — 连续回复顺序与逐条 TTS、插队发送 /「停止」、工具消息落库后重启续聊、记忆检索四档、工具记忆写入 / 删除撤销、TEXT 模式无记忆内容变更、只读回退不触发文本写入或自动摘要、摘要触发范围、turn 超时、压缩分隔条与手动压缩、向上懒加载锚定。
 - [ ] **M4 观察期指标** — 收集 `TurnMetrics` 中的工具调用率、平均轮数、失败 / 取消 / 超时占比和 `cacheHitRatio`，评估运行质量与容量 / 摘要参数。
 - [ ] **1.10：清除对话改软删除**（M3 遗留）— `conversations.state=cleared` + 新活跃会话 + 撤销只带 conversationId；单会话模型下需先让 `conversationId` 可切换（仓库 / 压缩状态 / 会话指针）。
-- [ ] **1.10：清理备胎代码** — `MemoryRepository`（JSON 实现）、`ConversationStore` 与相关单测；legacy 导入保留到 1.11（见 `legacy-compat.md`）。
+- [ ] **1.10：清理备胎代码** — `MemoryRepository`（JSON 实现）、`ConversationStore` 与相关单测；legacy 导入保留到 1.11（见 `legacy-compat.md`）。**2026-11-22 复核**：`MemoryRepository` 已无任何实例化点、`ConversationStore` 只剩一个无人读取的 `lazy` 属性，两者实际已是死代码，可提前到 1.9.x 删除。
 - [ ] **被打断 turn 的 `interrupted` 落库标记** — 当前仅 `TurnMetrics` 日志记录，无消费方；等有「中断轮次分析」需求再补（`extra_json` 或 meta 记录，不改 schema）。
 - [ ] **备用 tail 模式（`SEPARATE_USER`）未接线** — 只有常量与单测，没有设置入口，也没有计划里的「返回 400/500 且正文命中模板报错 → 回退 MERGE_USER 并按 baseUrl+model 缓存」探测 / 降级逻辑；默认 MERGE_USER 兼容性最好，暂不启用，等确有端点需要连续 user 时再做（避免写永不执行的死代码）。
 - [ ] **联网工具真机验收**（见 [联网工具方案](2026-11-19-web-search-plan.md)）— 验证 DeepSeek 官方 Key、AnySearch 匿名与 token、搜索后读取正文、设置切换、限流和额度提示。

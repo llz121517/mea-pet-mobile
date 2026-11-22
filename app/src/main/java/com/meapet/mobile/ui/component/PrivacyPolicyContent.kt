@@ -92,7 +92,7 @@ private fun PrivacyPolicyWithUmeng() {
         PrivacyBullet("web_search 的查询词与 web_fetch 要求读取的网页地址，会发送给实际使用的搜索服务商（DeepSeek 或 AnySearch）")
         PrivacyBullet("自动模式下首选服务失败或超时会切换到下一家，同一请求可能被发送给多家服务商")
         PrivacyBullet("AnySearch 未填写 Key 时使用匿名模式：请求不带鉴权信息，但查询词与网页地址仍会发送给 AnySearch；独立 Key 保存在本机应用私有存储中，仅随发往 AnySearch 的请求发送")
-        PrivacyBullet("DeepSeek 独立 Key 留空、且「API 配置」使用 DeepSeek 官方地址时，会复用其中的聊天 Key；该 Key 会随搜索请求发往 DeepSeek")
+        PrivacyBullet("DeepSeek 独立 Key 留空、且「API 配置」使用 DeepSeek 官方地址、并且已开启「复用聊天 Key」开关（默认开启）时，才会复用其中的聊天 Key；该 Key 会随搜索请求发往 DeepSeek。关闭该开关后不再复用，需单独填写 DeepSeek Key")
         PrivacyBullet("应用不记录查询词、网页地址、网页正文或 API Key；服务商可能对调用设置额度、限速或收费，相关费用与限制由服务商决定")
     }
 
@@ -197,7 +197,7 @@ private fun PrivacyPolicyWithoutSdk() {
         PrivacyBullet("web_search 的查询词与 web_fetch 要求读取的网页地址，会发送给实际使用的搜索服务商（DeepSeek 或 AnySearch）")
         PrivacyBullet("自动模式下首选服务失败或超时会切换到下一家，同一请求可能被发送给多家服务商")
         PrivacyBullet("AnySearch 未填写 Key 时使用匿名模式：请求不带鉴权信息，但查询词与网页地址仍会发送给 AnySearch；独立 Key 保存在本机应用私有存储中，仅随发往 AnySearch 的请求发送")
-        PrivacyBullet("DeepSeek 独立 Key 留空、且「API 配置」使用 DeepSeek 官方地址时，会复用其中的聊天 Key；该 Key 会随搜索请求发往 DeepSeek")
+        PrivacyBullet("DeepSeek 独立 Key 留空、且「API 配置」使用 DeepSeek 官方地址、并且已开启「复用聊天 Key」开关（默认开启）时，才会复用其中的聊天 Key；该 Key 会随搜索请求发往 DeepSeek。关闭该开关后不再复用，需单独填写 DeepSeek Key")
         PrivacyBullet("应用不记录查询词、网页地址、网页正文或 API Key；服务商可能对调用设置额度、限速或收费，相关费用与限制由服务商决定")
     }
 
