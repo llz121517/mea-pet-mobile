@@ -1,7 +1,7 @@
 # ADR 0002：兜底上下文容量取小窗口（32K），不取大窗口（128K）
 
 - 状态：已采纳（2026-11-19，1.9.0 dev）
-- 相关代码：`ContextCapacity`（`FALLBACK_CAPACITY_TOKENS` / `LOOPBACK_FALLBACK_CAPACITY_TOKENS`）、`ContextCapacityProvider`、`ContextCapacityProbe`
+- 相关代码：`ContextCapacity`（`FALLBACK_CAPACITY_TOKENS` / `LOOPBACK_FALLBACK_CAPACITY_TOKENS`）、`ContextCapacityProvider`、`ContextCapacityParser`（`client/ContextCapacity.kt`）
 
 ## 背景
 

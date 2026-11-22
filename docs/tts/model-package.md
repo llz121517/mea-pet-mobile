@@ -20,7 +20,7 @@ App 支持两种：
 1. **在线下载**：把 6 个文件按「上传名」平铺上传到 `app.ttsModelBaseUrl` 指向的静态目录 / GitHub Release：
    `model.onnx`、`lexicon.txt`、`tokens.txt`、`phone.fst`、`date.fst`、`number.fst`
    （`fsts/` 只保留 App 本地目录结构，远端是平铺名，见 TtsModelManager.buildDownloadFiles）。
-2. **本地 zip 导入**：直接用 `dist/tts-model-v1.zip`，设置页「从本地导入」。
+2. **本地 zip 导入**：直接用 `tools/tts/dist/tts-model-v1.zip`（`build_package.py --out tools/tts/dist` 的产物），设置页「从本地导入」。
 
 ## 重新生成
 

@@ -47,7 +47,7 @@
 
 | 文件 | 内容 | 更新时机 |
 |---|---|---|
-| [`rules.md`](rules.md) | 项目规则（通用逻辑优先 / 过时文档直接删除） | 新增 / 修改规则时 |
+| [`rules.md`](rules.md) | 项目规则（通用逻辑优先 / 童子军规则优先 / 过时文档直接删除 / 提交规范） | 新增 / 修改规则时 |
 | [`adr/0001-tool-round-limit-interception.md`](adr/0001-tool-round-limit-interception.md) | ADR：工具轮次用尽时在工具执行端拦截，不发送 `tool_choice="none"` | 新决策按编号追加 |
 | [`adr/0002-context-window-fallback.md`](adr/0002-context-window-fallback.md) | ADR：兜底上下文容量取 32K 小窗口而非 128K，把「估大被 400 拒绝」换成「提前压缩」 | 新决策按编号追加 |
 

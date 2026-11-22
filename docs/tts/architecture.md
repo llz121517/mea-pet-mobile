@@ -11,14 +11,15 @@
    ▼  App 侧（Kotlin，轻量，无词典/无分词库）
 ① 拉丁转小写
 ② 英文 OOV 兜底：词表外的多字母拉丁词按字母拆开（kotlin → k o t l i n）
-③ 上下文改写：日语片段（连续汉字且紧挨假名）→ 用映射表改写为假名
+③ 英文数字预转换：紧邻拉丁词的整数 → 英文数词（3 → three，见 §3）
+④ 上下文改写：日语片段（连续汉字且紧挨假名）→ 用映射表改写为假名
    │
    ▼  sherpa C++ 内部
-④ 句切分（。！？,.!?…）→ 逐句合成（maxNumSentences=1，每句一个分块）→ 每句完成即回调 App；
+⑤ 句切分（。！？,.!?…）→ 逐句合成（maxNumSentences=1，每句一个分块）→ 每句完成即回调 App；
    App 首块到达就开播，后续分块边合成边写 AudioTrack（generateWithConfigAndCallback）
-⑤ ruleFsts：phone.fst → date.fst → number.fst（顺序重要！）
-⑥ CharacterLexicon 最长匹配（统一 lexicon.txt）
-⑦ 符号 → ID（tokens.txt）+ add_blank
+⑥ ruleFsts：phone.fst → date.fst → number.fst（顺序重要！）
+⑦ CharacterLexicon 最长匹配（统一 lexicon.txt）
+⑧ 符号 → ID（tokens.txt）+ add_blank
    ▼
 VITS 单图推理 → 22050Hz 音频
 ```

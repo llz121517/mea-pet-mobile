@@ -15,16 +15,16 @@
   6. 私网地址与公网同样处理，不做特殊对待；仅回环地址保留独立常量（当前与云端同为 32K）。
   7. 容量获取原则：尽量用通用逻辑，不为各服务单独写 if；不设内置表、不设白名单、不做运行时学习，探测失败直接降级到兜底值。
   8. 压缩摘要并入首条 system 末尾（见 M5）。
-  9. tail 目前只含当前时间，并入最后一条 user，不进历史，不使用尾部 system（见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)）。
+  9. tail 含当前时间；只读路径（文本模式 / 端点回退）还含关键词命中回忆，工具模式只含时间。tail 并入最后一条 user，不进历史，不使用尾部 system（见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)）。
   10. 工具循环消息（role=tool）入历史并保留，同轮共用 turn_id，整轮回滚、重试、清除按 turn_id 处理（见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)）。
 
 ## 1. 已落地（commit f2569a1）
 
 - [已完成] M0：依赖解析、JDBC 测试驱动、spike 测试（事务、外键级联、WAL、部分唯一索引、user_version、Unicode、keyset 分页）。
-- [已完成] M1：`storage/SqliteDatabase`（单连接 + Mutex、BEGIN IMMEDIATE 事务、`user_version` 迁移、V1 schema，包含工具消息字段与压缩状态表位）；`ConversationRepository`（SQLite / 内存实现）；`MemoryStore` 接口 + `SqliteMemoryStore`，`MemoryRepository`（JSON）实现同一接口作备胎；`ConversationManager` 改为内存窗口 + 有序异步写队列，完整历史留在仓库。
+- [已完成] M1：`storage/SqliteDatabase`（初始为单连接 + Mutex，后续 `7650552` 改为一写多读连接池，见 §4.2；BEGIN IMMEDIATE 事务、`user_version` 迁移、V1 schema，包含工具消息字段与压缩状态表位）；`ConversationRepository`（SQLite / 内存实现）；`MemoryStore` 接口 + `SqliteMemoryStore`，`MemoryRepository`（JSON）实现同一接口作备胎；`ConversationManager` 改为内存窗口 + 有序异步写队列，完整历史留在仓库。
 - [已完成] M2：`LegacyJsonImporter`（单事务、幂等、读回校验、标记 meta.legacy_json_import 与数据同事务）；历史 JSON 中废弃的记忆操作附加字段忽略，不参与导入后的请求或记忆处理。
 - [已完成] UI 解耦首版：首屏读仓库最近 50 条，向上 keyset 懒加载；清除对话的撤销快照改用仓库完整历史。
-- 验证：已有 JVM 单测与 debug 构建覆盖存储和上下文功能；本轮代码变更后的最终验证待完成，暂不列测试数量。
+- 验证：已有 JVM 单测与 debug 构建覆盖存储和上下文功能；最终验证见 [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) §测试与待验证项（2026-11-22 全量 447 条单测通过，后续改动追加测试后需以最新一次全量结果为准）。
 
 注意：旧 JSON 只含约 27 到 35 条消息，「完整历史」只能从升级后开始累积，发布说明需写明。
 
@@ -43,7 +43,7 @@
 - [待做] 真机验证：向上懒加载的滚动锚定、悬浮窗与主界面同步、WAL 行为、工具消息往返、插队/停止、压缩分隔条（本轮按要求暂不操作设备）。
 - [已完成] 压缩分隔条：样式 `──────── 早些时候 ────────`（淡色），显示在 `seq == active_summary.covered_to_seq` 之后，即已压缩进摘要的消息与仍逐字发送给模型的消息之间；不提供点击展开摘要（已否决，见 M5 待办）。
   - 实现注记：为免迁移，压缩状态未写入 `compaction_summaries` 表，而是整份 JSON 存进 `meta` 表键 `context_compaction`（`MetaCompactionStore`）；分隔条按「已被覆盖的最后一条消息 id」定位（`ChatUiState.compactedUpToMessageId`）。
-- [已完成] 按天轻时间分隔条：相邻两条可见消息跨自然日（设备本地时区）时插入，文案 `──────── 今天 ────────`、`昨天`、`M月D日`，跨年带年份。纯 UI 派生项，由消息 `timestamp` 在列表渲染时计算，不入库、不进模型上下文；与压缩分隔条复用同一个分隔条组件，仅文案不同；两者位置重合时先显示日期条再显示「早些时候」；判断相邻消息时跳过 tool 消息与空 assistant 消息，触摸系统气泡不参与；向上懒加载时在页与页交界处按相邻消息重新判断，避免重复或遗漏（首条无前驱时总给日期条）。
+- [已完成] 按天轻时间分隔条：相邻两条可见消息跨自然日（设备本地时区）时插入，文案 `──────── 今天 ────────`、`昨天`、`M月D日`，跨年带年份。纯 UI 派生项，由消息 `timestamp` 在列表渲染时计算，不入库、不进模型上下文；与压缩分隔条复用同一个分隔条组件，仅文案不同；两者位置重合时先显示日期条再显示「早些时候」；判断相邻消息时跳过 tool 消息与空 assistant 消息（UI 层已过滤），触摸系统气泡属于可见消息、当前实现也参与相邻判断；向上懒加载时在页与页交界处按相邻消息重新判断，避免重复或遗漏（首条无前驱时总给日期条）。
 
 ### M4 容量获取
 
@@ -57,7 +57,7 @@
 - 为什么是 32K 而不是 128K：见 [ADR 0002](adr/0002-context-window-fallback.md)。
 - 兜底只在探测无结果时使用。
 
-**单一适配器（`ContextCapacityProbe`，独立抽出）**
+**单一适配器（`ContextCapacityParser`，`client/ContextCapacity.kt`，独立抽出）**
 - 只发 `GET {baseUrl}/models`，不做各服务原生接口分支，不设字段白名单，不设内置表。
 - 通用解析：在响应里找到 id 等于当前模型的条目（忽略大小写；响应可能是 `{data:[...]}` 或顶层数组），在该条目内递归查找名字含 `context` 且值为 1024 到 10,000,000 之间正整数的字段（如 `context_window`、`context_length`、`max_context_length`、`max_model_len`）；多个命中取较小者。
 - 找不到条目、找不到字段、请求失败、406 等一律降级到兜底值，不报错、不重试风暴。
@@ -101,7 +101,7 @@
   - 阈值与系数（64K 提醒、90% 硬触发、0.85 预算系数、token 估算权重）尚为起始值，需按真实使用调参。
 
 ### M6 收尾
-- 文档、发布说明、备胎代码（JsonMemoryRepository、ConversationStore）的 1.10 清理登记。
+- 文档、发布说明、备胎代码（`MemoryRepository` JSON 实现、`ConversationStore`）的 1.10 清理登记。
 
 ## 4. 存储铁律与连接模型（已落地）
 
