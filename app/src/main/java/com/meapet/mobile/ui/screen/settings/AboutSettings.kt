@@ -176,7 +176,7 @@ internal fun UpdateSection(
     Spacer(Modifier.height(8.dp))
 }
 
-/** 隐私与数据：查看隐私政策 + 友盟采集授权管理。 */
+/** 隐私与数据：数据流向摘要 + 查看隐私政策 + 友盟采集授权管理。 */
 @Composable
 internal fun PrivacySection(
     state: SettingsUiState,
@@ -187,6 +187,15 @@ internal fun PrivacySection(
     // 响应式读取授权状态（由 SettingsViewModel 订阅 PrivacyConsentManager.agreedFlow 维护）
     val umengAgreed = state.privacyAgreed
     var showRevokeDialog by remember { mutableStateOf(false) }
+
+    // 数据流向摘要：完整说明在隐私政策全文里，这里给只看设置页的用户一个入口级提示
+    Text(
+        text = "MeaPet 不运营服务器：会话、记忆与 API Key 只保存在本机；" +
+            "对话内容会发送到你自行配置的 API 地址，开启联网搜索后查询词与网页地址会发送给 DeepSeek 或 AnySearch。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(8.dp))
 
     // 查看隐私协议
     Surface(
@@ -278,7 +287,7 @@ internal fun PrivacySection(
             if (!BuildConfig.UMENG_ENABLED) {
                 // 无统计 SDK 构建：无采集、无授权可管，仅提示构建状态
                 Text(
-                    text = "该构建未包含统计 SDK，不会采集任何数据",
+                    text = "该构建未包含统计 SDK，不会采集统计数据",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = ALPHA_MUTED_TEXT),
                     modifier = Modifier.padding(top = 4.dp)

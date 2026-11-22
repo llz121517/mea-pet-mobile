@@ -675,9 +675,9 @@ class ChatService(
      * **仅 debug 构建**：把本次请求的结构打进 logcat，方便排查「实际发出去的 system
      * prompt / 上下文到底是什么」。
      *
-     * 只打印第一条 system 的全文（它由 设置里的 System Prompt + 工具说明 + 压缩摘要
-     * 拼成，排查人设不生效时第一眼看的就是它）；其余消息只打印角色、长度与是否有
-     * tool_calls，不把用户对话正文写进 logcat。
+     * 只打印各段**长度与组成标记**，不打印任何正文：首条 system 里含用户设置的系统
+     * 提示词、压缩摘要（对话正文的压缩）与人设记忆，用户对话正文 / 记忆内容 / 工具结果
+     * 都不能进 logcat（隐私承诺见隐私政策「数据安全」，导出日志会读取 logcat）。
      *
      * Release 构建不会调用本方法（入口处 `BuildConfig.DEBUG` 判断）。
      */
@@ -694,7 +694,7 @@ class ChatService(
             )
         }
         messages.firstOrNull { it.role == ChatRole.system }?.let { system ->
-            Log.d(TAG, "  system[${system.content.length}]: ${system.content}")
+            Log.d(TAG, "  system length=${system.content.length} (正文不打印，见隐私政策)")
         }
     }
 
