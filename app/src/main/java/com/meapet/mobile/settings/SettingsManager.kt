@@ -79,6 +79,7 @@ class SettingsManager internal constructor(
     private val KEY_WEB_SEARCH_PROVIDER = stringPreferencesKey(SettingsKeys.WEB_SEARCH_PROVIDER)
     private val KEY_WEB_SEARCH_ANYSEARCH_KEY = stringPreferencesKey(SettingsKeys.WEB_SEARCH_ANYSEARCH_KEY)
     private val KEY_WEB_SEARCH_DEEPSEEK_KEY = stringPreferencesKey(SettingsKeys.WEB_SEARCH_DEEPSEEK_KEY)
+    private val KEY_WEB_SEARCH_REUSE_CHAT_KEY = booleanPreferencesKey(SettingsKeys.WEB_SEARCH_REUSE_CHAT_KEY)
     private val KEY_MODEL = stringPreferencesKey(SettingsKeys.MODEL)
     private val KEY_TEMPERATURE = doublePreferencesKey(SettingsKeys.TEMPERATURE)
     private val KEY_MAX_TOKENS = intPreferencesKey(SettingsKeys.MAX_TOKENS)
@@ -124,9 +125,14 @@ class SettingsManager internal constructor(
         WebSearchProviderId.parse(prefs[KEY_WEB_SEARCH_PROVIDER])
     }
 
-    /** 独立 DeepSeek Key；空值保留官方聊天端点的 Key 复用行为。 */
+    /** 独立 DeepSeek Key；空值表示未单独填写。 */
     val webSearchDeepSeekKeyFlow: Flow<String> = dataStore.data.map { prefs ->
         prefs[KEY_WEB_SEARCH_DEEPSEEK_KEY].orEmpty()
+    }
+
+    /** 联网搜索是否复用聊天 Key（默认开启）。 */
+    val webSearchReuseChatKeyFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_WEB_SEARCH_REUSE_CHAT_KEY] ?: true
     }
 
     /** AnySearch key flow，空值表示匿名档。 */
@@ -272,6 +278,10 @@ class SettingsManager internal constructor(
     fun getWebSearchAnySearchKey(): String = currentPrefs()[KEY_WEB_SEARCH_ANYSEARCH_KEY].orEmpty()
     fun getWebSearchDeepSeekKey(): String = currentPrefs()[KEY_WEB_SEARCH_DEEPSEEK_KEY].orEmpty()
 
+    /** 联网搜索是否复用「API 配置」里的聊天 Key（默认开启）。 */
+    fun isWebSearchReuseChatKey(): Boolean =
+        currentPrefs()[KEY_WEB_SEARCH_REUSE_CHAT_KEY] ?: true
+
     fun getModel(): String = currentPrefs()[KEY_MODEL] ?: SettingsKeys.Defaults.MODEL
     fun getTemperature(): Double = currentPrefs()[KEY_TEMPERATURE] ?: SettingsKeys.Defaults.TEMPERATURE
     fun getMaxTokens(): Int = currentPrefs()[KEY_MAX_TOKENS] ?: SettingsKeys.Defaults.MAX_TOKENS
@@ -369,6 +379,10 @@ class SettingsManager internal constructor(
             if (trimmed.isEmpty()) prefs.remove(KEY_WEB_SEARCH_DEEPSEEK_KEY)
             else prefs[KEY_WEB_SEARCH_DEEPSEEK_KEY] = trimmed
         }
+    }
+
+    suspend fun setWebSearchReuseChatKey(enabled: Boolean) {
+        cachedPrefs = dataStore.edit { it[KEY_WEB_SEARCH_REUSE_CHAT_KEY] = enabled }
     }
 
     suspend fun setWebSearchAnySearchKey(key: String) {

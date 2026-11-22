@@ -16,6 +16,13 @@ object SettingsKeys {
     const val WEB_SEARCH_ANYSEARCH_KEY = "web_search_anysearch_key"
     const val WEB_SEARCH_DEEPSEEK_KEY = "web_search_deepseek_key"
 
+    /**
+     * 联网搜索是否复用「API 配置」里的聊天 Key 作为 DeepSeek Key（默认开启）。
+     *
+     * 开启时不显示 DeepSeek Key 输入框；关闭后必须单独填写，否则 DeepSeek 服务商不可用。
+     */
+    const val WEB_SEARCH_REUSE_CHAT_KEY = "web_search_reuse_chat_key"
+
     /** 用户手动填写的上下文窗口（原始容量，token）。无此键 = 自动；有值则优先于探测缓存。 */
     const val CONTEXT_WINDOW = "context_window"
     const val ENABLE_MEMORY = "enable_memory"

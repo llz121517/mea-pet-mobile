@@ -353,7 +353,9 @@ internal fun WebSearchSection(
                 helpTitle = "联网搜索与服务商",
                 helpText = "自动：优先匹配聊天接口的服务商，否则依次选择有 Key 的 DeepSeek、支持匿名的 AnySearch。" +
                     "自动模式调用失败时会尝试下一家；手动指定时不切换。参数错误和用户取消不会触发切换。\n\n" +
-                    "DeepSeek 优先使用独立 Key；留空时，会尝试复用「API 配置」中的 Key。" +
+                    "DeepSeek：默认复用「API 配置」中的聊天 Key——但仅当聊天地址是官方 DeepSeek HTTPS 地址时生效，" +
+                    "避免把其它服务商的 Key 发给 DeepSeek。关掉「复用」开关后需要在下方单独填写 DeepSeek Key，" +
+                    "未填写则该服务商不可用。\n\n" +
                     "AnySearch 留空使用匿名档，有 Key 时使用该 Key。\n\n" +
                     "查询词和网页地址会发送给实际使用的服务商，自动切换也可能将同一请求发送给下一家。" +
                     "服务可能有额度、限速或收费。联网工具与记忆设置相互独立，" +
@@ -379,26 +381,42 @@ internal fun WebSearchSection(
 
             if (state.webSearchProvider != com.meapet.mobile.config.WebSearchProviderId.ANYSEARCH) {
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = local.webSearchDeepSeekKey,
-                    onValueChange = { local.webSearchDeepSeekKey = it },
-                    label = { Text("DeepSeek API Key（可选）") },
-                    placeholder = { Text("留空复用「API 配置」中的 Key") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .saveOnFocusChange { viewModel.saveWebSearchDeepSeekKey(local.webSearchDeepSeekKey) },
-                    singleLine = true,
-                    visualTransformation = if (local.webSearchDeepSeekKeyVisible)
-                        VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        TextButton(onClick = {
-                            local.webSearchDeepSeekKeyVisible = !local.webSearchDeepSeekKeyVisible
-                        }) {
-                            Text(if (local.webSearchDeepSeekKeyVisible) "隐藏" else "显示")
-                        }
+                // 复用聊天 Key 是默认路径：只有用户主动关掉，才要求单独填写 DeepSeek Key。
+                // 这样「把 API 配置里别家的 Key 发给 DeepSeek」必须由用户明确同意。
+                SettingsSwitchRow(
+                    label = "复用「API 配置」中的 Key",
+                    description = if (state.webSearchReuseChatKey) {
+                        "DeepSeek 服务商使用聊天端点同一把 Key；仅在聊天地址为官方 DeepSeek 时生效"
+                    } else {
+                        "已关闭：需在下方单独填写 DeepSeek Key，未填写时该服务商不可用"
                     },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                    checked = state.webSearchReuseChatKey,
+                    darkTheme = darkTheme,
+                    onCheckedChange = viewModel::updateWebSearchReuseChatKey
                 )
+                if (!state.webSearchReuseChatKey) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = local.webSearchDeepSeekKey,
+                        onValueChange = { local.webSearchDeepSeekKey = it },
+                        label = { Text("DeepSeek API Key") },
+                        placeholder = { Text("必填，仅用于联网搜索的 DeepSeek 服务商") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .saveOnFocusChange { viewModel.saveWebSearchDeepSeekKey(local.webSearchDeepSeekKey) },
+                        singleLine = true,
+                        visualTransformation = if (local.webSearchDeepSeekKeyVisible)
+                            VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            TextButton(onClick = {
+                                local.webSearchDeepSeekKeyVisible = !local.webSearchDeepSeekKeyVisible
+                            }) {
+                                Text(if (local.webSearchDeepSeekKeyVisible) "隐藏" else "显示")
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                    )
+                }
             }
 
             if (state.webSearchProvider != com.meapet.mobile.config.WebSearchProviderId.DEEPSEEK) {

@@ -51,6 +51,8 @@ data class SettingsUiState(
     val maxTokens: Int = SettingsKeys.Defaults.MAX_TOKENS,
     val webSearchEnabled: Boolean = false,
     val webSearchProvider: WebSearchProviderId = WebSearchProviderId.AUTO,
+    /** 是否复用「API 配置」的聊天 Key 作为 DeepSeek Key（默认开；关闭后才显示独立 Key 输入框）。 */
+    val webSearchReuseChatKey: Boolean = true,
     val systemPrompt: String = SettingsKeys.Defaults.SYSTEM_PROMPT,
     val enableMemory: Boolean = SettingsKeys.Defaults.ENABLE_MEMORY,
     /** 记忆检索模式（AUTO/TOOLS/TEXT/OFF）。 */
@@ -160,6 +162,7 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
             maxTokens = settingsManager.getMaxTokens(),
             webSearchEnabled = settingsManager.getWebSearchEnabled(),
             webSearchProvider = settingsManager.getWebSearchProvider(),
+            webSearchReuseChatKey = settingsManager.isWebSearchReuseChatKey(),
             systemPrompt = settingsManager.getSystemPrompt(),
             enableMemory = settingsManager.isMemoryEnabled(),
             memoryMode = settingsManager.getMemoryMode(),
@@ -189,6 +192,9 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
         subscribe(settingsManager.maxTokensFlow) { s, t -> s.copy(maxTokens = t) }
         subscribe(settingsManager.webSearchEnabledFlow) { s, enabled -> s.copy(webSearchEnabled = enabled) }
         subscribe(settingsManager.webSearchProviderFlow) { s, provider -> s.copy(webSearchProvider = provider) }
+        subscribe(settingsManager.webSearchReuseChatKeyFlow) { s, reuse ->
+            s.copy(webSearchReuseChatKey = reuse)
+        }
         subscribe(settingsManager.systemPromptFlow) { s, p -> s.copy(systemPrompt = p) }
         subscribe(settingsManager.enableMemoryFlow) { s, e -> s.copy(enableMemory = e) }
         subscribe(settingsManager.memoryModeFlow) { s, m -> s.copy(memoryMode = m) }
@@ -364,6 +370,10 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
 
     fun updateWebSearchProvider(provider: WebSearchProviderId) {
         viewModelScope.launch { settingsManager.setWebSearchProvider(provider) }
+    }
+
+    fun updateWebSearchReuseChatKey(enabled: Boolean) {
+        viewModelScope.launch { settingsManager.setWebSearchReuseChatKey(enabled) }
     }
 
     fun saveWebSearchDeepSeekKey(key: String) {

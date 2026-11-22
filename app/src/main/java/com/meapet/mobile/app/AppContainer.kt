@@ -205,7 +205,8 @@ class AppContainer(
             chatBaseUrl = chat.url,
             chatApiKey = chat.key,
             anySearchKey = settingsManager.getWebSearchAnySearchKey(),
-            deepSeekKey = settingsManager.getWebSearchDeepSeekKey()
+            deepSeekKey = settingsManager.getWebSearchDeepSeekKey(),
+            reuseChatKey = settingsManager.isWebSearchReuseChatKey()
         )
     }
 

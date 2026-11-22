@@ -23,6 +23,45 @@ class WebToolFactoryTest {
         assertTrue(engine.requests.isEmpty())
     }
 
+    /**
+     * 用户关掉「复用聊天 Key」后，即使聊天地址是官方 DeepSeek 也不能再拿聊天 Key 顶替：
+     * 复用是用户显式同意的行为，不能让它在用户不知情时发生。
+     */
+    @Test
+    fun `reuse switch off never falls back to the chat key`() = runTest {
+        val engine = FakeHttpClientEngine { error("Chat key must not be reused when switch is off") }
+        val tools = WebToolFactory(JsonHttpClient(engine)).create(
+            "deepseek", "https://api.deepseek.com/v1", "official-chat-key", "",
+            deepSeekKey = "", reuseChatKey = false
+        )
+        val raw = tools.single { it.name == "web_search" }.execute("""{"query":"weather"}""")
+        assertEquals("not_configured", Json.parseToJsonElement(raw).jsonObject.getValue("error").jsonPrimitive.content)
+        assertTrue(engine.requests.isEmpty())
+    }
+
+    /** 关掉复用但单独填了 DeepSeek Key：照常可用，且请求头用的是独立 Key。 */
+    @Test
+    fun `reuse switch off still uses a separately supplied DeepSeek key`() = runTest {
+        val engine = FakeHttpClientEngine { response("""{"results":[]}""") }
+        val tools = WebToolFactory(JsonHttpClient(engine)).create(
+            "deepseek", "https://api.deepseek.com/v1", "official-chat-key", "",
+            deepSeekKey = "own-deepseek-key", reuseChatKey = false
+        )
+        tools.single { it.name == "web_search" }.execute("""{"query":"weather"}""")
+        assertEquals("Bearer own-deepseek-key", engine.requests.single().headers["Authorization"])
+    }
+
+    /** 复用开关默认开启时，官方地址仍然行为不变（保持既有兼容）。 */
+    @Test
+    fun `reuse switch on keeps reusing the official chat key`() = runTest {
+        val engine = FakeHttpClientEngine { response("""{"results":[]}""") }
+        val tools = WebToolFactory(JsonHttpClient(engine)).create(
+            "deepseek", "https://api.deepseek.com/v1", "official-chat-key", ""
+        )
+        tools.single { it.name == "web_search" }.execute("""{"query":"weather"}""")
+        assertEquals("Bearer official-chat-key", engine.requests.single().headers["Authorization"])
+    }
+
     @Test
     fun `auto uses official credentials for both search and fetch`() = runTest {
         val engine = FakeHttpClientEngine {

@@ -60,5 +60,16 @@ class DeepSeekWebProvider(
                 "https".equals(uri.scheme, ignoreCase = true) &&
                 uri.rawUserInfo == null && (uri.port == -1 || uri.port == 443)
         }
+
+        /**
+         * 是否应复用聊天 Key 作为 DeepSeek Key。
+         *
+         * 双重条件：用户**显式允许**复用（设置开关，默认开），且聊天端点确实是官方
+         * DeepSeek HTTPS 地址（[canReuseChatKey]）。只看地址不够——用户可能把某个
+         * 中转/聚合服务的 Key 填在「API 配置」里，直接拿去请求 api.deepseek.com 就
+         * 等于把第三方的 Key 发给了 DeepSeek；开关让这件事必须由用户点头。
+         */
+        fun shouldReuseChatKey(chatBaseUrl: String, userAllowsReuse: Boolean): Boolean =
+            userAllowsReuse && canReuseChatKey(chatBaseUrl)
     }
 }

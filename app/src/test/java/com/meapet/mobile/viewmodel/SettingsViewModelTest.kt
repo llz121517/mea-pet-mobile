@@ -111,6 +111,7 @@ class SettingsViewModelTest {
         whenever(settingsManager.maxTokensFlow).thenReturn(MutableStateFlow(1024))
         whenever(settingsManager.webSearchEnabledFlow).thenReturn(MutableStateFlow(false))
         whenever(settingsManager.webSearchProviderFlow).thenReturn(MutableStateFlow(WebSearchProviderId.AUTO))
+        whenever(settingsManager.webSearchReuseChatKeyFlow).thenReturn(MutableStateFlow(true))
         whenever(settingsManager.webSearchAnySearchKeyFlow).thenReturn(MutableStateFlow(""))
         whenever(settingsManager.systemPromptFlow).thenReturn(MutableStateFlow(""))
         whenever(settingsManager.enableMemoryFlow).thenReturn(MutableStateFlow(true))
