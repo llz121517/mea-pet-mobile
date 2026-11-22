@@ -33,7 +33,9 @@ class TtsTextNormalizer(
     fun normalize(text: String): String {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return ""
-        return rewriteJapaneseContext(convertEnglishNumbers(expandUnknownEnglish(lowercaseLatin(trimmed))))
+        return rewriteJapaneseContext(
+            rewriteJapaneseNumbers(convertEnglishNumbers(expandUnknownEnglish(lowercaseLatin(trimmed))))
+        )
     }
 
     internal fun lowercaseLatin(text: String): String =
@@ -139,6 +141,244 @@ class TtsTextNormalizer(
         return if (ones == 0) tens else "$tens ${ONES[ones]}"
     }
 
+    /**
+     * 日文上下文里的阿拉伯数字 → 假名读法。
+     *
+     * 为什么需要：`ruleFsts` 是**中文**数字前端，日文句里的 `15 時` 会被读成
+     * shí wǔ shí、`9 月 1 日` 读成 jiǔ yuè yī rì。这里在进 sherpa 前把日文句里的数字
+     * 换成假名数词。
+     *
+     * ## 判定
+     * 单个数字 run **紧邻假名**（前后跳过空格后的最近邻，任一侧为假名）才算日文上下文；
+     * 紧邻中文汉字或拉丁字母、或两侧都没有内容时一律不动，交给原有路径：
+     * - 中文上下文：保持原数字，由中文 ruleFsts 读；
+     * - 英文上下文：已被 [convertEnglishNumbers] 先转成英文数词，此处看不到数字。
+     *
+     * ## 覆盖范围
+     * - 后接**特殊读法**的单位（日期/月份/时刻/量词）→ 用专用表；
+     * - 后接普通量词或句读 → 基数词；
+     * - 否则降级：**保留原数字**，让 ruleFsts 兜底（宁可读成中文，也不猜错读法）。
+     *
+     * 数字本身超出 [MAX_JAPANESE_NUMBER] 或 `0` 开头的多位数字不处理（电话、编号等）。
+     */
+    internal fun rewriteJapaneseNumbers(text: String): String {
+        val sb = StringBuilder(text.length)
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            if (c !in '0'..'9') {
+                sb.append(c)
+                i++
+                continue
+            }
+            var j = i
+            while (j < text.length && text[j] in '0'..'9') j++
+            val run = text.substring(i, j)
+            val reading = japaneseNumberReading(text, i, j, run)
+            if (reading == null) {
+                sb.append(run)
+                i = j
+            } else {
+                // 读法已包含单位读音时，一并跳过中间的空白与单位字符（`15 時`→`じゅうごじ`）
+                sb.append(reading.text)
+                i += reading.consumedChars
+            }
+        }
+        return sb.toString()
+    }
+
+    /** 一次数字改写的产物：读法文本 + 从数字起点算起被覆盖的字符数。 */
+    private data class NumberReading(val text: String, val consumedChars: Int)
+
+    /** [start]..[endExclusive] 是数字 run；返回 null 表示保持原样。 */
+    private fun japaneseNumberReading(
+        text: String,
+        start: Int,
+        endExclusive: Int,
+        run: String,
+    ): NumberReading? {
+        val end = endExclusive - 1
+        if (!isJapaneseNumberContext(text, start, end)) return null
+        if (run.length > 1 && run[0] == '0') return null
+        if (isCompoundNumberPart(text, start, end)) return null
+        val value = run.toIntOrNull() ?: return null
+        if (value > MAX_JAPANESE_NUMBER) return null
+
+        val unitIndex = unitIndexAfter(text, end)
+        val unit = unitIndex?.let { text[it] }
+        val unitIsJapanese = unit != null && unit in JA_UNIT_CHARS
+        if (unitIsJapanese && unitIndex != null) {
+            // 单位一律由读法接管：特殊表命中用专用读法，否则「基数 + 单位基准读音」，
+            // 不能只替换数字而把单位字符留在原文里（`いち時`）。
+            val reading = specialReading(value, unit!!)
+                ?: (japaneseCardinal(value)?.let { it + genericUnitReading(value, unit) })
+            if (reading != null) return NumberReading(reading, consumedChars = unitIndex + 1 - start)
+        }
+        val cardinal = japaneseCardinal(value, standalone = true) ?: return null
+        return NumberReading(cardinal, consumedChars = endExclusive - start)
+    }
+
+    /** 数字后（跳过空白）的单位字符下标。 */
+    private fun unitIndexAfter(text: String, end: Int): Int? {
+        var i = end + 1
+        while (i < text.length && text[i] == ' ') i++
+        return i.takeIf { it < text.length }
+    }
+
+    /** 表外单位的基准读音（无音变的默认读法）。 */
+    private fun genericUnitReading(value: Int, unit: Char): String = when (unit) {
+        '日' -> "にち"
+        '月' -> "がつ"
+        '時' -> "じ"
+        '分' -> "ふん"
+        '秒' -> "びょう"
+        '人' -> "にん"
+        '歳' -> "さい"
+        '年' -> "ねん"
+        '週' -> "しゅう"
+        '円' -> "えん"
+        '度' -> "ど"
+        '点' -> "てん"
+        '番' -> "ばん"
+        else -> ""
+    }
+
+    /**
+     * 数字 run 是否处于日文上下文。
+     *
+     * 两条判据（任一成立即为日文）：
+     * 1. 跳过空格后的任一侧紧邻**假名** —— `15時に`；
+     * 2. 数字后紧跟**日文单位**，且整段文本里存在假名 —— `9月1日に` 里的 `9月`、`1日`。
+     *
+     * 第 2 条为什么要求「全段有假名」：`日`/`月`/`時` 这些字中日文同形，单看 `9月1日`
+     * 无法区分是中文日期还是日文日期。真日文句子几乎必然含假名（助词、送假名），
+     * 而中文文本没有假名——用这个信号做判据，宁可漏转（交给 ruleFsts 读成中文）
+     * 也不要在中文文本里硬读成日文。
+     */
+    private fun isJapaneseNumberContext(text: String, start: Int, end: Int): Boolean {
+        var prev = start - 1
+        while (prev >= 0 && text[prev] == ' ') prev--
+        if (prev >= 0 && isKana(text[prev])) return true
+        var next = end + 1
+        while (next < text.length && text[next] == ' ') next++
+        if (next >= text.length) return false
+        if (isKana(text[next])) return true
+        return text[next] in JA_UNIT_CHARS && text.any(::isKana)
+    }
+
+    /** 特殊读法：日期 / 月份 / 时刻 / 量词；表外返回 null 由调用方退化到基数词。 */
+    private fun specialReading(value: Int, unit: Char): String? = when (unit) {
+        '日' -> JAPANESE_DAYS[value]
+        '月' -> JAPANESE_MONTHS[value]
+        '時' -> JAPANESE_HOURS[value]
+        '分' -> JAPANESE_MINUTES[value]
+        '人' -> JAPANESE_PEOPLE[value]
+        '歳' -> JAPANESE_AGES[value]
+        '個', '本', '杯', '枚', '冊', '匹', '台', '回', '階', '件' -> japaneseCounter(value, unit)
+        else -> null
+    }
+
+    /** 基数词：1..9999 的组合；超出范围返回 null（调用方保留原数字）。 */
+    internal fun japaneseCardinal(value: Int, standalone: Boolean = false): String? {
+        if (value !in 0..MAX_JAPANESE_NUMBER) return null
+        if (value == 0) return "ゼロ"
+        if (standalone && value < 10) return japaneseDigit(value, standalone = true)
+        val sb = StringBuilder()
+        var rest = value
+        for ((unitValue, unit) in JAPANESE_UNITS) {
+            val count = rest / unitValue
+            if (count == 0) continue
+            rest %= unitValue
+            // 音变读法（ろっぴゃく/はっぴゃく 等）整体替换「数字+单位」，不再拼 count
+            val irregular = irregularUnitReading(unitValue, count)
+            when {
+                irregular != null -> sb.append(irregular)
+                count == 1 && unitValue in 10..1000 -> sb.append(unit)   // 10/100/1000 前省略「一」，万位不省
+                else -> {
+                    sb.append(japaneseDigit(count, standalone = false))
+                    sb.append(unit)
+                }
+            }
+        }
+        if (rest > 0) sb.append(japaneseDigit(rest, standalone = false))
+        return sb.toString().ifEmpty { null }
+    }
+
+    /**
+     * 单个数字的读法。
+     *
+     * 4/7 有两个读法：单独念时日语习惯 し/しち，但在组合里（14、17、40、70）更常用
+     * よん/なな；9 的组合里常用 きゅう（く 只用于 9時/9月 等固定搭配）。
+     * 这里按「是否参与组合」选择更自然的读法。
+     */
+    private fun japaneseDigit(value: Int, standalone: Boolean): String = when {
+        standalone -> JAPANESE_DIGITS[value]
+        value == 4 -> "よん"
+        value == 7 -> "なな"
+        value == 9 -> "きゅう"
+        else -> JAPANESE_DIGITS[value]
+    }
+
+    /**
+     * 单位音变的**完整**读法（含数字部分）；无音变返回 null。
+     *
+     * 特例：3百→さんびゃく、6百→ろっぴゃく、8百→はっぴゃく、3千→さんぜん、8千→はっせん。
+     * 这些读法整体替换「数字+单位」，调用方不要再拼 count（否则会得到 `ろくろっぴゃく`）。
+     */
+    private fun irregularUnitReading(unitValue: Int, count: Int): String? = when (unitValue) {
+        100 -> when (count) {
+            3 -> "さんびゃく"
+            6 -> "ろっぴゃく"
+            8 -> "はっぴゃく"
+            else -> null
+        }
+        1000 -> when (count) {
+            3 -> "さんぜん"
+            8 -> "はっせん"
+            else -> null
+        }
+        else -> null
+    }
+
+    private fun japaneseCounter(value: Int, unit: Char): String? {
+        val base = japaneseCardinal(value) ?: return null
+        val reading = when (unit) {
+            '個' -> if (value == 1) "いっこ" else "${base}こ"
+            '本' -> when {
+                value == 1 -> "いっぽん"
+                value == 3 -> "さんぼん"
+                value == 6 -> "ろっぽん"
+                value == 8 -> "はっぽん"
+                value == 10 -> "じゅっぽん"
+                else -> "${base}ほん"
+            }
+            '杯' -> when {
+                value == 1 -> "いっぱい"
+                value == 3 -> "さんばい"
+                value == 6 -> "ろっぱい"
+                value == 8 -> "はっぱい"
+                value == 10 -> "じゅっぱい"
+                else -> "${base}はい"
+            }
+            '枚' -> "${base}まい"
+            '冊' -> if (value == 1) "いっさつ" else "${base}さつ"
+            '匹' -> when {
+                value == 1 -> "いっぴき"
+                value == 3 -> "さんびき"
+                value == 6 -> "ろっぴき"
+                value == 8 -> "はっぴき"
+                value == 10 -> "じゅっぴき"
+                else -> "${base}ひき"
+            }
+            '台' -> "${base}だい"
+            '回' -> "${base}かい"
+            '階' -> if (value == 3) "さんがい" else "${base}かい"
+            '件' -> "${base}けん"
+            else -> null
+        }
+        return reading
+    }
+
     internal fun rewriteJapaneseContext(text: String): String {
         val ja = map()
         val sb = StringBuilder(text.length)
@@ -209,6 +449,67 @@ class TtsTextNormalizer(
 
         /** 阿拉伯数字 run；英文上下文的整数在进 sherpa 前转英文数词。 */
         val NUMBER_RUN = Regex("[0-9]+")
+
+        // ── 日文数字读法 ──────────────────────────────────────────
+
+        /** 日文数字 run；与 [NUMBER_RUN] 同一模式，分开命名以便两处独立演进。 */
+        val JA_NUMBER_RUN = Regex("[0-9]+")
+
+        /** 日文数字改写的上限（万位以内）；更大的数字（编号、里程等）保留原样。 */
+        const val MAX_JAPANESE_NUMBER = 99999
+
+        /** 0..9；下标即数值。注意 4=し、7=しち、9=く 是日文数词的标准读法。 */
+        val JAPANESE_DIGITS = arrayOf(
+            "ゼロ", "いち", "に", "さん", "し", "ご", "ろく", "しち", "はち", "く",
+        )
+
+        /** 基数单位：值 → 读法。按从大到小排列，拆位时依次除。 */
+        val JAPANESE_UNITS = listOf(
+            10000 to "まん",
+            1000 to "せん",
+            100 to "ひゃく",
+            10 to "じゅう",
+        )
+
+        /** 1..31 日的特殊读法；表外的日（如 32）退化为「基数 + にち」。 */
+        val JAPANESE_DAYS = mapOf(
+            1 to "ついたち", 2 to "ふつか", 3 to "みっか", 4 to "よっか", 5 to "いつか",
+            6 to "むいか", 7 to "なのか", 8 to "ようか", 9 to "ここのか", 10 to "とおか",
+            14 to "じゅうよっか", 20 to "はつか", 24 to "にじゅうよっか",
+        )
+
+        /** 月份特殊读法；其余月份「基数 + がつ」。 */
+        val JAPANESE_MONTHS = mapOf(
+            4 to "しがつ", 7 to "しちがつ", 9 to "くがつ",
+        )
+
+        /** 时刻特殊读法；其余「基数 + じ」。14/24 时的 4 读 よ 而非 よん。 */
+        val JAPANESE_HOURS = mapOf(
+            4 to "よじ", 7 to "しちじ", 9 to "くじ",
+            14 to "じゅうよじ", 24 to "にじゅうよじ",
+        )
+
+        /** 分钟特殊音变；其余「基数 + ふん」。 */
+        val JAPANESE_MINUTES = mapOf(
+            1 to "いっぷん", 3 to "さんぷん", 4 to "よんぷん", 6 to "ろっぷん",
+            8 to "はっぷん", 10 to "じゅっぷん", 30 to "さんじゅっぷん",
+        )
+
+        /** 人数特殊读法；其余「基数 + にん」。 */
+        val JAPANESE_PEOPLE = mapOf(
+            1 to "ひとり", 2 to "ふたり", 4 to "よにん", 7 to "しちにん",
+        )
+
+        /** 年龄特殊读法；其余「基数 + さい」。 */
+        val JAPANESE_AGES = mapOf(
+            1 to "いっさい", 8 to "はっさい", 10 to "じゅっさい", 20 to "はたち",
+        )
+
+        /** 视为日文单位的字符（与假名一起构成日文上下文判据，见 [isJapaneseNumberContext]）。 */
+        val JA_UNIT_CHARS = setOf(
+            '日', '月', '時', '分', '秒', '人', '歳', '個', '本', '杯', '枚', '冊',
+            '匹', '台', '回', '階', '件', '年', '週', '円', '度', '点', '番',
+        )
 
         /** 最多 6 位（≤999,999）；电话等更长数字交给 phone.fst 逐位处理。 */
         const val MAX_ENGLISH_NUMBER_DIGITS = 6

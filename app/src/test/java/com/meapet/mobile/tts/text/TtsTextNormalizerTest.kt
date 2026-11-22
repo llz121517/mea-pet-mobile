@@ -99,8 +99,8 @@ class TtsTextNormalizerTest {
         assertEquals("我今年 18 岁", normalizer().normalize("我今年 18 岁"))
         assertEquals("今天是 2026 年 11 月 1 日", normalizer().normalize("今天是 2026 年 11 月 1 日"))
         assertEquals("我用 python 写了 3 个脚本", normalizer().normalize("我用 Python 写了 3 个脚本"))
-        // 日文数字仍是已知边界：不转英文，进 sherpa 后走中文 ruleFsts
-        assertEquals("きょうの meeting は 15 時からです", normalizer().normalize("今日の meeting は 15 時からです"))
+        // 日文数字：由 rewriteJapaneseNumbers 按日文单位读法处理（见 JapaneseNumbersTest）
+        assertEquals("きょうの meeting は じゅうごじからです", normalizer().normalize("今日の meeting は 15 時からです"))
     }
 
     @Test
