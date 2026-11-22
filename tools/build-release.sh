@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # 构建并签名 v7a / v8a / both 三个 release APK → dist/MeaPet-v<版本>-<ABI>.APK
 #
+# 自动构建会把当前提交的 9 位短哈希通过 -PversionSuffix 传给 gradle，拼到 versionName
+# 末尾（如 1.9.0-1a2b3c4d5），便于从安装包识别构建来源；dist/ 产物文件名仍使用
+# app/build.gradle.kts 里的基础版本号（MeaPet-v1.9.0-<ABI>.APK），保持既有命名不变。
+# 非 git 工作区（如从源码包构建）读不到哈希时只告警，versionName 保持原样继续构建。
+#
 # 用法:
 #   tools/build-release.sh                 # 三档全打
 #   ABIS="v8a" tools/build-release.sh      # 只打 v8a
@@ -34,15 +39,33 @@ done
 [[ -f "$KEYSTORE_STORE_FILE" ]] || die "找不到 keystore 文件：$KEYSTORE_STORE_FILE"
 
 # ── 版本号 ────────────────────────────────────────────────
+# 取的是基础版本号（versionName 字面量），不含自动构建追加的 -短哈希后缀；
+# dist 产物文件名沿用 MeaPet-v<基础版本>-<ABI>.APK，保持既有命名不变。
 VER="$(sed -nE 's/.*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$ROOT/app/build.gradle.kts" | head -1)"
 [[ -n "$VER" ]] || die "未能从 app/build.gradle.kts 解析 versionName"
+
+# ── 当前提交短哈希（9 位）────────────────────────────────
+# 只负责取哈希并通过 -PversionSuffix 传给 gradle；versionName 的拼接在
+# app/build.gradle.kts 里完成。git 短哈希冲突时 --short=9 会自动加长，仍视为合法。
+VERSION_SUFFIX="$(git -C "$ROOT" rev-parse --short=9 HEAD 2>/dev/null || true)"
+if [[ "$VERSION_SUFFIX" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+  echo "当前提交短哈希：$VERSION_SUFFIX（拼到 versionName 末尾）"
+else
+  VERSION_SUFFIX=""
+  echo "⚠ 未能从 git 读取当前提交短哈希，本次构建 versionName 不带 -<短哈希> 后缀" >&2
+fi
 
 mkdir -p "$DIST"
 cd "$ROOT"
 
 for ABI in $ABIS; do
   echo "── assembleRelease ($ABI) ──"
-  ./gradlew :app:assembleRelease "-PappAbi=$ABI" --console=plain
+  # -PappAbi 过滤 ABI；-PversionSuffix 把自动构建的提交短哈希拼到 versionName 末尾
+  GRADLE_ARGS=(":app:assembleRelease" "-PappAbi=$ABI" "--console=plain")
+  if [[ -n "$VERSION_SUFFIX" ]]; then
+    GRADLE_ARGS+=("-PversionSuffix=$VERSION_SUFFIX")
+  fi
+  ./gradlew "${GRADLE_ARGS[@]}"
 
   OUT="$ROOT/app/build/outputs/apk/release"
   SRC=""

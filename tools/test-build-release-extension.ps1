@@ -1,5 +1,9 @@
 #requires -Version 5.1
-# Regression check: both release wrappers must publish uppercase .APK files in dist/.
+# Regression check:
+#   1. both release wrappers must publish uppercase .APK files in dist/ with the unchanged
+#      MeaPet-v<基础版本>-<ABI>.APK naming;
+#   2. both wrappers must pass the current commit's 9-char short hash to gradle via
+#      -PversionSuffix（app/build.gradle.kts 负责把它拼到 versionName 末尾）。
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $fixture = Join-Path ([System.IO.Path]::GetTempPath()) ("meapet-release-test-" + [guid]::NewGuid().ToString('N'))
@@ -14,12 +18,32 @@ try {
     Set-Content (Join-Path $fixture 'keystore.properties') "storeFile=release.keystore`nstorePassword=test`nkeyAlias=test`nkeyPassword=test"
     Set-Content (Join-Path $fixture 'release.keystore') 'dummy'
     Set-Content (Join-Path $fixture 'app\build\outputs\apk\release\app-release.apk') 'signed fixture'
-    Set-Content (Join-Path $fixture 'gradlew') "#!/usr/bin/env bash`nexit 0"
-    Set-Content (Join-Path $fixture 'gradlew.bat') "@echo off`r`nexit /b 0"
+    # 假 gradlew：把收到的参数写进 gradle-args.txt，供断言 -PappAbi / -PversionSuffix
+    Set-Content (Join-Path $fixture 'gradlew') "#!/usr/bin/env bash`nprintf '%s\n' `"`$@`" > gradle-args.txt`nexit 0`n"
+    Set-Content (Join-Path $fixture 'gradlew.bat') "@echo off`r`n(echo %*)>gradle-args.txt`r`nexit /b 0`r`n"
 
+    # 造一个带提交的 git 仓库：构建脚本用 git rev-parse --short=9 读取提交短哈希
+    Push-Location $fixture
+    try {
+        & git init -q 2>&1 | Out-Null
+        & git config user.email 'release-test@example.com'
+        & git config user.name 'release test'
+        & git add -A
+        & git commit -qm 'fixture' 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'git fixture init failed' }
+    } finally {
+        Pop-Location
+    }
+    $expectedSuffix = (& git -C $fixture rev-parse --short=9 HEAD | Out-String).Trim()
+    if ($expectedSuffix -notmatch '^[0-9a-fA-F]{7,40}$') {
+        throw "unexpected short hash from git: $expectedSuffix"
+    }
+
+    $argsFile = Join-Path $fixture 'gradle-args.txt'
     foreach ($wrapper in @('sh', 'ps1')) {
         $dist = Join-Path $fixture 'dist'
         if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+        if (Test-Path $argsFile) { Remove-Item -Force $argsFile }
         if ($wrapper -eq 'sh') {
             $env:RELEASE_FIXTURE = $fixture
             try {
@@ -34,6 +58,8 @@ try {
             & (Join-Path $fixture 'tools\build-release.ps1') -Abis v8a
             if ($LASTEXITCODE -ne 0) { throw "PowerShell wrapper failed: $LASTEXITCODE" }
         }
+
+        # 产物命名保持不变：基础版本号来自 build.gradle.kts，不拼短哈希后缀
         $expected = Join-Path $dist 'MeaPet-v1.7.2-v8a.APK'
         $actual = @(Get-ChildItem -File $dist | Select-Object -ExpandProperty Name)
         if ($actual.Count -ne 1 -or $actual[0] -cne 'MeaPet-v1.7.2-v8a.APK') {
@@ -42,8 +68,18 @@ try {
         if ((Get-Content $expected -Raw).Trim() -ne 'signed fixture') {
             throw "$wrapper wrapper did not copy the signed APK"
         }
-        Write-Host "PASS: $wrapper wrapper publishes $($actual[0])"
+
+        # 自动构建必须把当前提交短哈希传给 gradle，由 build.gradle.kts 拼到 versionName
+        if (-not (Test-Path $argsFile)) { throw "$wrapper wrapper did not invoke gradlew" }
+        $gradleArgs = (Get-Content $argsFile -Raw)
+        if ($gradleArgs -notmatch [regex]::Escape("-PappAbi=v8a")) {
+            throw "$wrapper wrapper did not pass -PappAbi: $gradleArgs"
+        }
+        if ($gradleArgs -notmatch [regex]::Escape("-PversionSuffix=$expectedSuffix")) {
+            throw "$wrapper wrapper did not pass -PversionSuffix=$expectedSuffix : $gradleArgs"
+        }
+        Write-Host "PASS: $wrapper wrapper publishes $($actual[0]) and passes -PversionSuffix=$expectedSuffix"
     }
 } finally {
-    if (Test-Path $fixture) { Remove-Item -Recurse -Force $fixture }
+    if (Test-Path $fixture) { Remove-Item -Recurse -Force $fixture -ErrorAction SilentlyContinue }
 }

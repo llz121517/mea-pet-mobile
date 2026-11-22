@@ -16,6 +16,14 @@ object AppInfo {
 
     private const val DEFAULT_VERSION = "1.0.0"
 
+    /**
+     * 自动构建追加在 versionName 末尾的提交短哈希后缀（`-1a2b3c4d5`）。
+     *
+     * 只匹配 7–40 位十六进制串（git 短哈希长度区间），避免把 `1.9.0-beta1`
+     * 这类预发布标识误当构建号剥离。`+` 前缀兼容 SemVer build metadata 写法。
+     */
+    private val BUILD_HASH_SUFFIX = Regex("[-+][0-9a-fA-F]{7,40}$")
+
     /** 开发者名称。 */
     val devName: String = BuildConfig.DEV_NAME.ifBlank { "llz121517" }
 
@@ -34,10 +42,25 @@ object AppInfo {
         "https://www.umeng.com/page/policy"
     }
 
-    /** 从 PackageManager 读取当前 versionName（失败回退默认）。 */
+    /**
+     * 从 PackageManager 读取当前 versionName（失败回退默认）。
+     *
+     * 自动构建的返回值会带提交短哈希后缀（如 `1.9.0-1a2b3c4d5`）。这里保留完整版本号
+     * 供「关于」页与日志展示；需要比较版本时先用 [baseVersion] 剥离后缀。
+     */
     fun readVersion(context: Context): String = try {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: DEFAULT_VERSION
     } catch (_: Exception) {
         DEFAULT_VERSION
     }
+
+    /**
+     * 去掉自动构建追加的提交短哈希后缀，返回可比较的基础版本号。
+     *
+     * 例：`1.9.0-1a2b3c4d5` → `1.9.0`。更新检查比较远端 tag 与本机 versionName 前必须
+     * 先剥离后缀，否则以数字开头的短哈希会被当成额外的版本段（旧实现会把
+     * `1.9.0-1a2b3c4d5` 解析为 `1.9.0.1`，误判需要更新）。
+     */
+    fun baseVersion(versionName: String): String =
+        versionName.trim().replace(BUILD_HASH_SUFFIX, "")
 }

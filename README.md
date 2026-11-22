@@ -165,7 +165,7 @@ model.onnx  tokens.txt  lexicon.txt  fsts/phone.fst  fsts/date.fst  fsts/number.
 
 「关于」子页集中了应用信息、更新与隐私入口：
 
-- **应用信息** — 版本号、技术栈等。
+- **应用信息** — 版本号与构建时间（构建时注入）、技术栈等。自动构建的版本号末尾带 9 位提交短哈希（如 `1.9.0-1a2b3c4d5`），便于对照具体提交。
 - **更新** — 启动时静默检测新版本，发现更新才提示（可在子页关闭）；此处也可手动「检查更新」（按钮 + 进度 + 结果文案与发布页链接）。
 - **隐私与数据** — 查看隐私政策全文（再往里一层）；导出日志（含设备 / 版本头信息、native 崩溃 tombstone、logcat），便于反馈问题；友盟统计 SDK 授权管理（可查看授权状态，取消授权后立即退出，确保停止上报）。
 
@@ -175,6 +175,8 @@ model.onnx  tokens.txt  lexicon.txt  fsts/phone.fst  fsts/date.fst  fsts/number.
 构建复用 [`tools/build-release.sh`](tools/build-release.sh)，与本地产物同名同规则。
 
 **一次性配置**：Settings → Environments 新建 **`keystore`**，加 secrets：
+**版本号与构建时间**：`tools/build-release.sh` / `tools/build-release.ps1` 会把当前提交的 9 位短哈希通过 `-PversionSuffix` 传给 gradle，拼到 `versionName` 末尾（形如 `1.9.0-1a2b3c4d5`），便于从安装包反查提交；`dist/` 产物命名保持 `MeaPet-v<基础版本>-<ABI>.APK` 不变。手动构建（Android Studio / `gradlew assembleDebug`）不带该属性，`versionName` 保持 `1.9.0`。构建时间由 `app/build.gradle.kts` 以 epoch 毫秒时间戳注入 `BuildConfig.BUILD_TIME`，在「关于」页版本号下方按设备当前时区展示。
+
 
 | Secret | 内容 |
 | --- | --- |

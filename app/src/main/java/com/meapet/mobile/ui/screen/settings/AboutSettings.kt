@@ -40,6 +40,10 @@ import com.meapet.mobile.core.AppInfo
 import com.meapet.mobile.ui.component.LinkItem
 import com.meapet.mobile.viewmodel.SettingsUiState
 import com.meapet.mobile.viewmodel.SettingsViewModel
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 // ═══════════════════════════════════════════════════
 //  关于：应用信息、版本更新、隐私政策与数据授权
@@ -47,6 +51,19 @@ import com.meapet.mobile.viewmodel.SettingsViewModel
 
 /** 关于卡片中的 Live2D 模型来源链接。 */
 private const val LIVE2D_MODEL_SOURCE_URL = "https://www.bilibili.com/video/BV1AoX7BXEaN"
+
+/** 构建时间展示格式（只到分钟，避免秒级抖动带来的无意义信息）。 */
+private const val BUILD_TIME_DISPLAY_PATTERN = "yyyy-MM-dd HH:mm"
+
+/**
+ * 把 `BuildConfig.BUILD_TIME`（构建时的 epoch 毫秒）按设备当前时区展示。
+ *
+ * 构建时只注入时间戳，不固定时区 / 不预先格式化；展示格式与语言跟随设备系统。
+ */
+private fun formatBuildTime(epochMillis: Long): String =
+    Instant.ofEpochMilli(epochMillis)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern(BUILD_TIME_DISPLAY_PATTERN, Locale.getDefault()))
 
 /**
  * 应用信息：名称/简介/版本、致谢、外部链接与技术栈。
@@ -59,6 +76,7 @@ internal fun AppInfoSection() {
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
     val appVersion = remember(context) { AppInfo.readVersion(context) }
+    val buildTime = remember { formatBuildTime(BuildConfig.BUILD_TIME) }
     val linkStyle = MaterialTheme.typography.bodySmall
 
     SectionTitle("应用信息")
@@ -73,6 +91,12 @@ internal fun AppInfoSection() {
     Spacer(Modifier.height(4.dp))
     Text(
         "版本 $appVersion",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(2.dp))
+    Text(
+        "构建时间 $buildTime",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )

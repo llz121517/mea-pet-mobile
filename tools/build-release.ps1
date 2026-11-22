@@ -8,6 +8,11 @@
   签名证书来自根目录 keystore.properties（或 4 个环境变量覆盖）：
     KEYSTORE_STORE_FILE / KEYSTORE_STORE_PASSWORD / KEYSTORE_KEY_ALIAS / KEYSTORE_KEY_PASSWORD
 
+  自动构建会把当前提交的 9 位短哈希通过 -PversionSuffix 传给 gradle，拼到 versionName
+  末尾（如 1.9.0-1a2b3c4d5），便于从安装包识别构建来源；dist/ 产物文件名仍使用
+  app/build.gradle.kts 里的基础版本号（MeaPet-v1.9.0-<ABI>.APK），保持既有命名不变。
+  非 git 工作区（如从源码包构建）读不到哈希时只告警，versionName 保持原样继续构建。
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools\build-release.ps1
   powershell -ExecutionPolicy Bypass -File tools\build-release.ps1 -Abis v8a        # 只打 v8a
@@ -77,6 +82,8 @@ if (-not (Test-Path $env:KEYSTORE_STORE_FILE)) {
 }
 
 # ── 从 app/build.gradle.kts 取版本号 ─────────────────────────────────────
+# 取的是基础版本号（versionName 字面量），不包含自动构建追加的 -短哈希后缀；
+# dist 产物文件名沿用 MeaPet-v<基础版本>-<ABI>.APK，保持既有命名不变。
 $buildFile = Join-Path $root 'app\build.gradle.kts'
 $m = [regex]::Match((Get-Content $buildFile -Raw), 'versionName\s*=\s*"([^"]+)"')
 if (-not $m.Success) {
@@ -85,6 +92,23 @@ if (-not $m.Success) {
 }
 $ver = $m.Groups[1].Value
 
+# ── 当前提交短哈希（9 位）──────────────────────────────────────────────
+# 只负责取哈希并通过 -PversionSuffix 传给 gradle；versionName 的拼接在
+# app/build.gradle.kts 里完成（dist 产物文件名继续用上面的基础版本号，保持不变）。
+# git 短哈希冲突时 --short=9 会自动加长，仍视为合法。
+$versionSuffix = $null
+try {
+    $versionSuffix = (& git -C $root rev-parse --short=9 HEAD 2>$null | Out-String).Trim()
+} catch {
+    $versionSuffix = $null
+}
+if ([string]::IsNullOrWhiteSpace($versionSuffix) -or $versionSuffix -notmatch '^[0-9a-fA-F]{7,40}$') {
+    Write-Warning "未能从 git 读取当前提交短哈希，本次构建 versionName 不带 -<短哈希> 后缀"
+    $versionSuffix = $null
+} else {
+    Write-Host "当前提交短哈希：$versionSuffix（拼到 versionName 末尾）"
+}
+
 # ── 构建 ────────────────────────────────────────────────────────────────
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 $gradlew = Join-Path $root 'gradlew.bat'
@@ -92,7 +116,10 @@ Push-Location $root
 try {
     foreach ($abi in ($Abis -split ',' | Where-Object { $_ })) {
         Write-Host "── assembleRelease ($abi) ──"
-        & $gradlew ':app:assembleRelease' "-PappAbi=$abi" '--console=plain'
+        # -PappAbi 过滤 ABI；-PversionSuffix 把自动构建的提交短哈希拼到 versionName 末尾
+        $gradleArgs = @(':app:assembleRelease', "-PappAbi=$abi", '--console=plain')
+        if ($versionSuffix) { $gradleArgs += "-PversionSuffix=$versionSuffix" }
+        & $gradlew @gradleArgs
         if ($LASTEXITCODE -ne 0) { throw "assembleRelease($abi) 失败，退出码 $LASTEXITCODE" }
 
         $outDir = Join-Path $root 'app\build\outputs\apk\release'
