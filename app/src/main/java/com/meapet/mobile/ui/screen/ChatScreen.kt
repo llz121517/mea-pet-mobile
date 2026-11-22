@@ -68,6 +68,7 @@ import com.meapet.mobile.chat.ChatUiState
 import com.meapet.mobile.chat.MemoryDialogUi
 import com.meapet.mobile.chat.TurnPhase
 import com.meapet.mobile.memory.MemoryType
+import com.meapet.mobile.live2d.Live2dSupport
 import com.meapet.mobile.settings.SettingsKeys
 import com.meapet.mobile.ui.component.AppSnackbarHost
 import com.meapet.mobile.ui.component.ChatBubble
@@ -323,6 +324,7 @@ private fun ChatPage(
         // ── Layer 2: 顶部菜单 ──
         OverlayMenu(
             onToggleOverlay = onToggleOverlay,
+            showOverlayEntry = Live2dSupport.isAvailable,
             onClearConversation = {
                 // 立即清空，随后由撤销条给一次反悔机会（见 UndoSnackbarEffect）
                 chatViewModel.onEvent(ChatEvent.ClearConversation)

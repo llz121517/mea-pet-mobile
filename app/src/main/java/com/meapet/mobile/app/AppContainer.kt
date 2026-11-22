@@ -353,10 +353,13 @@ class AppContainer(
             contextCapacity.refreshIfNeeded()
             // Live2D 模型预读独立后台跑：模型加载在 GL 线程同步执行，asset 读取是最大耗时。
             // 它不阻塞首屏历史渲染——若并进 warmUpJob，聊天页要等模型预热完才显示内容（闪黑/闪空）。
-            applicationScope.launch(Dispatchers.IO) {
-                runCatching {
-                    com.meapet.mobile.live2d.Live2dManager.getInstance().prewarmModel(context)
-                }.onFailure { Log.w(TAG, "Live2D 模型预热失败", it) }
+            // 32 位 ARM 无 Live2D 原生核心时跳过：预热只是读 assets，但没必要为不存在的模型占内存。
+            if (com.meapet.mobile.live2d.Live2dSupport.isAvailable) {
+                applicationScope.launch(Dispatchers.IO) {
+                    runCatching {
+                        com.meapet.mobile.live2d.Live2dManager.getInstance().prewarmModel(context)
+                    }.onFailure { Log.w(TAG, "Live2D 模型预热失败", it) }
+                }
             }
             listOf(
                 launch { memoryRepository.loadFromDisk() },

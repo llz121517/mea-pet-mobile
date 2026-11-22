@@ -19,6 +19,7 @@ import android.view.WindowManager
 import com.meapet.mobile.app.MeaPetApplication
 import com.meapet.mobile.live2d.Live2dDelegate
 import com.meapet.mobile.live2d.Live2dRenderState
+import com.meapet.mobile.live2d.Live2dSupport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -120,6 +121,14 @@ class FloatingLive2dService : Service() {
         // 否则会留下一个加不上视图/吞触摸的空壳服务
         if (!Settings.canDrawOverlays(this)) {
             Log.w(TAG, "Overlay permission missing, stopping service")
+            Live2dRenderState.setOverlayActive(false)
+            stopSelf()
+            return
+        }
+        // 32 位 ARM 没有 Live2D 原生核心（见 Live2dSupport / ADR 0003）：悬浮窗的唯一内容
+        // 就是模型，没有模型就没有可显示的东西，直接拒绝启动，避免留下透明僵尸窗。
+        if (!Live2dSupport.isAvailable) {
+            Log.w(TAG, "Live2D unavailable on this ABI, overlay not supported; stopping service")
             Live2dRenderState.setOverlayActive(false)
             stopSelf()
             return

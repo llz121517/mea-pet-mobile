@@ -54,6 +54,8 @@ fun OverlayMenu(
     onClearConversation: () -> Unit = {},
     onShowMemories: () -> Unit = {},
     onToggleOverlay: () -> Unit = {},
+    /** 是否提供「悬浮窗」入口。32 位 ARM 无 Live2D 原生核心时隐藏（见 Live2dSupport）。 */
+    showOverlayEntry: Boolean = true,
     /** 上下文是否已长到值得显示「压缩上下文」入口（平时不占菜单位置）。 */
     showCompactContext: Boolean = false,
     /** 是否正在压缩（菜单项显示进行中文案）。 */
@@ -138,8 +140,12 @@ fun OverlayMenu(
                             MenuEntry("清除对话", R.drawable.ic_menu_clear) { menuExpanded = false; onClearConversation() }
                             HorizontalDivider()
                             MenuEntry("查看记忆", R.drawable.ic_menu_memory) { menuExpanded = false; onShowMemories() }
-                            HorizontalDivider()
-                            MenuEntry("悬浮窗", R.drawable.ic_menu_overlay) { menuExpanded = false; onToggleOverlay() }
+                            // 悬浮窗只能显示 Live2D 模型：设备缺原生核心时不显示入口，
+                            // 避免用户点了没反应（见 Live2dSupport / ADR 0003）
+                            if (showOverlayEntry) {
+                                HorizontalDivider()
+                                MenuEntry("悬浮窗", R.drawable.ic_menu_overlay) { menuExpanded = false; onToggleOverlay() }
+                            }
                             // 上下文较长时才出现：平时不占菜单位置，避免误导用户频繁整理
                             if (showCompactContext) {
                                 HorizontalDivider()

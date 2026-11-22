@@ -22,15 +22,22 @@ try {
     Set-Content (Join-Path $fixture 'gradlew') "#!/usr/bin/env bash`nprintf '%s\n' `"`$@`" > gradle-args.txt`nexit 0`n"
     Set-Content (Join-Path $fixture 'gradlew.bat') "@echo off`r`n(echo %*)>gradle-args.txt`r`nexit /b 0`r`n"
 
-    # 造一个带提交的 git 仓库：构建脚本用 git rev-parse --short=9 读取提交短哈希
+    # 造一个带提交的 git 仓库：构建脚本用 git rev-parse --short=9 读取提交短哈希。
+    # 注意：`& git ... | Out-Null` 会让 $LASTEXITCODE 保留管道最后一环的状态，
+    # 且 PowerShell 7 下 git 的 stderr 输出（如 "Initialized empty Git repository"）
+    # 会被当成 NativeCommandError。这里统一用 `2>&1 | Out-Null` 吞掉，并以
+    # 用户配置 + 显式 --allow-empty 保证在任何环境都能提交成功。
     Push-Location $fixture
     try {
         & git init -q 2>&1 | Out-Null
-        & git config user.email 'release-test@example.com'
-        & git config user.name 'release test'
-        & git add -A
-        & git commit -qm 'fixture' 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'git fixture init failed' }
+        if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
+        & git config user.email 'release-test@example.com' 2>&1 | Out-Null
+        & git config user.name 'release test' 2>&1 | Out-Null
+        & git config commit.gpgsign false 2>&1 | Out-Null
+        & git add -A 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'git add failed' }
+        & git commit --allow-empty -qm 'fixture' 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'git commit failed' }
     } finally {
         Pop-Location
     }
