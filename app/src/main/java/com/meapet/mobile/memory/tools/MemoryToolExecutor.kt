@@ -302,6 +302,18 @@ class MemoryToolExecutor(
             runCatching { MemoryType.valueOf(name) }.getOrNull()
                 ?: return errorEnvelope(INVALID_ARGUMENTS, "非法 type：$name")
         }
+        // 与 create 一致：长期记忆只由摘要流程生成，工具不得创建或改写出来
+        if (type == MemoryType.LONG_TERM) {
+            return errorEnvelope("invalid_type", "长期记忆由系统摘要生成，不能直接创建或修改")
+        }
+        // 永久类（事实/特质）不允许改类型：否则模型可先降级为短期、再免确认删除，
+        // 绕过 delete_memory 的 confirm_permanent 护栏
+        if (existing.type.isPermanent && type != existing.type) {
+            return errorEnvelope(
+                INVALID_ARGUMENTS,
+                "事实/特质类记忆的类型不能修改；如需删除请按永久类流程请求用户确认"
+            )
+        }
         val importance = (args["importance"] as? JsonPrimitive)?.doubleOrNull
             ?.coerceIn(0.0, 1.0)?.toFloat() ?: existing.importance
         val keywords = parseKeywords(args["keywords"]).ifEmpty { existing.keywords }
@@ -331,7 +343,7 @@ class MemoryToolExecutor(
         val existing = findItem(id)
             ?: return errorEnvelope(NOT_FOUND, "id $id 不存在，请先 search_memory 确认")
 
-        val permanent = existing.type == MemoryType.FACTUAL || existing.type == MemoryType.CORE_TRAIT
+        val permanent = existing.type.isPermanent
         if (permanent) {
             val confirmed = (args["confirm_permanent"] as? JsonPrimitive)?.booleanOrNull == true
             val reason = args.str("reason")

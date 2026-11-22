@@ -15,7 +15,14 @@ enum class MemoryType {
     SHORT_TERM,
     LONG_TERM,
     CORE_TRAIT,
-    FACTUAL
+    FACTUAL;
+
+    /**
+     * 是否为永不自动淘汰的永久类（核心特质 / 事实）。
+     *
+     * 永久类不允许被工具改类型，删除必须显式确认（见 `MemoryToolExecutor`）。
+     */
+    val isPermanent: Boolean get() = this == CORE_TRAIT || this == FACTUAL
 }
 
 /**

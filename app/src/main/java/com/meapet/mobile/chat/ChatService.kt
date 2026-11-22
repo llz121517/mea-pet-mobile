@@ -34,6 +34,17 @@ import kotlinx.serialization.json.jsonObject
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
+ * UI 历史分页结果。
+ *
+ * @property messages 过滤后的可见消息（见 [forUi]）
+ * @property rawCount 本页**原始记录条数**（含 tool 与空 assistant）。
+ *
+ * 「是否还有更早历史」必须按 [rawCount] 判断：工具模式下每轮会落 tool 行与纯 tool_calls 的
+ * 空 assistant，过滤后一页可见条数必然少于页大小，用可见条数判断会让翻页永远停在首屏。
+ */
+data class HistoryPage(val messages: List<ChatMessage>, val rawCount: Int)
+
+/**
  * 聊天业务服务。
  *
  * ## 职责
@@ -859,12 +870,16 @@ class ChatService(
      * UI 首屏：完整历史里最近 [limit] 条，**过滤掉 UI 不可见消息**
      * （tool 与纯 tool_calls 的空 assistant，见 [forUi]）。
      */
-    suspend fun loadRecentForUi(limit: Int): List<ChatMessage> =
-        conversationManager.loadRecentForUi(limit).forUi()
+    suspend fun loadRecentForUi(limit: Int): HistoryPage {
+        val raw = conversationManager.loadRecentForUi(limit)
+        return HistoryPage(raw.forUi(), raw.size)
+    }
 
     /** UI 懒加载：[beforeId] 之前的 [limit] 条完整历史（按时间正序，同样过滤不可见消息）。 */
-    suspend fun loadOlder(beforeId: String, limit: Int): List<ChatMessage> =
-        conversationManager.pageBefore(beforeId, limit).forUi()
+    suspend fun loadOlder(beforeId: String, limit: Int): HistoryPage {
+        val raw = conversationManager.pageBefore(beforeId, limit)
+        return HistoryPage(raw.forUi(), raw.size)
+    }
 
     /** 清除历史（同时清除压缩状态：摘要已不对应任何现存历史）。 */
     fun clearHistory() {

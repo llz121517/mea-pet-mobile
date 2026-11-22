@@ -188,6 +188,48 @@ class MemoryToolWriteTest {
     }
 
     /**
+     * 永久类删除的确认护栏不能被「先 update 改类型再 delete」绕过：
+     * 事实/特质条目禁止改成其它类型，因此删除时仍会要求确认。
+     */
+    @Test
+    fun `永久类记忆不能通过改类型绕过删除确认`() = runTest {
+        val (executor, repo) = setup()
+        repo.save(
+            MemoryItem(
+                id = "mem_fact",
+                content = "主人叫小明",
+                type = MemoryType.FACTUAL,
+                keywords = listOf("小明")
+            )
+        )
+
+        val demote = executor.execute(
+            "update_memory",
+            """{"id":"mem_fact","content":"主人叫小明","type":"SHORT_TERM"}"""
+        )
+        assertEquals("false", str(demote, "ok"), "永久类不应被降级成短期")
+        assertTrue(executor.drainPending().upserts.isEmpty())
+
+        val delete = executor.execute("delete_memory", """{"id":"mem_fact"}""")
+        assertEquals("permanent_delete_requires_confirmation", str(delete, "error"))
+        assertTrue(executor.drainPending().deletes.isEmpty())
+    }
+
+    @Test
+    fun `update 不能把条目改成长期记忆`() = runTest {
+        val (executor, repo) = setup()
+        repo.save(MemoryItem(id = "mem_s", content = "临时信息", keywords = listOf("临时")))
+
+        val raw = executor.execute(
+            "update_memory",
+            """{"id":"mem_s","content":"临时信息","type":"LONG_TERM"}"""
+        )
+
+        assertEquals("false", str(raw, "ok"))
+        assertTrue(executor.drainPending().upserts.isEmpty())
+    }
+
+    /**
      * 删除要留**墓碑快照**（删除前存库的完整条目），供 UI 撤销还原；
      * 同 turn 内刚创建又删除的条目从未落库，不该有墓碑（撤销无意义）。
      */

@@ -14,6 +14,7 @@ import com.meapet.mobile.chat.MemoryDialogUi
 import com.meapet.mobile.chat.TurnPhase
 import com.meapet.mobile.chat.UpdateNoticeUi
 import com.meapet.mobile.chat.forUi
+import com.meapet.mobile.chat.HistoryPage
 import com.meapet.mobile.app.MeaPetApplication
 import com.meapet.mobile.core.undoWindowMs
 import com.meapet.mobile.live2d.Live2dDelegate
@@ -99,13 +100,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             container.warmUpJob.join()
             // UI 首屏读仓库里的完整历史（最近一页），与发给模型的内存窗口解耦。
-            // 读取接口已过滤 tool/空 assistant，这里再兜一层，防止 mock/旧数据漏进来
-            val restored = chatService.loadRecentForUi(UI_PAGE_SIZE).forUi()
+            // 读取接口已过滤 tool/空 assistant；「还有更早历史」按原始页条数判断，
+            // 否则工具模式下一页可见条数永远凑不满页大小，上滑翻页会失效
+            val page = chatService.loadRecentForUi(UI_PAGE_SIZE)
+            val restored = page.messages
             if (restored.isNotEmpty()) {
                 _state.update { current ->
                     current.copy(
                         messages = mergeWithHistory(restored, current.messages),
-                        hasMoreHistory = restored.size >= UI_PAGE_SIZE
+                        hasMoreHistory = page.rawCount >= UI_PAGE_SIZE
                     )
                 }
             }
@@ -209,8 +212,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.isLoading) return
         viewModelScope.launch {
             // 按页取最近 UI_PAGE_SIZE 条（不是完整内存窗口），避免长会话下合并超大列表。
-            // 读取接口已过滤 tool/空 assistant，这里再兜一层
-            val history = chatService.loadRecentForUi(UI_PAGE_SIZE).forUi()
+            // 读取接口已过滤 tool/空 assistant
+            val history = chatService.loadRecentForUi(UI_PAGE_SIZE).messages
             if (history.isEmpty()) return@launch
             _state.update { cur ->
                 // 已向上加载的更早页要保留：history 只是最近一页，合并会丢掉它之前的内容
@@ -231,19 +234,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val anchor = s.messages.firstOrNull { it.role != ChatRole.system }?.id ?: return
         _state.update { it.copy(isLoadingOlder = true) }
         viewModelScope.launch {
-            val older = try {
-                chatService.loadOlder(anchor, UI_PAGE_SIZE).forUi()
+            val page = try {
+                chatService.loadOlder(anchor, UI_PAGE_SIZE)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                emptyList()
+                HistoryPage(emptyList(), 0)
             }
+            val older = page.messages
             _state.update { cur ->
                 val ids = cur.messages.mapTo(HashSet()) { it.id }
                 cur.copy(
                     messages = older.filter { it.id !in ids } + cur.messages,
                     isLoadingOlder = false,
-                    hasMoreHistory = older.size >= UI_PAGE_SIZE
+                    hasMoreHistory = page.rawCount >= UI_PAGE_SIZE
                 )
             }
         }

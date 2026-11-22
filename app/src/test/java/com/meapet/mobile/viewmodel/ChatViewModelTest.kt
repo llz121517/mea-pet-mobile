@@ -86,7 +86,9 @@ class ChatViewModelTest {
         // 成功收尾会取「本轮工具删除的墓碑」：默认无删除
         whenever(memoryManager.takeRecentToolDeletions()).thenReturn(emptyList())
         // UI 首屏与撤销快照改读「完整历史」接口；测试里沿用各用例对 getHistory() 的 stub 作为完整历史
-        wheneverBlocking { chatService.loadRecentForUi(any()) }.thenAnswer { chatService.getHistory() }
+        wheneverBlocking { chatService.loadRecentForUi(any()) }.thenAnswer {
+            com.meapet.mobile.chat.HistoryPage(chatService.getHistory(), chatService.getHistory().size)
+        }
         wheneverBlocking { chatService.loadFullHistory() }.thenAnswer { chatService.getHistory() }
         // 压缩状态与上下文估算：ViewModel 在发送成功后会刷新，mock 需显式给默认值（否则拆箱 NPE）
         wheneverBlocking { chatService.refreshContextTokens() }.thenReturn(0)
@@ -577,6 +579,71 @@ class ChatViewModelTest {
         } finally {
             Dispatchers.setMain(dispatcher)
         }
+    }
+
+    /**
+     * 工具轮次会落 tool 行与空的 assistant 行（UI 不显示），一页原始记录过滤后可见条数
+     * 必然少于页大小。「是否还有更早历史」必须按**原始页条数**判断，否则永远不再翻页。
+     */
+    @Test
+    fun `工具消息占位时首屏仍可继续向上翻页`() = runTest(dispatcher.scheduler) {
+        val repo = com.meapet.mobile.storage.InMemoryConversationRepository()
+        // 直接往仓库播种：不启用落库队列（persistScope=null），避免消费协程跑在真实 IO 线程、
+        // 让 ViewModel 的 flush() 在测试调度器上变成竞态。
+        // 每轮 4 行原始记录（user / 空 assistant(tool_calls) / tool / 最终 assistant）：
+        // 15 轮 = 60 行，UI 可见 30 行。首屏页大小 50 行 → 可见 25 条左右，但仍有更早历史。
+        repo.appendAll(
+            (1..15).flatMap { turn ->
+                listOf(
+                    ChatMessage(role = ChatRole.user, content = "问题$turn", id = "u$turn"),
+                    ChatMessage(
+                        role = ChatRole.assistant,
+                        content = "",
+                        id = "call$turn",
+                        rawAssistantJson = """{"role":"assistant","content":""}"""
+                    ),
+                    ChatMessage(
+                        role = ChatRole.tool,
+                        content = """{"ok":true}""",
+                        id = "tool$turn",
+                        toolCallId = "c$turn"
+                    ),
+                    ChatMessage(role = ChatRole.assistant, content = "回答$turn", id = "a$turn")
+                )
+            }
+        )
+        val cm = ConversationManager(
+            maxSize = 1000,
+            trimBatch = 100,
+            repository = repo,
+            autoTrim = false
+        )
+        // ViewModel 初始化会真实调用 refreshContextTokens()，需要设置项有值（mock 默认 null 会 NPE）
+        whenever(settingsManager.getSystemPrompt()).thenReturn("你是梅尔")
+        whenever(settingsManager.getModel()).thenReturn("m")
+        whenever(settingsManager.getTemperature()).thenReturn(0.7)
+        whenever(settingsManager.getMaxTokens()).thenReturn(1024)
+        whenever(settingsManager.getMemoryMode()).thenReturn(com.meapet.mobile.config.MemoryMode.TEXT)
+        whenever(settingsManager.isMemoryEnabled()).thenReturn(true)
+        val realService = ChatService(
+            clientProvider = { error("本用例不发送请求") },
+            conversationManager = cm,
+            memoryManager = null,
+            settingsManager = settingsManager,
+            postProcessScope = backgroundScope
+        )
+        Mockito.doReturn(realService).`when`(container).chatService
+
+        val vm = ChatViewModel(application)
+        vm.advance()
+
+        assertTrue("工具行占位时仍应判断出有更早历史", vm.state.value.hasMoreHistory)
+
+        vm.loadOlderMessages()
+        vm.advance()
+
+        val contents = vm.state.value.messages.map { it.content }
+        assertTrue("应加载到首屏页之外更早的可见消息: $contents", contents.contains("问题1"))
     }
 
     /** 模型用工具删了记忆：turn 成功后给一次撤销窗口，撤销按墓碑快照原样写回。 */
