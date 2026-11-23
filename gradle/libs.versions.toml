@@ -20,6 +20,7 @@ sherpaOnnx = "v2.0.1"
 markwon = "4.6.2"
 androidxSqlite = "2.7.1"
 sqliteJdbc = "3.49.1.0"
+zip4j = "2.11.5"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -75,6 +76,9 @@ markwon-inline-parser = { group = "io.noties.markwon", name = "inline-parser", v
 androidx-sqlite = { group = "androidx.sqlite", name = "sqlite", version.ref = "androidxSqlite" }
 androidx-sqlite-framework = { group = "androidx.sqlite", name = "sqlite-framework", version.ref = "androidxSqlite" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteJdbc" }
+
+# zip4j：备份包的 AES-256 加密 zip 读写（Apache-2.0，见 NOTICE.md）
+zip4j = { module = "net.lingala.zip4j:zip4j", version.ref = "zip4j" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -352,6 +352,24 @@ class ConversationManager(
     }
 
     /**
+     * 备份导入后重载内存窗口。
+     *
+     * 导入器已在**仓库**里整体替换了会话数据；这里丢弃旧窗口、按当前设置重新读取，
+     * 让 UI 分页与模型上下文都看到新数据。与 [replaceAll] 不同：**只读仓库、不再回写**，
+     * 避免把刚导入的历史重复写一遍、或与导入事务交错。
+     */
+    suspend fun reloadWindowFromRepository() {
+        val repo = repository ?: return
+        val limit = if (autoTrim) maxSize else Int.MAX_VALUE
+        val loaded = repo.loadRecent(limit)
+        synchronized(lock) {
+            messages.clear()
+            messages.addAll(loaded)
+        }
+        Log.i(TAG, "Window reloaded after backup import (${loaded.size} messages)")
+    }
+
+    /**
      * 按 id 移除消息。仓库侧无论窗口里有没有都会尝试删除
      * （消息可能已被窗口裁掉，但仍在完整历史里）。
      *

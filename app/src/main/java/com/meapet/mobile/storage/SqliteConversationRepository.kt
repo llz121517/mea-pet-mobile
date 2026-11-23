@@ -125,6 +125,14 @@ class SqliteConversationRepository(
         }
     }
 
+    override suspend fun contains(id: String): Boolean = db.withConnection { c ->
+        c.prepare("SELECT 1 FROM messages WHERE id = ? AND conversation_id = ?").use { st ->
+            st.bindText(1, id)
+            st.bindText(2, conversationId)
+            st.step()
+        }
+    }
+
     // ── 内部 ──────────────────────────────────────────
 
     private fun ensureConversation(c: SQLiteConnection) {

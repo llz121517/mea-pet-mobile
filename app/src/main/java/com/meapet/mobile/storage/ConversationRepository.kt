@@ -44,6 +44,14 @@ interface ConversationRepository {
 
     /** 当前会话消息总数。 */
     suspend fun count(): Int
+
+    /**
+     * 是否存在指定 id 的消息。
+     *
+     * 备份导入校验压缩摘要的 `coveredToMessageId` 时使用：该 id 在新库里不存在时，
+     * 必须丢弃旧摘要，避免把旧摘要注入新会话（见 PRD/LLD 的 G2 同类问题）。
+     */
+    suspend fun contains(id: String): Boolean
 }
 
 /** 纯内存实现：JVM 单测与无库场景使用，不落盘。 */
@@ -86,4 +94,7 @@ class InMemoryConversationRepository : ConversationRepository {
         }
 
     override suspend fun count(): Int = synchronized(lock) { items.size }
+
+    override suspend fun contains(id: String): Boolean =
+        synchronized(lock) { items.any { it.id == id } }
 }

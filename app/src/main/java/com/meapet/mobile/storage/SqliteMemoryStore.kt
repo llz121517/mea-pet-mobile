@@ -172,6 +172,23 @@ class SqliteMemoryStore(
         }
     }
 
+    /**
+     * 备份导入：清空记忆 + 写入新条目 + 写回轮数计数，**同一个事务**（任一环节失败整类回滚）。
+     */
+    override suspend fun replaceAll(items: List<MemoryItem>, exchangeCount: Int) {
+        db.transaction { c ->
+            c.exec("DELETE FROM memory_keywords")
+            c.exec("DELETE FROM memories")
+            items.forEach { upsert(c, it) }
+            c.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)").use { st ->
+                st.bindText(1, META_EXCHANGE_COUNT)
+                st.bindText(2, exchangeCount.toString())
+                st.step()
+            }
+        }
+        Log.i(TAG, "Memories replaced from backup: ${items.size} items")
+    }
+
     // ── 内部（均在 db 锁内调用）─────────────────────────
 
     private fun upsert(c: SQLiteConnection, item: MemoryItem) {

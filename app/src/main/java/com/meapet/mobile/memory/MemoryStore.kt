@@ -40,4 +40,16 @@ interface MemoryStore {
 
     /** 写回轮数计数（摘要触发后归零）。 */
     suspend fun setExchangeCount(count: Int)
+
+    /**
+     * 备份导入：整体替换记忆库与轮数计数。
+     *
+     * 默认实现按 [clear] → [saveAll] → [setExchangeCount] 依次执行；
+     * SQLite 实现覆写为**单个事务**，避免「记忆清空但计数没写进去」这类半落地状态。
+     */
+    suspend fun replaceAll(items: List<MemoryItem>, exchangeCount: Int) {
+        clear()
+        saveAll(items)
+        setExchangeCount(exchangeCount)
+    }
 }

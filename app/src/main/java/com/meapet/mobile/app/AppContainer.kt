@@ -4,6 +4,11 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.util.Log
 import com.meapet.mobile.BuildConfig
+import com.meapet.mobile.backup.BackupService
+import com.meapet.mobile.backup.BackupSources
+import com.meapet.mobile.backup.BackupTarget
+import com.meapet.mobile.backup.DataStoreSettingsSink
+import com.meapet.mobile.backup.SettingsSink
 import com.meapet.mobile.client.KtorHttpClientEngine
 import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.chat.ChatService
@@ -157,7 +162,7 @@ class AppContainer(
     }
 
     /** 上下文压缩状态存储（与会话/记忆同库，`meta` 表一行 JSON）。 */
-    private val compactionStore: MetaCompactionStore by lazy {
+    val compactionStore: MetaCompactionStore by lazy {
         MetaCompactionStore(database)
     }
 
@@ -261,6 +266,42 @@ class AppContainer(
     /** 主界面背景壁纸导入与清理（相册 URI → filesDir）。 */
     val wallpaperStore: WallpaperStore by lazy {
         WallpaperStore(context)
+    }
+
+    // ── 数据与备份（1.10）──────────────────────────────
+    // 全部复用上面的既有实例，不在备份模块里新建数据库 / 设置实例。
+
+    /** SAF 薄封装：暂存目录、打开读写流、显示名、进页清扫。 */
+    val backupService: BackupService by lazy {
+        BackupService(context)
+    }
+
+    /** 设置读写抽象：导出读 DataStore 快照，导入按白名单写回。 */
+    val backupSettingsSink: SettingsSink by lazy {
+        DataStoreSettingsSink(settingsManager)
+    }
+
+    /** 导出采集的数据源（设置 / 会话 / 记忆 / 压缩状态 / 壁纸）。 */
+    val backupSources: BackupSources by lazy {
+        BackupSources(
+            settings = backupSettingsSink,
+            conversationRepository = conversationRepository,
+            memoryStore = memoryRepository,
+            compactionStore = compactionStore,
+            filesDir = context.filesDir,
+            appVersion = readAppVersion()
+        )
+    }
+
+    /** 导入落地目标：按类别分别覆盖本机数据。 */
+    val backupTarget: BackupTarget by lazy {
+        BackupTarget(
+            conversationRepository = conversationRepository,
+            memoryStore = memoryRepository,
+            compactionStore = compactionStore,
+            filesDir = context.filesDir,
+            settings = backupSettingsSink
+        )
     }
 
     /** 生命周期管理器。 */

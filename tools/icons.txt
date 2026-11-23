@@ -1,4 +1,4 @@
-﻿# 设置界面图标清单
+# 设置界面图标清单
 #
 # 图标源：Material Design Icons (MDI) by Pictogrammers —— Apache License 2.0
 #   https://pictogrammers.com/library/mdi/
@@ -13,6 +13,7 @@ mdi/cloud-outline               ic_settings_provider
 mdi/chat-outline                ic_settings_chat
 mdi/palette-outline             ic_settings_appearance
 mdi/microphone-outline          ic_settings_voice
+mdi/backup-restore              ic_settings_backup
 mdi/information-outline         ic_settings_about
 
 # ── 子页内的分节图标 ──

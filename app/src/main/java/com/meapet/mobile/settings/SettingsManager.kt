@@ -263,6 +263,24 @@ class SettingsManager internal constructor(
     fun getApiKey(): String = currentPrefs()[KEY_API_KEY] ?: ""
     fun getApiUrl(): String = currentPrefs()[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL
 
+    /**
+     * 备份导出：读取 DataStore 原始快照（只读）。
+     *
+     * 导出只包含用户实际写过的键，因此需要原始快照而不是逐项 getter（避免把默认值物化）。
+     * **仅供备份模块使用**；业务代码请用上方的类型化 getter。
+     */
+    fun rawSnapshot(): Preferences = currentPrefs()
+
+    /**
+     * 备份导入：在一个 DataStore 事务里批量修改设置，并同步内存快照。
+     *
+     * 传进来的编辑器只能触碰备份白名单内的键（由调用方 [com.meapet.mobile.backup.SettingsWhitelist]
+     * 保证），避免导入把运行时状态键一起覆盖。**仅供备份模块使用**。
+     */
+    suspend fun editRaw(transform: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
+        cachedPrefs = dataStore.edit { prefs -> transform(prefs) }
+    }
+
     /** Read endpoint and credential from one preferences snapshot. */
     internal fun getApiConnection(): ApiConnection {
         val prefs = currentPrefs()

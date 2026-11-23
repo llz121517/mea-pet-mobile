@@ -238,6 +238,9 @@ dependencies {
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.ktor.client.logging)
 
+    // zip4j：备份包 AES-256 加密 zip（导出/导入），Apache-2.0，见 NOTICE.md
+    implementation(libs.zip4j)
+
     // Kotlinx Serialization (for OpenAI client)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)

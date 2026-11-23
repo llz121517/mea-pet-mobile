@@ -69,6 +69,7 @@ private enum class SettingsPage(val title: String) {
     CHAT("对话"),
     APPEARANCE("外观"),
     VOICE("语音"),
+    DATA("数据与备份"),
     ABOUT("关于"),
     POLICY("隐私政策"),
 }
@@ -232,6 +233,11 @@ fun SettingsScreen(
                         SettingsCard { TtsSection(state, settingsViewModel, darkTheme) }
                     }
 
+                    // 数据与备份：导出 / 导入两个可折叠块，内部自带卡片标题与回执区
+                    SettingsPage.DATA -> {
+                        SettingsCard { DataSettings() }
+                    }
+
                     SettingsPage.ABOUT -> {
                         SettingsCard { AppInfoSection() }
                         SettingsCard { UpdateSection(state, settingsViewModel, darkTheme) }
@@ -256,7 +262,7 @@ fun SettingsScreen(
     }
 }
 
-/** 入口列表：五个功能域，每项显示当前状态摘要。 */
+/** 入口列表：六个功能域，每项显示当前状态摘要。 */
 @Composable
 private fun RootPage(
     state: SettingsUiState,
@@ -284,6 +290,11 @@ private fun RootPage(
             iconRes = R.drawable.ic_settings_voice,
             summary = if (state.ttsMainEnabled || state.ttsOverlayEnabled) "发声已开启"
                       else "发声已关闭"
+        ),
+        SettingsEntry(
+            page = SettingsPage.DATA,
+            iconRes = R.drawable.ic_settings_backup,
+            summary = "导出与导入设置、对话、记忆"
         ),
         SettingsEntry(
             page = SettingsPage.ABOUT,
