@@ -16,7 +16,7 @@ import java.io.File
  * [BackupInspector] 的纯 JVM 单测：用 zip4j 现场造包，验证「任一失败整包拒绝」的各条闸门，
  * 以及文本体积闸与二进制流式写盘。
  *
- * 造包与解包走同一把口令；错误口令/损坏场景都在同一条「口令错误或文件已损坏」文案上收敛。
+ * 造包与解包走同一把密码；错误密码/损坏场景都在同一条「密码错误或文件已损坏」文案上收敛。
  */
 @Suppress("NonAsciiCharacters")
 class BackupInspectorTest {
@@ -84,17 +84,53 @@ class BackupInspectorTest {
         assertArrayEquals(newBytes, target.readBytes())
     }
 
-    // ── 口令 / 损坏 ───────────────────────────────────
+    /**
+     * 回归：调用方在读包后立刻把密码数组清零（ViewModel 的密码生命周期要求），
+     * 之后再解业务条目必须仍然成功。
+     *
+     * zip4j 的 `ZipFile` 保存的是传入数组的引用，`open()` 若不复制密码，清零会直接
+     * 让后续 AES 解密失败——真机表现就是「读包成功、导入时所有类别都说包损坏」。
+     */
+    @Test
+    fun `调用方清零密码后仍能解出业务条目`() {
+        val settingsText = """{"values":{"theme_mode":"dark"}}"""
+        val chatText = """{"messages":[]}"""
+        val settingsBytes = settingsText.toByteArray(Charsets.UTF_8)
+        val chatBytes = chatText.toByteArray(Charsets.UTF_8)
+        val manifest = manifestOf(
+            register("files/settings", settingsBytes),
+            register("files/chat", chatBytes),
+        )
+        val file = writePackage(
+            dataEntries = listOf(
+                "files/settings" to settingsBytes,
+                "files/chat" to chatBytes,
+            ),
+            manifestText = manifest,
+        )
+
+        val callerPassword = password.copyOf()
+        val reader = BackupInspector.open(file, callerPassword)
+        // 模拟 ViewModel 读包成功后立刻清零自己持有的密码
+        callerPassword.fill('\u0000')
+
+        reader.use {
+            assertEquals(settingsText, it.extractText(BackupCategory.SETTINGS))
+            assertEquals(chatText, it.extractText(BackupCategory.CHAT))
+        }
+    }
+
+    // ── 密码 / 损坏 ───────────────────────────────────
 
     @Test
-    fun `口令错误统一按口令错误或文件已损坏拒绝且不泄露包内信息`() {
+    fun `密码错误统一按密码错误或文件已损坏拒绝且不泄露包内信息`() {
         val file = simpleSettingsPackage()
 
         val error = runCatching { BackupInspector.open(file, "wrong-password".toCharArray()) }
             .exceptionOrNull()
 
         assertTrue("应以 ManifestRejectException 拒绝，实际：$error", error is ManifestRejectException)
-        assertEquals("口令错误或文件已损坏", error!!.message)
+        assertEquals("密码错误或文件已损坏", error!!.message)
     }
 
     @Test
@@ -104,7 +140,7 @@ class BackupInspectorTest {
         val error = runCatching { BackupInspector.open(file, password) }.exceptionOrNull()
 
         assertTrue(error is ManifestRejectException)
-        assertEquals("口令错误或文件已损坏", error!!.message)
+        assertEquals("密码错误或文件已损坏", error!!.message)
     }
 
     @Test
@@ -115,7 +151,7 @@ class BackupInspectorTest {
         val error = runCatching { BackupInspector.open(broken, password) }.exceptionOrNull()
 
         assertTrue(error is ManifestRejectException)
-        assertEquals("口令错误或文件已损坏", error!!.message)
+        assertEquals("密码错误或文件已损坏", error!!.message)
     }
 
     // ── 结构 / 版本闸门 ───────────────────────────────
@@ -160,23 +196,69 @@ class BackupInspectorTest {
     }
 
     @Test
-    fun `未知路径的条目整包拒绝`() {
+    fun `未知但安全的条目被忽略而不是整包拒绝`() {
+        val settings = """{"values":{"theme_mode":"dark"}}""".toByteArray()
         val file = writePackage(
-            dataEntries = listOf("files/definitely_unknown" to "x".toByteArray()),
+            // 未来版本新增的类别 / 参考实现的 pet_form：本版本不认识，但路径形态合法
+            dataEntries = listOf(
+                "files/settings" to settings,
+                "files/definitely_unknown" to "x".toByteArray(),
+            ),
             manifestText = BackupFormat.encode(
                 BackupManifest(
                     format = BackupFormat.SUPPORTED_FORMAT,
                     createdAt = "2026-11-22T15:30:00Z",
-                    entries = emptyList(),
+                    entries = listOf(
+                        register("files/settings", settings),
+                        ManifestEntry(
+                            name = "definitely_unknown",
+                            schema = 1,
+                            bytes = 1,
+                            path = "files/definitely_unknown",
+                        ),
+                    ),
                 )
             ),
         )
 
-        assertRejected(file, BackupFormat.STRUCTURE_INCOMPLETE)
+        BackupInspector.open(file, password).use { reader ->
+            // 已知类别正常可读；未知条目只是没进 contents
+            assertEquals(setOf(BackupCategory.SETTINGS), reader.contents.categories)
+            assertEquals(
+                """{"values":{"theme_mode":"dark"}}""",
+                reader.extractText(BackupCategory.SETTINGS)
+            )
+        }
+    }
+
+    @Test
+    fun `越界路径仍然整包拒绝`() {
+        // 未知 ≠ 危险：含 `..`/空段/绝对路径的条目必须拒绝，否则等于允许路径穿越
+        listOf(
+            "files/../settings",
+            "files//settings",
+            "files/./settings",
+            "/files/settings",
+            "files\\settings",
+        ).forEach { path ->
+            val file = writePackage(
+                dataEntries = listOf(path to "x".toByteArray()),
+                manifestText = BackupFormat.encode(
+                    BackupManifest(
+                        format = BackupFormat.SUPPORTED_FORMAT,
+                        createdAt = "2026-11-22T15:30:00Z",
+                        entries = emptyList(),
+                    )
+                ),
+            )
+            assertRejected(file, BackupFormat.STRUCTURE_INCOMPLETE)
+        }
     }
 
     @Test
     fun `包内存在未登记条目时整包拒绝`() {
+        // 注意与「未知条目」区分：memory 是本版本**已知**的类别，却没在 manifest 登记，
+        // 说明包结构自相矛盾（可能被篡改），仍然整包拒绝。
         val settings = """{"values":{}}""".toByteArray()
         val memory = """{"items":[]}""".toByteArray()
         val manifest = manifestOf(register("files/settings", settings))

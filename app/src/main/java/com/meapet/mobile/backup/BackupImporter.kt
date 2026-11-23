@@ -75,8 +75,11 @@ object BackupImporter {
                 throw cancellation
             } catch (error: Exception) {
                 // 单个类别失败不影响其它类别：记录简短原因，继续下一个类别。
-                // 只记录异常类型，不记录 message/堆栈，避免日志带出对话正文或文件路径。
-                Log.w(TAG, "导入 ${category.entryName} 失败（${error::class.java.simpleName}）")
+                // 日志只写异常类型与消息（不含对话正文 / 文件路径 / 密码），便于真机排障。
+                Log.w(
+                    TAG,
+                    "导入 ${category.entryName} 失败（${error::class.java.simpleName}）：${error.message}"
+                )
                 failed[category] = failureReason(error)
             }
         }

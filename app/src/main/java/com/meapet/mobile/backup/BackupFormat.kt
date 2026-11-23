@@ -59,19 +59,32 @@ enum class BackupCategory(val entryName: String, val label: String) {
          *
          * 只接受两种形态：`files/<entry>`（文本条目）与 `files/wallpaper/<name>`
          * （壁纸二进制）。任何多余层级、空段、`.`/`..` 段、反斜杠、绝对路径、
-         * 超长路径都返回 null，由调用方按「未知路径」整包拒绝。
+         * 超长路径都返回 null；调用方用 [isIllegalPath] 区分「越界（整包拒绝）」
+         * 与「未知但安全（忽略）」。
          */
         fun fromPath(path: String): BackupCategory? {
-            if (path.isEmpty() || path.length > BackupFormat.MAX_PATH_LENGTH) return null
-            if (path.startsWith('/') || path.contains('\\') || path.contains('\u0000')) return null
+            if (isIllegalPath(path)) return null
             val segments = path.split('/')
             if (segments.size < 2 || segments[0] != BackupFormat.FILES_DIR) return null
-            if (segments.any { it.isEmpty() || it == "." || it == ".." }) return null
             val category = fromEntryName(segments[1]) ?: return null
             return when (category) {
                 BackupCategory.WALLPAPER -> if (segments.size == 3) category else null
                 else -> if (segments.size == 2) category else null
             }
+        }
+
+        /**
+         * 路径是否**危险**（越界 / 畸形）。
+         *
+         * 与「未知但安全」区分开：未知条目（如未来版本新增的类别、参考实现的 `pet_form`）
+         * 只是本版本不认识，忽略即可；而越界路径意味着有人在构造恶意包，必须整包拒绝。
+         */
+        fun isIllegalPath(path: String): Boolean {
+            if (path.isEmpty() || path.length > BackupFormat.MAX_PATH_LENGTH) return true
+            if (path.startsWith('/') || path.contains('\\') || path.contains('\u0000')) return true
+            val segments = path.split('/')
+            if (segments.size < 2 || segments[0] != BackupFormat.FILES_DIR) return true
+            return segments.any { it.isEmpty() || it == "." || it == ".." }
         }
     }
 }

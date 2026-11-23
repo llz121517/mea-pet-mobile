@@ -12,18 +12,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -37,7 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -45,10 +40,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material3.SnackbarHostState
 import com.meapet.mobile.R
 import com.meapet.mobile.backup.BackupCategory
+import com.meapet.mobile.backup.BackupCounter
 import com.meapet.mobile.backup.BackupExporter
 import com.meapet.mobile.backup.BackupService
+import com.meapet.mobile.backup.ImportCount
+import com.meapet.mobile.ui.component.showDismissableSnackbar
 import com.meapet.mobile.viewmodel.BackupUiState
 import com.meapet.mobile.viewmodel.BackupViewModel
 import java.time.Instant
@@ -59,54 +58,39 @@ import java.time.format.DateTimeFormatter
 //  数据与备份：导出（加密 zip）、导入（按类别覆盖恢复）
 // ═══════════════════════════════════════════════════
 
+/** 弱密码提示阈值：短于该长度只提示不拦截（用户自担风险，见 PRD §2 / §8）。 */
+private const val MIN_PASSWORD_LENGTH = 6
+
 /**
  * 「数据与备份」页内容。
  *
  * 由 [SettingsScreen] 的滚动 Column 承载，外包一层 `SettingsCard`，因此本函数
- * **不套 Scaffold**、不自己滚动；「导出」「导入」两个可折叠块共用顶部的回执区。
+ * **不套 Scaffold**、不自己滚动；导出 / 导入的回执经 [snackbarHostState] 以 Snackbar 呈现。
  *
- * 口令生命周期：只存在本函数的 `remember` 里（不 saveable、不进 ViewModel 状态）；
+ * 密码生命周期：只存在本函数的 `remember` 里（不 saveable、不进 ViewModel 状态）；
  * 导出时跨 SAF 往返用的 [CharArray] 在结果回调里立刻清零，ViewModel 内部也会清零。
  */
 @Composable
-internal fun DataSettings(viewModel: BackupViewModel = viewModel()) {
+internal fun DataSettings(
+    snackbarHostState: SnackbarHostState,
+    viewModel: BackupViewModel = viewModel()
+) {
     val state by viewModel.state.collectAsState()
-
-    // 本页没有 SettingsUiState，按当前 MaterialTheme 的实际明暗给开关配色
-    val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
     // 进页：清扫残留暂存包 + 刷新本机各类别可用性
     LaunchedEffect(Unit) { viewModel.onPageOpened() }
 
-    Text(
-        text = "把本机的设置、对话、记忆等数据打包成口令加密的 zip，换机或重装后按类别恢复。" +
-            "备份只写到你自己选择的位置，不经过网络。",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = ALPHA_MUTED_TEXT),
-        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-    )
-
-    if (state.busy) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "处理中…",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+    // 回执统一走 Snackbar：不占用页面纵向空间，也不跟折叠块抢位置。
+    // 用带 ✕ 的可关闭样式：回执看完即关，不用等它自己消失。
+    // showSnackbar 是挂起调用，必须等它结束（自动消失 / 点 ✕）再清回执——先清会让
+    // LaunchedEffect 以 key 变化重启并取消正在显示的 Snackbar。
+    LaunchedEffect(state.receipt) {
+        val message = state.receipt ?: return@LaunchedEffect
+        snackbarHostState.showDismissableSnackbar(message)
+        viewModel.dismissReceipt()
     }
 
-    // 共享回执区：导出 / 导入的成功、失败、取消都落在这里
-    ReceiptBlock(receipt = state.receipt, onDismiss = viewModel::dismissReceipt)
-
-    ExportBlock(state = state, viewModel = viewModel, darkTheme = darkTheme)
+    ExportBlock(state = state, viewModel = viewModel)
 
     HorizontalDivider(
         modifier = Modifier.padding(vertical = 8.dp),
@@ -116,55 +100,23 @@ internal fun DataSettings(viewModel: BackupViewModel = viewModel()) {
     ImportBlock(state = state, viewModel = viewModel)
 }
 
-// ── 共享：回执 ─────────────────────────────────────
-
-@Composable
-private fun ReceiptBlock(receipt: String?, onDismiss: () -> Unit) {
-    if (receipt == null) return
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 12.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = receipt,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(vertical = 6.dp)
-            )
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        }
-    }
-}
-
 // ── 导出 ───────────────────────────────────────────
 
 @Composable
 private fun ExportBlock(
     state: BackupUiState,
-    viewModel: BackupViewModel,
-    darkTheme: Boolean
+    viewModel: BackupViewModel
 ) {
     var expanded by remember { mutableStateOf(false) }
     var password by remember { mutableStateOf("") }
     var passwordConfirm by remember { mutableStateOf("") }
     var showNotice by remember { mutableStateOf(false) }
 
-    /** 跨 SAF 往返暂存的口令；回调里交给 ViewModel 后立即清零。 */
+    /** 跨 SAF 往返暂存的密码；回调里交给 ViewModel 后立即清零。 */
     var pendingPassword by remember { mutableStateOf<CharArray?>(null) }
 
     val passwordMismatch = passwordConfirm.isNotEmpty() && password != passwordConfirm
-    val passwordTooShort = password.isNotEmpty() && password.length < 8
+    val passwordTooShort = password.isNotEmpty() && password.length < MIN_PASSWORD_LENGTH
     val canExport = !state.busy &&
         state.exportSelection.isNotEmpty() &&
         password.isNotEmpty() &&
@@ -176,7 +128,7 @@ private fun ExportBlock(
     ) { uri ->
         val carried = pendingPassword
         pendingPassword = null
-        // 无论写出还是取消，口令都不再留在界面里
+        // 无论写出还是取消，密码都不再留在界面里
         password = ""
         passwordConfirm = ""
         if (uri == null || carried == null) {
@@ -190,7 +142,7 @@ private fun ExportBlock(
 
     ExpandableHeader(
         title = "导出",
-        subtitle = "把勾选的数据打包成加密 zip",
+        subtitle = "把选择的数据打包成加密 zip",
         expanded = expanded,
         enabled = !state.busy,
         onToggle = { expanded = !expanded }
@@ -199,18 +151,22 @@ private fun ExportBlock(
     SettingsExpandableContent(visible = expanded) {
         Column(Modifier.fillMaxWidth()) {
             Text(
-                text = "选择要写进备份包的数据；未勾选的类别不会出现在包里。",
+                text = "选择要写入备份包的数据；未勾选的类别不会进入包内。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
                     .copy(alpha = ALPHA_MUTED_TEXT),
                 modifier = Modifier.padding(bottom = 4.dp)
             )
 
+            // API Key 存放在 settings 条目内，所以紧贴「设置」行展示（见下方 forEach 内的分支）；
+            // 「设置」未勾选时它没有落地位置 → 置灰并说明原因，避免误以为单独勾 Key 就会进包。
+            val settingsExported = BackupCategory.SETTINGS in state.exportSelection
+
             BackupCategory.entries.forEach { category ->
                 val available = category in state.available
                 CategoryCheckRow(
                     label = category.label,
-                    status = if (available) "有内容" else "本机这一类还没有东西",
+                    status = if (available) "有内容" else "本机这类还没有东西",
                     statusColor = if (available) {
                         MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
                     } else {
@@ -221,25 +177,29 @@ private fun ExportBlock(
                     enabled = !state.busy,
                     onCheckedChange = { viewModel.toggleExportCategory(category) }
                 )
+                // 「设置」的可选内容：API Key（与类别同样的勾选条目）
+                if (category == BackupCategory.SETTINGS) {
+                    CategoryCheckRow(
+                        label = "API Key",
+                        status = when {
+                            !settingsExported -> "需先勾选「设置」"
+                            state.includeApiKeys -> "随设置写入"
+                            else -> "默认不包含"
+                        },
+                        statusColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            .copy(alpha = ALPHA_MUTED_TEXT),
+                        checked = state.includeApiKeys,
+                        enabled = !state.busy && settingsExported,
+                        onCheckedChange = { viewModel.setIncludeApiKeys(!state.includeApiKeys) }
+                    )
+                }
             }
 
-            Spacer(Modifier.height(4.dp))
-
-            // API Key 默认不进包；勾选后随设置条目一起写入
-            SettingsSwitchRow(
-                label = "包含 API Key",
-                description = "默认不包含。勾选后聊天 / 联网服务的 Key 会写进设置条目。",
-                checked = state.includeApiKeys,
-                darkTheme = darkTheme,
-                onCheckedChange = { viewModel.setIncludeApiKeys(it) },
-                enabled = !state.busy
-            )
-
             Spacer(Modifier.height(8.dp))
-            SectionTitle("备份口令")
+            SectionTitle("备份密码")
 
             Text(
-                text = "口令用于加密备份包，至少 8 位；忘记口令将无法再打开这个包。",
+                text = "密码用于加密备份包；忘记密码将无法再打开这个包。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
                     .copy(alpha = ALPHA_MUTED_TEXT),
@@ -249,7 +209,7 @@ private fun ExportBlock(
             PasswordField(
                 value = password,
                 onValueChange = { password = it },
-                label = "口令",
+                label = "密码",
                 enabled = !state.busy,
                 isError = false,
                 supportingText = null
@@ -260,15 +220,15 @@ private fun ExportBlock(
             PasswordField(
                 value = passwordConfirm,
                 onValueChange = { passwordConfirm = it },
-                label = "再次输入口令",
+                label = "再次输入密码",
                 enabled = !state.busy,
                 isError = passwordMismatch,
-                supportingText = if (passwordMismatch) "两次输入的口令不一致" else null
+                supportingText = if (passwordMismatch) "两次输入的密码不一致" else null
             )
 
             if (passwordTooShort) {
                 Text(
-                    text = "口令短于 8 位，更容易被猜到（仍可继续）。",
+                    text = "密码短于 $MIN_PASSWORD_LENGTH 位，更容易被猜到。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f),
                     modifier = Modifier.padding(top = 4.dp)
@@ -284,13 +244,6 @@ private fun ExportBlock(
             ) {
                 Text("导出…")
             }
-            Text(
-                text = "导出前会先提醒包里有什么，确认后才打开系统保存面板。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-                    .copy(alpha = ALPHA_FAINT_TEXT),
-                modifier = Modifier.padding(top = 4.dp)
-            )
         }
     }
 
@@ -301,7 +254,7 @@ private fun ExportBlock(
             onDismiss = { showNotice = false },
             onConfirm = {
                 showNotice = false
-                // 口令转为 CharArray 暂存，跨 SAF 往返后交给 ViewModel（其内部用后清零）
+                // 密码转为 CharArray 暂存，跨 SAF 往返后交给 ViewModel（其内部用后清零）
                 pendingPassword = password.toCharArray()
                 createDocument.launch(
                     BackupExporter.defaultFileName(BackupService.utcCompactNow())
@@ -311,7 +264,7 @@ private fun ExportBlock(
     }
 }
 
-/** 「包里有什么」告知弹窗：列出勾选类别与「口令遗忘无法找回」。 */
+/** 「确认导出数据」弹窗：列出勾选类别与「密码遗忘无法找回」。 */
 @Composable
 private fun ExportNoticeDialog(
     selection: Set<BackupCategory>,
@@ -321,10 +274,10 @@ private fun ExportNoticeDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("包里有什么") },
+        title = { Text("确认导出数据") },
         text = {
             Column {
-                Text("将把以下数据加密写进备份包：")
+                Text("将把以下数据加密写入备份包：")
                 Spacer(Modifier.height(8.dp))
                 val chosen = BackupCategory.entries.filter { it in selection }
                 if (chosen.isEmpty()) {
@@ -338,12 +291,12 @@ private fun ExportNoticeDialog(
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "备份包用你设置的口令加密。口令遗忘无法找回，包将无法恢复。",
+                    text = "密码遗忘无法找回，备份包将无法恢复。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "备份文件会写到你在下一步选择的位置，应用不保留副本。",
+                    text = "备份文件写到你在下一步选择的位置，应用不保留副本。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -373,7 +326,7 @@ private fun ImportBlock(
     val staged = state.staged
     val context = LocalContext.current
 
-    // 读取成功后包已解密打开，口令不再需要留在界面里
+    // 读取成功后包已解密打开，密码不再需要留在界面里
     LaunchedEffect(staged) {
         if (staged != null) password = ""
     }
@@ -403,8 +356,8 @@ private fun ImportBlock(
     SettingsExpandableContent(visible = expanded) {
         Column(Modifier.fillMaxWidth()) {
             Text(
-                text = "先选择备份包并输入口令读取，确认包里有什么之后再恢复。" +
-                    "恢复会按类别整体覆盖本机现有数据，无法撤销。",
+                text = "选择备份包并输入密码读取，确认内容后再恢复；" +
+                    "恢复会按类别整体覆盖本机数据，无法撤销。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
                     .copy(alpha = ALPHA_MUTED_TEXT),
@@ -426,7 +379,7 @@ private fun ImportBlock(
             if (pickedUri != null && staged == null) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "已选择备份包。输入口令后点「读取备份」校验包内容（口令错误不会透露包内信息）。",
+                    text = "已选择备份包。输入密码后点「读取备份」校验内容。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -434,7 +387,7 @@ private fun ImportBlock(
                 PasswordField(
                     value = password,
                     onValueChange = { password = it },
-                    label = "备份口令",
+                    label = "密码",
                     enabled = !state.busy,
                     isError = false,
                     supportingText = null
@@ -472,7 +425,7 @@ private fun ImportBlock(
                     )
                 }
                 Text(
-                    text = "只显示包里实际存在的类别；勾选要恢复到本机的类别。",
+                    text = "只显示包内实际存在的类别；勾选要恢复的类别。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                         .copy(alpha = ALPHA_FAINT_TEXT),
@@ -483,13 +436,21 @@ private fun ImportBlock(
                     .filter { it in staged.categories }
                     .forEach { category ->
                         val entry = staged.entries[category]
+                        val count = state.counts[category]
                         CategoryCheckRow(
                             label = category.label,
-                            status = entry?.let {
-                                "共 " + android.text.format.Formatter.formatShortFileSize(
-                                    context, it.bytes
+                            // 统一显示包内大小；对话 / 记忆再补「本机 → 包内」条数
+                            status = buildString {
+                                append(
+                                    entry?.let {
+                                        "共 " + android.text.format.Formatter
+                                            .formatShortFileSize(context, it.bytes)
+                                    } ?: "已包含"
                                 )
-                            } ?: "已包含",
+                                if (count != null) {
+                                    append(" · ${count.local} → ${count.inPackage} 条")
+                                }
+                            },
                             statusColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 .copy(alpha = ALPHA_MUTED_TEXT),
                             checked = category in state.importSelection,
@@ -524,6 +485,7 @@ private fun ImportBlock(
         ImportConfirmDialog(
             selection = state.importSelection,
             available = staged.categories,
+            counts = state.counts,
             onDismiss = { showConfirm = false },
             onConfirm = {
                 showConfirm = false
@@ -533,11 +495,12 @@ private fun ImportBlock(
     }
 }
 
-/** 导入前的强制确认弹窗：逐项点名「将覆盖本机的 X」。 */
+/** 导入前的强制确认弹窗：逐项点名「将覆盖本机的 X」，对话 / 记忆另给条数对比。 */
 @Composable
 private fun ImportConfirmDialog(
     selection: Set<BackupCategory>,
     available: Set<BackupCategory>,
+    counts: Map<BackupCategory, ImportCount>,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
@@ -547,16 +510,37 @@ private fun ImportConfirmDialog(
         title = { Text("确认恢复数据") },
         text = {
             Column {
-                Text("以下类别的本机现有数据将被备份包中的内容整体覆盖，且无法撤销：")
+                Text("以下类别的本机数据将被备份包内容整体覆盖，无法撤销：")
                 Spacer(Modifier.height(8.dp))
                 if (chosen.isEmpty()) {
                     Text("（没有勾选任何类别）")
                 } else {
                     chosen.forEach { Text("· 将覆盖本机的${it.label}") }
                 }
+                // 条数对比：对话 / 记忆按条数计，明确写出「本机 → 包内」以免误覆盖
+                val compared = BackupCounter.countedCategories.mapNotNull { category ->
+                    if (category !in chosen) return@mapNotNull null
+                    val count = counts[category] ?: return@mapNotNull null
+                    category to count
+                }
+                if (compared.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "条数对比（本机 → 包内）：",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    compared.forEach { (category, count) ->
+                        Text(
+                            text = "· ${category.label}：${count.local} → ${count.inPackage}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "恢复后部分设置（如外观）可能需要重新进入设置页才完全生效。",
+                    text = "部分设置（如外观）可能需重新进入设置页才生效。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -658,7 +642,7 @@ private fun CategoryCheckRow(
     }
 }
 
-/** 口令输入框（掩码显示；不提供明文切换，减少口令在屏幕上停留的机会）。 */
+/** 密码输入框（掩码显示；不提供明文切换，减少密码在屏幕上停留的机会）。 */
 @Composable
 private fun PasswordField(
     value: String,

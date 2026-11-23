@@ -233,9 +233,9 @@ fun SettingsScreen(
                         SettingsCard { TtsSection(state, settingsViewModel, darkTheme) }
                     }
 
-                    // 数据与备份：导出 / 导入两个可折叠块，内部自带卡片标题与回执区
+                    // 数据与备份：导出 / 导入两个可折叠块，回执走页面级 Snackbar
                     SettingsPage.DATA -> {
-                        SettingsCard { DataSettings() }
+                        SettingsCard { DataSettings(snackbarHostState = snackbarHostState) }
                     }
 
                     SettingsPage.ABOUT -> {

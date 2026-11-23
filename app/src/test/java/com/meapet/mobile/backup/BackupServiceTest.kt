@@ -37,7 +37,7 @@ class BackupServiceTest {
     @Test
     fun `utcCompactNow 生成的文件名可用作默认导出名`() {
         val name = BackupExporter.defaultFileName(BackupService.utcCompactNow())
-        assertTrue("实际文件名：$name", name.matches(Regex("\\d{8}T\\d{6}Z_MeaPet-Android\\.zip")))
+        assertTrue("实际文件名：$name", name.matches(Regex("\\d{8}T\\d{6}Z_MeaPet-backup\\.zip")))
     }
 
     @Test

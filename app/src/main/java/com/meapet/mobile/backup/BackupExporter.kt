@@ -19,8 +19,8 @@ object BackupExporter {
     /** manifest 在包内的固定路径。 */
     const val MANIFEST_ENTRY = BackupFormat.MANIFEST_ENTRY
 
-    /** 默认文件名：`<UTC紧凑>_MeaPet-Android.zip`。 */
-    fun defaultFileName(utcCompact: String): String = "${utcCompact}_MeaPet-Android.zip"
+    /** 默认文件名：`<UTC紧凑>_MeaPet-backup.zip`。 */
+    fun defaultFileName(utcCompact: String): String = "${utcCompact}_MeaPet-backup.zip"
 
     /**
      * 写出整个包。
@@ -30,9 +30,9 @@ object BackupExporter {
      *
      * @param items 待写条目（顺序即包内顺序）
      * @param manifest 与之对应的 manifest（在条目之后收尾写出）
-     * @param password 口令（调用方负责用后清零）
+     * @param password 密码（调用方负责用后清零）
      * @param sink SAF 给的目标输出流；本函数会关闭它
-     * @throws net.lingala.zip4j.exception.ZipException zip4j 写失败（口令为空、参数非法等）
+     * @throws net.lingala.zip4j.exception.ZipException zip4j 写失败（密码为空、参数非法等）
      * @throws java.io.IOException 目标流写失败
      */
     fun export(
@@ -41,7 +41,7 @@ object BackupExporter {
         password: CharArray,
         sink: OutputStream,
     ) {
-        // 构造失败（如口令为空）时也要关闭 SAF 目标流，避免泄漏系统句柄
+        // 构造失败（如密码为空）时也要关闭 SAF 目标流，避免泄漏系统句柄
         val zip = try {
             ZipOutputStream(sink, password)
         } catch (t: Throwable) {
@@ -78,7 +78,7 @@ object BackupExporter {
         }
     }
 
-    /** 统一的加密参数：AES-256；清空口令/非法参数由 zip4j 抛 ZipException。 */
+    /** 统一的加密参数：AES-256；清空密码/非法参数由 zip4j 抛 ZipException。 */
     private fun parameters(path: String, compressionMethod: CompressionMethod): ZipParameters =
         ZipParameters().apply {
             setFileNameInZip(path)

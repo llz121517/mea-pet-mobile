@@ -26,7 +26,7 @@ import java.nio.file.Files
  *
  * 用内存替身代替 SQLite / DataStore（真实 SQLite 事务语义另有
  * `SqliteMemoryStoreTest` / `SqliteConversationRepositoryTest` 覆盖），
- * 这里验证的是**数据在包内往返后语义不变**，以及口令、壁纸路径、压缩游标等跨类别联动。
+ * 这里验证的是**数据在包内往返后语义不变**，以及密码、壁纸路径、压缩游标等跨类别联动。
  */
 @Suppress("NonAsciiCharacters")
 class BackupRoundTripTest {
@@ -107,7 +107,7 @@ class BackupRoundTripTest {
         }
         assertTrue("导出包不应为空", zip.length() > 0)
 
-        // ── 口令错误整包拒绝 ──
+        // ── 密码错误整包拒绝 ──
         assertThrows(ManifestRejectException::class.java) {
             BackupInspector.open(zip, "wrong-password".toCharArray())
         }
