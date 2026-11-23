@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +41,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import androidx.compose.material3.SnackbarHostState
 import com.meapet.mobile.R
 import com.meapet.mobile.backup.BackupCategory
@@ -76,18 +78,25 @@ internal fun DataSettings(
     viewModel: BackupViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
+    // 回执的展示放在页面作用域里：它不依赖 LaunchedEffect 的 key，所以「先消费」不会
+    // 取消正在显示的 Snackbar（见下方说明）。
+    val snackbarScope = rememberCoroutineScope()
 
     // 进页：清扫残留暂存包 + 刷新本机各类别可用性
     LaunchedEffect(Unit) { viewModel.onPageOpened() }
 
-    // 回执统一走 Snackbar：不占用页面纵向空间，也不跟折叠块抢位置。
-    // 用带 ✕ 的可关闭样式：回执看完即关，不用等它自己消失。
-    // showSnackbar 是挂起调用，必须等它结束（自动消失 / 点 ✕）再清回执——先清会让
-    // LaunchedEffect 以 key 变化重启并取消正在显示的 Snackbar。
+    // 回执是**一次性事件**：先消费（清空 state.receipt）再展示。
+    //
+    // 反过来「等 showSnackbar 返回再清」会有重放 bug：Snackbar 自动消失要几秒，
+    // 期间离开页面会取消 LaunchedEffect，dismissReceipt() 就不执行；下次进入该页时
+    // LaunchedEffect(state.receipt) 以同一个非空 key 重新执行，旧回执再弹一遍。
+    //
+    // 先清空会让 LaunchedEffect 的 key 立刻变化并重启（本次协程被取消），所以真正的
+    // 展示必须交给独立作用域，不能写在 effect 体内。
     LaunchedEffect(state.receipt) {
         val message = state.receipt ?: return@LaunchedEffect
-        snackbarHostState.showDismissableSnackbar(message)
         viewModel.dismissReceipt()
+        snackbarScope.launch { snackbarHostState.showDismissableSnackbar(message) }
     }
 
     ExportBlock(state = state, viewModel = viewModel)
@@ -326,9 +335,16 @@ private fun ImportBlock(
     val staged = state.staged
     val context = LocalContext.current
 
-    // 读取成功后包已解密打开，密码不再需要留在界面里
+    // 包被清空（读取成功后被导入消费，或用户点「关闭」）时，同步清掉页面上的选择与密码：
+    // 否则「导入」按钮仍指向一个已经不存在的包，界面也显示着旧文件名。
     LaunchedEffect(staged) {
-        if (staged != null) password = ""
+        if (staged == null) {
+            pickedUri = null
+            password = ""
+        } else {
+            // 读取成功后包已解密打开，密码不再需要留在界面里
+            password = ""
+        }
     }
 
     // 文件选择面板：mime 放宽到 */*，避免不同文件管理器给的 mime 不一致

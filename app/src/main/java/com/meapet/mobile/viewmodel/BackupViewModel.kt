@@ -319,7 +319,12 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
                     refreshAvailability()
                     result
                 }
-                _state.update { it.copy(busy = false, receipt = importReceipt(outcome)) }
+                // 导入已落地：待导入包的生命周期到此结束——关闭 zip 句柄、删暂存文件、
+                // 清空清单与勾选，避免用户以为「还选着那个包」或重复点一次导入。
+                // 回执文案在清空之后再写，否则会被 clearStaged 的 state 更新覆盖掉。
+                val receipt = importReceipt(outcome)
+                clearStaged()
+                _state.update { it.copy(busy = false, receipt = receipt) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
