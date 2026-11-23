@@ -27,7 +27,7 @@
 ## 2. 包结构
 
 ```
-<UTC紧凑>_MeaPet-Android.zip           ← AES-256 加密（zip4j）
+<UTC紧凑>_MeaPet-backup.zip           ← AES-256 加密（zip4j）
 ├── manifest.json
 └── files/
     ├── settings                        JSON
@@ -56,7 +56,7 @@
 - `format`：包级格式版本；`entries[].schema`：条目级版本。**两者都必须等于支持值**，不等即整包拒绝。
 - `appVersion`：本项目补充，便于排障；读取方忽略未知字段。
 - 只登记实际写出的条目（未勾选的类别不出现）。
-- `bytes` 仅用于 UI 展示与合理性对账，不做逐条目 hash（zip 口令已提供完整性校验）。
+- `bytes` 仅用于 UI 展示与合理性对账，不做逐条目 hash（zip 密码已提供完整性校验）。
 
 ### 2.2 各条目内部结构
 
@@ -178,7 +178,7 @@
 ## 3. 模块设计
 
 > **实现状态（2026-11-23）**：本文已按实现同步。较早草稿中的 `BackupInspector.inspect()` /
-> `BackupTargetSetters` 等形态已由下方实际接口取代（`open()` 返回 `BackupContentReader`，口令不进 UI 状态）。
+> `BackupTargetSetters` 等形态已由下方实际接口取代（`open()` 返回 `BackupContentReader`，密码不进 UI 状态）。
 
 ```
 backup/
@@ -188,6 +188,7 @@ backup/
 ├── BackupCodec.kt         各条目 JSON 模型与编解码（ChatPayload/MemoryPayload/CompactionPayload）
 ├── BackupContract.kt      BackupItem、BackupSources、BackupTarget、SettingsSink
 ├── BackupCollector.kt     类别 + 数据源 → List<BackupItem>（Text / FileSource）+ manifest
+├── BackupCounter.kt       导入前条数对比：对话 / 记忆的「本机 → 包内」条数
 ├── BackupExporter.kt      逐条目 AES-256 流式写出 + manifest 收尾
 ├── BackupInspector.kt     读包 + 两级版本校验 + 文本条目内存闸（返回 BackupContentReader）
 ├── BackupImporter.kt      按类别事务化落地
@@ -257,7 +258,7 @@ sealed interface BackupItem {
 
 object BackupExporter {
     const val MANIFEST_ENTRY = "manifest.json"
-    fun defaultFileName(utcCompact: String): String        // <utc>_MeaPet-Android.zip
+    fun defaultFileName(utcCompact: String): String        // <utc>_MeaPet-backup.zip
     fun export(items: List<BackupItem>, manifest: BackupManifest,
                password: CharArray, sink: OutputStream)
 }
@@ -267,7 +268,7 @@ object BackupExporter {
 - 用 zip4j 的 `io.outputstream.ZipOutputStream(OutputStream, char[])`（**`ZipFile` 没有 OutputStream 构造器**），逐条目 `putNextEntry(ZipParameters)` → `write` → `closeEntry`，最后写 manifest。
 - `ZipParameters`：AES-256（`EncryptionMethod.AES` / `AesKeyStrength.KEY_STRENGTH_256`）、`setFileNameInZip(path)`、图片用 `STORE`（已压缩），文本用 `DEFLATE`。**写入任一流的 `STORE` 条目必须 `setEntrySize(...)`**（zip4j 不能回填大小，否则 `putNextEntry` 抛 "uncompressed size should be set"）。
 - 明文不落盘：文本在内存、图片直读源文件进加密流。
-- 包里**不含**口令、不含设备标识。
+- 包里**不含**密码、不含设备标识。
 
 ### 3.3 Inspector
 
@@ -291,15 +292,23 @@ object BackupInspector {
 }
 ```
 
-口令不落 UI 状态：zip 句柄与口令由 `BackupContentReader` 私有持有，`BackupUiState` 只放
+密码不落 UI 状态：zip 句柄与密码由 `BackupContentReader` 私有持有，`BackupUiState` 只放
 `contents`（元信息）。读取器在重新选包 / 关闭 / `onCleared` 时 `close()`。
 
-校验顺序（任一失败整包拒绝）：
-1. 能打开（口令错 → 「口令错误或文件已损坏」）。
+校验顺序（前四条任一失败整包拒绝）：
+1. 能打开（密码错 → 「密码错误或文件已损坏」）。
 2. 有且只有一个 `manifest.json`（读取上限 1 MiB）且可解析。
 3. `format == SUPPORTED_FORMAT`。
-4. 每个 zip 条目：路径能归入已知类别（未知路径拒绝）、manifest 有登记且 name/path 一致、`schema` 匹配。
-5. 一个类别只允许出现一次；manifest 登记数必须等于包内条目数（缺条目拒绝）。
+4. **路径越界/畸形**（`..`、空段、`.`、绝对路径、反斜杠、超长）→ 拒绝（安全底线）。
+5. 已知条目：manifest 有登记且 name/path 一致、`schema` 匹配；一个类别只允许出现一次。
+6. **未知但安全的条目**（本版本不认识的类别名，如未来新增类别或参考实现的 `pet_form`）：
+   **静默忽略 + logcat 警告**（`BackupInspector` 的 `忽略未知备份条目：<path>`），不进
+   `BackupContents`。这样新版 App 导出的包在旧版仍可导入其余类别，而不是整包报废。
+7. manifest 登记数与包内条目数对账（两边都排除第 6 步已忽略的条目）：「登记了但包里没有」
+   或「包里已知条目未登记」都按结构不完整拒绝。
+
+> 取舍：**未知 ≠ 危险**。忽略未知条目是为了前向兼容；路径越界、已知类别未登记、schema
+> 不支持这些「自相矛盾或会危及本机」的情况仍然整包拒绝。
 
 **体积闸**：文本条目边读边计数，超 64 MiB 抛；二进制条目流式写盘不设上限（磁盘是边界）。
 
@@ -337,6 +346,26 @@ data class ImportOutcome(val succeeded: Set<BackupCategory>, val failed: Map<Bac
 
 失败语义：某类别失败时该类别回滚（事务），**其它类别按用户原本勾选继续**，回执里分别报告成功/失败类别。
 
+### 3.4.1 条数对比（BackupCounter）
+
+```kotlin
+data class ImportCount(val inPackage: Int, val local: Int)
+
+object BackupCounter {
+    val countedCategories = listOf(BackupCategory.CHAT, BackupCategory.MEMORY)
+    suspend fun compare(
+        reader: BackupContentReader,
+        target: BackupTarget,
+        selected: Set<BackupCategory> = reader.contents.categories,
+    ): Map<BackupCategory, ImportCount>
+}
+```
+
+- 只对**按条数计**的类别有意义：`chat` 是消息条数、`memory` 是记忆条目数；设置 / 压缩状态 / 壁纸各是一份整体数据，不参与。
+- 读包成功后立即算好（`inspectPackage` 内、与校验同一 IO 线程），随 `BackupContents` 一起进 `BackupUiState.counts`；
+  读包清单里每个类别显示「本机 → 包内」条数，强制确认弹窗再列一次，避免用户误判覆盖规模。
+- 单个类别解析失败只跳过该类别（不阻断读包）；真正的结构校验与拒绝仍在 `BackupInspector` / `BackupImporter`。
+
 ### 3.5 Service
 
 ```kotlin
@@ -362,14 +391,15 @@ data class BackupUiState(
     val includeApiKeys: Boolean = false,
     val staged: BackupContents? = null,                // 已校验的待导入包（只含元信息）
     val stagedFileName: String? = null,                // 备份包显示名（SAF 取不到时为 null）
+    val counts: Map<BackupCategory, ImportCount> = emptyMap(),  // 对话/记忆：本机 → 包内条数
     val importSelection: Set<BackupCategory> = emptySet(),
     val receipt: String? = null,
 )
 ```
 
-- 口令**不进状态、不落盘、不写日志**，只作为方法参数（用后 `fill('\u0000')`）或 `DataSettings` 的局部 `remember`。
-- 导出：`refreshAvailability()` → 勾选 → 口令两次 → 告知弹窗 → SAF → `runExport`。
-- 导入：SAF → `inspectPackage(uri, pwd)` → 展示清单 → 勾选 → 强制确认 → `runImport`。
+- 密码**不进状态、不落盘、不写日志**，只作为方法参数（用后 `fill('\u0000')`）或 `DataSettings` 的局部 `remember`。
+- 导出：`refreshAvailability()` → 勾选 → 密码两次 → 告知弹窗 → SAF → `runExport`。
+- 导入：SAF → `inspectPackage(uri, pwd)`（同时算好 `counts`）→ 展示清单（含条数对比）→ 勾选 → 强制确认（再列条数）→ `runImport`；`refreshCounts()` 可在停留期间按需重算。
 - 导入成功后：`ConversationManager.reloadWindowFromRepository()` 刷新内存窗口（使 UI 与模型上下文看到新数据）；
   若设置类别成功则 `AppContainer.reloadClient()` 让新端点 / Key / 模型立即生效。
 
@@ -387,7 +417,7 @@ data class BackupUiState(
 
 | 场景 | 文案要点 |
 |---|---|
-| 口令错误/包损坏 | 「口令错误或文件已损坏」——不区分二者，不泄露包内信息 |
+| 密码错误/包损坏 | 「密码错误或文件已损坏」——不区分二者，不泄露包内信息 |
 | format/schema 不支持 | 「这个备份由不支持的版本创建（format X，本应用支持 Y）」+ 建议升级 App |
 | 条目缺失/未登记 | 「备份包结构不完整」 |
 | 文本条目超限 | 「备份中的文本条目过大（超过 64 MiB）」 |
@@ -405,12 +435,13 @@ data class BackupUiState(
 | `SettingsWhitelistTest` | 白名单外的键不进包、Optional Key 三键受开关控制、只导出实际写过的键、类型正确性、未知/类型不符键在导入时忽略、null 上下文窗口清除 |
 | `BackupCodecTest` | chat/memory/compaction 往返、rawAssistantJson 与工具字段保留、损坏内容拒绝、未知字段忽略 |
 | `BackupCollectorTest` | 可用性判定、各类别条目与 manifest 对账、未勾选类别不进包、壁纸文件缺失时跳过 |
-| `BackupExporterTest` | 文本+文件混合写出、明文不出现在字节里、口令能解、错误口令打不开、manifest 条目数与实际一致 |
-| `BackupInspectorTest` | 正常包解析、口令错、缺 manifest、未登记条目、重复类别、未知路径、schema 不符、文本大小闸 |
+| `BackupExporterTest` | 文本+文件混合写出、明文不出现在字节里、密码能解、错误密码打不开、manifest 条目数与实际一致 |
+| `BackupInspectorTest` | 正常包解析、密码错、缺 manifest、未登记条目、重复类别、越界路径拒绝、未知安全条目忽略、schema 不符、文本大小闸 |
 | `BackupImporterTest` | 各类别覆盖（原有数据 / 空库两种）、单类别失败不影响其它、compaction 的 coveredToMessageId 失效重置、壁纸路径安全化、未勾选类别不动 |
-| `BackupRoundTripTest` | 全类别导出→导入→比对：消息、记忆、设置、压缩状态、壁纸字节；错误口令拒绝 |
+| `BackupCounterTest` | 对话 / 记忆的「本机 → 包内」条数、空库与空包为 0、非条数类别不参与、条目损坏时跳过该类别 |
+| `BackupRoundTripTest` | 全类别导出→导入→比对：消息、记忆、设置、压缩状态、壁纸字节；错误密码拒绝 |
 | `BackupServiceTest` | 文件名生成（UTC 紧凑）、暂存目录清扫 |
-| 安全 | 全流程日志不含口令、Key、对话正文（代码审查 + grep 断言） |
+| 安全 | 全流程日志不含密码、Key、对话正文（代码审查 + grep 断言） |
 
 ---
 
@@ -423,7 +454,7 @@ data class BackupUiState(
 5. `BackupService` + `AppContainer` 装配。
 6. `BackupViewModel` + `DataSettings` UI。
 7. `NOTICE.md` 补 zip4j、隐私政策补备份章节、`docs/README.md` 登记本文、CHANGELOG 补条目。
-8. 真机验收：导出→改数据→导入→核对；错误口令；取消路径；大壁纸。
+8. 真机验收：导出→改数据→导入→核对；错误密码；取消路径；大壁纸。
 
 ---
 
@@ -432,7 +463,7 @@ data class BackupUiState(
 | 风险 | 对策 |
 |---|---|
 | 导入把库写坏 | 按类别事务 + 导入前取快照（可选：提供「导入前自动导出一次」作为无痛兜底） |
-| 口令遗忘导致包报废 | UI 明示「无法找回」；弱口令只提示不拦（用户自担） |
+| 密码遗忘导致包报废 | UI 明示「无法找回」；弱密码只提示不拦（用户自担） |
 | zip4j 的 API 与直觉不符 | 已在 §3.2 写明：只有 `ZipOutputStream` 能往任意流写；`STORE` 条目必须 `setEntrySize(...)`；`ZipParameters` 无 `isCompressed` |
 | 未来新增设置键被意外导出 | 白名单是显式枚举，新增键默认不进包，有单测守护 |
 | 未来备份格式升级 | 遵循 `docs/legacy-compat.md` §8：格式升级与导入兼容 step 同步提供 |
