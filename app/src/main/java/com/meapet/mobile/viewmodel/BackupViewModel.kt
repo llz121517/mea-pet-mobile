@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.IOException
 
 /**
@@ -74,6 +75,15 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
 
     /** 已校验包的读取器：持解密后的 zip 句柄，**不放进 UI 状态**，用完必须 close。 */
     private var reader: BackupContentReader? = null
+
+    /**
+     * 当前待导入包的暂存文件（`cacheDir/backup/import_*.zip`）。
+     *
+     * 与 reader 同生命周期：`clearStaged()` / 重新读包 / `onCleared()` 时随 reader 一起删除，
+     * 否则每次导入都会在 cache 里留一份解密前的包副本（真机验证时发现过残留）。
+     * 注意不能在导入完成前删——zip4j 每次取条目流都按路径重新打开文件。
+     */
+    private var stagedFile: File? = null
 
     // ── 页面生命周期 ─────────────────────────────────
 
@@ -213,23 +223,29 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         }
         val job = viewModelScope.launch {
             try {
-                val (opened, fileName, counts) = withContext(Dispatchers.IO) {
+                val opened = withContext(Dispatchers.IO) {
                     closeReader()
                     val stageFile = container.backupService.stageForRead(uri)
                     val newReader = BackupInspector.open(stageFile, password)
                     // 读包成功后立刻算条数对比（对话 / 记忆）：确认弹窗要用它，
                     // 提前算好也避免确认那一刻再解一次包。
                     val compared = BackupCounter.compare(newReader, container.backupTarget)
-                    Triple(newReader, runCatching { container.backupService.displayName(uri) }.getOrNull(), compared)
+                    OpenedPackage(
+                        reader = newReader,
+                        fileName = runCatching { container.backupService.displayName(uri) }.getOrNull(),
+                        counts = compared,
+                        stageFile = stageFile,
+                    )
                 }
-                reader = opened
-                val contents = opened.contents
+                reader = opened.reader
+                stagedFile = opened.stageFile
+                val contents = opened.reader.contents
                 _state.update {
                     it.copy(
                         busy = false,
                         staged = contents,
-                        stagedFileName = fileName,
-                        counts = counts,
+                        stagedFileName = opened.fileName,
+                        counts = opened.counts,
                         // 默认勾选包内全部类别（用户可再取消）
                         importSelection = contents.categories,
                     )
@@ -351,12 +367,32 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         super.onCleared()
     }
 
-    /** 关闭并丢弃当前读取器（zip 句柄 + 其内部持有的密码副本）。 */
+    /** 关闭并丢弃当前读取器（zip 句柄 + 其内部持有的密码副本），并删除暂存文件。 */
     private fun closeReader() {
-        val current = reader ?: return
+        val current = reader
         reader = null
-        runCatching { current.close() }
+        current?.let { runCatching { it.close() } }
+        // 暂存包只在本次读包期间有用：导入完成 / 重新选包 / 离开页面时删掉，
+        // 避免 cacheDir 里越堆越多解密前的包副本（真机验证时发现过残留）。
+        val stale = stagedFile
+        stagedFile = null
+        stale?.let { runCatching { it.delete() } }
     }
+
+    // ── 内部数据 ─────────────────────────────────────
+
+    /**
+     * 一次读包的产物：已校验读取器 + 显示名 + 条数对比 + 暂存文件。
+     *
+     * 暂存文件必须与 reader 一起持有并一起释放：zip4j 每次取条目流都按路径重新打开
+     * 文件，提前删会让导入抛 `FileNotFoundException`；不删则留垃圾。
+     */
+    private class OpenedPackage(
+        val reader: BackupContentReader,
+        val fileName: String?,
+        val counts: Map<BackupCategory, ImportCount>,
+        val stageFile: File,
+    )
 
     /** 导入回执：按类别列出成功 / 失败（Snackbar 一行显示，保持简短）。 */
     private fun importReceipt(outcome: ImportOutcome): String {
