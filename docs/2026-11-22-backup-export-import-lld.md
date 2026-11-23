@@ -116,7 +116,7 @@
 | `web_search_reuse_chat_key` | Boolean | 复用聊天 Key 开关 |
 | `enable_auto_update_check` | Boolean | 启动检查更新 |
 | `wallpaper_path` / `wallpaper_blur` | String / Double | 壁纸路径与模糊 |
-| **`api_key`** | String | **可选**：仅当用户勾选「包含 API Key」 |
+| **`api_key`** | String | **可选**：仅当用户勾选「API Key」 |
 | **`web_search_deepseek_key`** | String | **可选**：同上 |
 | **`web_search_anysearch_key`** | String | **可选**：同上 |
 

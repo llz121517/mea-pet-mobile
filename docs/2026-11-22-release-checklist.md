@@ -45,10 +45,10 @@
     - [ ] 6. Live2D Cubism SDK / Cubism Core 版本未记录（Core AAR 被 git 忽略且无版本串）
     - [ ] 7. `jlm_special.ttf` 未列入上游字体许可清单
     - [ ] 8. Mea VITS2 模型与语音训练数据的权利归属（`tts-model-v1.zip` 在仓库外分发）
-- [ ] **隐私政策 1.3 与实现一致性复核（含新增「备份与导出」小节与「复用聊天 Key」开关）**
-  - 来源：[`../CHANGELOG.md`](../CHANGELOG.md) [1.9.0] Changed「隐私政策补充「备份与导出」说明」；`app/src/main/java/com/meapet/mobile/ui/component/PrivacyPolicyContent.kt` §五（第 95 / 200 行）；commit `a693aa9` `change(search): DeepSeek Key 复用改为开关控制，默认开启`
-  - 背景：政策 §五现写「DeepSeek 独立 Key 留空、且『API 配置』使用 DeepSeek 官方地址时，会复用其中的聊天 Key」（无条件表述），而 `a693aa9` 已引入**用户可关闭**的复用开关 `web_search_reuse_chat_key`（默认开）。开关关闭后政策这句描述与实际行为不再一致，且政策未告知用户「复用可在设置中关闭」。
-  - 判据：政策 §五（两份全文各一处）与设置帮助在「可关闭复用」这一前提下仍然准确——补一句「可在设置中关闭复用」，或明确说明关闭后需单独填写 Key；新增的「三、备份与导出」小节与实际行为一致（导出需用户主动发起、AES-256 密码加密、Key 默认不进包、不上传不保留副本、导入按类别整体覆盖）；`CHANGELOG.md` [1.9.0] 同步登记该开关与备份功能。
+- [ ] **隐私政策 1.3 与实现一致性复核（含「备份与导出」小节与「复用聊天 Key」开关）**
+  - 来源：[`../CHANGELOG.md`](../CHANGELOG.md) [1.9.0] Changed「隐私政策补充「备份与导出」说明」；`app/src/main/java/com/meapet/mobile/ui/component/PrivacyPolicyContent.kt` §五（第 105 / 218 行）；commit `a693aa9` `change(search): DeepSeek Key 复用改为开关控制，默认开启`
+  - 背景：`a693aa9` 引入**用户可关闭**的复用开关 `web_search_reuse_chat_key`（默认开）。
+  - 判据：**政策正文已按开关语义改写**（§五 现写「…并且已开启「复用聊天 Key」开关（默认开启）时，才会复用其中的聊天 Key…关闭该开关后不再复用，需单独填写 DeepSeek Key」），复核时确认这句与实际行为仍然一致即可；新增的「三、备份与导出」小节与实际行为一致（导出需用户主动发起、AES-256 密码加密、Key 默认不进包且**勾选项名为「API Key」**、不上传不保留副本、导入按类别整体覆盖）；`CHANGELOG.md` [1.9.0] 已登记该开关与备份功能。
 - [ ] **统计 SDK 构建的隐私重新确认路径** —— 含 SDK 的构建中老用户会因政策版本 1.3 变化（相对 1.8.0 的 1.2）重新确认一次。
   - 来源：[`../CHANGELOG.md`](../CHANGELOG.md) [1.9.0] Changed「隐私政策补充「备份与导出」说明」；`ui/MainActivity.kt` 的 `UMENG_ENABLED && getPrivacyVersionShown() != currentPrivacyVersion` 分支
   - 判据：发布构建用到的 `UMENG_APP_KEY` secret 已配置（否则 `umeng.enabled` 虽为 true 但 AppKey 为空，统计与隐私弹窗链路与预期不符——CI 只打 warning）；升级安装后老用户确实看到一次政策更新弹窗。
@@ -67,13 +67,13 @@
 - [ ] **dev → main 合并** —— 发布 workflow 要求 tag 提交在 `main` 上（`--require-main`）。
   - 来源：`.github/workflows/release.yml`「校验 tag（须在 main 上、与 versionName 一致）」；`git rev-list` 显示 `origin/main` 落后 `dev` **60** 个提交
   - 判据：`main` 已包含 `dev` 全部提交，且 `git tag v1.9.0` 指向 `main` 上的该提交。
-- [ ] **全量单测通过（本版基线 554 条）** —— 见 §3。
+- [ ] **全量单测通过（本版基线 562 条）** —— 见 §3。
   - 来源：[`../README.md`](../README.md)「发布」；`.github/workflows/ci.yml`
-  - 判据：`./gradlew :app:testDebugUnitTest --stacktrace` 成功，`app/build/reports/tests/testDebugUnitTest/` 显示 554 tests / 0 failed。
+  - 判据：`./gradlew :app:testDebugUnitTest --stacktrace` 成功，`app/build/reports/tests/testDebugUnitTest/` 显示 562 tests / 0 failed。
 - [ ] **debug / release 构建各通过一次** —— 每个待办项都要能独立编过（bisect safe）。
   - 来源：[`TODO.md`](TODO.md)「验证要求与提交约定」
   - 判据：`./gradlew :app:assembleDebug` 与 `./gradlew :app:assembleRelease -PappAbi=v8a` 均成功。
-- [ ] **三档 ABI 产物齐全且签名一致** —— `dist/` 应有 `MeaPet-v1.9.0-{v7a,v8a,both}.APK`（当前 `dist/` 只有 1.7.2 与 1.8.0 的包）。
+- [ ] **三档 ABI 产物齐全且签名一致** —— `dist/` 应有 `MeaPet-v1.9.0-{v7a,v8a,both}.APK`（当前 `dist/` 只有 1.9.0 的 v8a 包，v7a / both 尚未构建）。
   - 来源：`tools/build-release.ps1` / `.sh`（`-Abis` 默认 `v7a,v8a,both`）；`.github/workflows/release.yml`「校验 APK 签名」
   - 判据：三个文件都在且签名证书 SHA-256 摘要一致；`v7a` 包体积明显小于 `v8a`（缺 Cubism Core so）。
 - [ ] **`CHANGELOG.md` 定稿** —— `## [1.9.0] - 未发布（dev 分支）` 改为实际发布日；补登 `a693aa9` 新增的「复用聊天 Key 开关」条目（32 位降级条目已在 `f7eefa7` 补入）。
@@ -288,8 +288,10 @@
   - 步骤：进「设置」根页逐项看摘要。
   - 预期：提供商（模型名 + 联网开/关）、对话（System Prompt、记忆开/关）、外观（主题 · 取色）、语音（发声开/关）、数据与备份（导出与导入设置、对话、记忆）、关于（版本 N）都与实际配置一致。
 - [ ] **数据与备份（导出 / 导入）**
-  - 步骤：`设置 → 数据与备份`，全类别导出（含与不含 API Key 各一次）；清空/改动部分数据后按类别导入；再试错误密码、版本不符的包、系统面板取消、大壁纸。
-  - 预期：导出包能被正确密码解开、错误密码提示「密码错误或文件已损坏」且不泄露包内信息；未勾选类别不进包、导入不改动未勾选类别；导入按类别整体覆盖且逐项点名确认；**对话历史与记忆库在确认弹窗里显示「本机条数 → 包内条数」且与实际一致**；取消面板回执「已取消，没有写出/改动任何文件」；文本条目超 64 MiB 被拒、二进制壁纸不触发上限；导入后界面历史与下一轮模型的上下文都能读到新数据；进页时清扫 `cacheDir/backup` 残留。用例全集见 [PRD §8](2026-11-22-backup-export-import-prd.md)。
+  - 步骤：`设置 → 数据与备份`，全类别导出（勾选与不勾选 API Key 各一次）；清空/改动部分数据后按类别导入；再试错误密码、版本不符的包、系统面板取消、大壁纸；导入成功后**退出设置页再重新进入**「数据与备份」。
+  - 预期：导出包能被正确密码解开、错误密码提示「密码错误或文件已损坏」且不泄露包内信息；未勾选类别不进包、导入不改动未勾选类别；导入按类别整体覆盖且逐项点名确认；**对话历史与记忆库在清单与确认弹窗里都显示「本机条数 → 包内条数」且与实际一致**；取消面板回执「已取消，未改动任何数据」；文本条目超 64 MiB 被拒、二进制壁纸不触发上限；导入后界面历史与下一轮模型的上下文都能读到新数据；进页时清扫 `cacheDir/backup` 残留。用例全集见 [PRD §8](2026-11-22-backup-export-import-prd.md)。
+- [ ] **导入后的刷新与状态清理**（本轮修复的回归点，逐条验）
+  - 预期：① 导入成功后回执只弹**一次**，退出设置页再进入「数据与备份」不重复弹；② 导入块回到「选择备份包…」的初始态（清单、勾选、条数、文件名都已清空），暂存文件被删除；③ 主页消息列表**立即**变成导入后的内容（不必等 `ON_RESUME`）；④ 压缩状态与「早些时候」分隔条按导入的摘要刷新；⑤ **API Key 等设置项导入后立刻是新值**，退出设置页再进也不会被本地旧副本覆盖（本轮修过：`SettingsLocalState` 脏标记）。
 - [ ] **隐私政策 1.3 两版全文**
   - 步骤：分别在含统计 SDK 与不含 SDK（`-Pumeng.enabled=false`）的构建里打开 `设置 → 关于 → 隐私政策`。
   - 预期：两版各自成篇；含 SDK 版说明友盟采集范围与授权管理，无 SDK 版声明不采集；头部显示「版本：1.3 / 生效时间 2026-07-29 / 修订时间 2026-11-23」；联网搜索、AI 对话与备份导出数据流向章节完整；章节连号无重号。
@@ -321,13 +323,13 @@
 |---|---|
 | `app/src/test` 下 `*.kt` 文件 | 75（其中 `FakeHttpClientEngine.kt`、`storage/JdbcSQLiteDriver.kt`、`backup/BackupTestFakes.kt` 是测试辅助，不含用例） |
 | 含用例的测试文件 / 测试类 | 74 个 `*Test` 测试类（`MarkdownTableColumnsTest.kt` 一个文件里有 2 个类；`backup/BackupImporterTest.kt` 内含 `BackupImporterTest` 与 `BackupCollectorTest` 两个类） |
-| **`@Test` 总数（当前 `dev` HEAD 含备份功能）** | **554** |
-| 其中数据与备份新增 | 85（`app/src/test/java/com/meapet/mobile/backup/` 下 10 个测试类，含全链路 `BackupRoundTripTest` 与条数对比 `BackupCounterTest`） |
+| **`@Test` 总数（当前 `dev` HEAD 含备份功能）** | **562** |
+| 其中数据与备份新增 | 87（`app/src/test/java/com/meapet/mobile/backup/` 下 9 个测试类，含全链路 `BackupRoundTripTest` 与条数对比 `BackupCounterTest`）；另有 `SettingsLocalStateTest` 6 例覆盖导入被本地编辑态覆盖的回归 |
 | 更早的基线（`c6c223e`） | 455 |
 | `app/src/androidTest` | 3 个文件 / 5 个 `@Test`（instrumented，需真机） |
 | `@Ignore` | 0 |
 
-> 文档里出现的旧数字 **447 / 455**（[`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) §1、[`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) §测试与待验证项）**已过时**：分别对应 `167e6bd` 与 `c6c223e` 时的数量，当前为 **554**。以全量跑完后的报告数字为准。
+> 文档里出现的旧数字 **447 / 455**（[`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) §1、[`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) §测试与待验证项）**已过时**：分别对应 `167e6bd` 与 `c6c223e` 时的数量，当前为 **562**。以全量跑完后的报告数字为准。
 
 统计命令（PowerShell，仓库根目录）：
 
@@ -496,7 +498,8 @@ node tools/check_doc_links.mjs
 - **废弃字段**：历史 JSON 中已废弃的记忆操作附加字段在读取时忽略，不参与导入后的请求或记忆处理；开发期旧库里同名的 nullable 列保持不动、不读不写，**不做破坏性迁移**；新建库不含该列。
 - **不支持降级（重要）**：SQLite 库版本 `user_version` 高于应用已知版本时**拒绝打开**（`Migrations` 的 `check(current <= CURRENT_VERSION)`，当前 `CURRENT_VERSION = 1`）。
 - **回滚到 1.8.0 的后果（待确认）**：1.8.0 没有 SQLite 存储路径，回滚后只能读到仍保留的旧 JSON（升级前的内容）；升级后产生的新对话只存在于 `meapet.db`，1.8.0 看不到。若要在回滚时保留新数据，需要另行导出/备份 `meapet.db` → **发布说明里建议升级前备份**（[`../CHANGELOG.md`](../CHANGELOG.md) [1.9.0] 已写「建议升级前按需备份」）。
-- **备份建议**：`files/meapet_conversation.json`、`files/meapet_memories.json`、`databases/meapet.db`（+ `-wal` / `-shm`）。
+- **备份建议**：1.9.0 起应用内已提供「设置 → 数据与备份」，可直接导出口令加密的备份包（设置 / 对话 / 记忆 / 压缩状态 / 壁纸，API Key 可选），这是升级前备份的**推荐方式**（[PRD](2026-11-22-backup-export-import-prd.md)）。手工兜底仍是 `files/meapet_conversation.json`、`files/meapet_memories.json`、`databases/meapet.db`（+ `-wal` / `-shm`）。
+- **回滚前备份的适用范围**：应用内备份包是**跨版本互认的业务数据**（`format`/`schema` 两级校验），但 1.8.0 没有导入功能，回滚到 1.8.0 用不上它；仅用于 1.9.0 及以后的换机 / 重装恢复。
 
 ### 6.2 隐私政策 1.3 的重新确认
 
@@ -558,12 +561,12 @@ node tools/check_doc_links.mjs
 | 文档 / 位置 | 写的 | 实测 |
 |---|---|---|
 | [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) §1 验证 | 「2026-11-22 全量 **447** 条单测通过」 | 当前 `dev` HEAD **550**（447 是 `167e6bd` 时的数字，455 是 `c6c223e` 时的数字） |
-| [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) §测试与待验证项 | 「本轮本地验证为 **447** 条单测通过」 | 同上，554 |
+| [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) §测试与待验证项 | 「本轮本地验证为 **447** 条单测通过」 | 同上，562 |
 | [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) §适配器与配置 | 持久设置只列了 `web_search_enabled` / `web_search_provider` / 两个 Key；§当前范围写「DeepSeek 留空时保留官方聊天 Key 的安全复用」 | `a693aa9` 新增了 `web_search_reuse_chat_key`（默认开）+ 设置页开关 + `WebToolFactory(reuseChatKey=)` + `DeepSeekWebProvider.shouldReuseChatKey()`；文档未更新 |
-| [`../CHANGELOG.md`](../CHANGELOG.md) [1.9.0] Added「联网工具的前提与转发语义」 | 「DeepSeek 独立 Key 留空时，官方聊天端点会复用聊天 Key」（无条件） | 未提「复用可关闭」；`a693aa9` 新增的开关未登记（发版前需补，见 §1.2） |
-| `app/src/main/java/com/meapet/mobile/ui/component/PrivacyPolicyContent.kt` §五（第 95 / 200 行） | 「DeepSeek 独立 Key 留空、且……会复用其中的聊天 Key」（无条件） | 同上，未提复用可关闭；政策版本仍是 1.3（2026-11-23 补充「备份与导出」小节，版本号未变、不额外触发重新确认） |
+| [`../CHANGELOG.md`](../CHANGELOG.md) [1.9.0] Added「联网工具的前提与转发语义」 | 「DeepSeek 独立 Key 留空时，官方聊天端点会复用聊天 Key」（无条件） | **已修正**：`a693aa9` 的复用开关已登记（Added「DeepSeek Key 复用开关」），文案也已补充「关闭后只用独立 Key」 |
+| `app/src/main/java/com/meapet/mobile/ui/component/PrivacyPolicyContent.kt` §五（第 105 / 218 行） | 「DeepSeek 独立 Key 留空、且……会复用其中的聊天 Key」（无条件） | **已修正**：政策现写「…并且已开启「复用聊天 Key」开关（默认开启）时…关闭该开关后不再复用，需单独填写 DeepSeek Key」；政策版本仍为 1.3（2026-11-23 补充「备份与导出」小节，版本号未变、不额外触发重新确认）。本行由「待修正」降级为「已一致，发版前复核」 |
 | `local.properties.example` TTS 段注释 | 「语音模型 **4 个** onnx 所在目录」 | 1.8.0 起已是 **6 个文件**（`model.onnx` / `tokens.txt` / `lexicon.txt` / `fsts/*.fst`） |
-| [`../NOTICE.md`](../NOTICE.md) 审计说明 | 审计基准是 `dist/MeaPet-v1.8.0-v8a.APK` | `dist/` 目前仍只有 1.7.2 / 1.8.0；1.9.0 产物尚未构建 |
+| [`../NOTICE.md`](../NOTICE.md) 审计说明 | 审计基准是 `dist/MeaPet-v1.8.0-v8a.APK` | `dist/` 目前已有 1.9.0 的 v8a 产物（`MeaPet-v1.9.0-v8a.APK`），v7a / both 待构建 |
 
 ---
 

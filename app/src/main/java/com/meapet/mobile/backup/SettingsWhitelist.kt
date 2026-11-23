@@ -25,7 +25,7 @@ enum class SettingKind { STRING, BOOLEAN, DOUBLE, INT, NULLABLE_INT }
  *
  * @property key DataStore 键名（见 [SettingsKeys]）
  * @property kind 值类型
- * @property optional 是否属于「可选包含」的敏感 Key（仅当用户勾选「包含 API Key」时进包）
+ * @property optional 是否属于「可选包含」的敏感 Key（仅当用户勾选「API Key」时进包）
  */
 data class WhitelistEntry(
     val key: String,
