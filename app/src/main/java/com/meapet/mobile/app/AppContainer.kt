@@ -450,6 +450,29 @@ class AppContainer(
         memoryRepository.clear()
     }
 
+    // ── 数据变更广播（备份导入等「绕过服务的整库替换」） ──
+
+    /**
+     * 数据被外部整批替换的信号（备份导入完成时自增）。
+     *
+     * 各 ViewModel 的消息列表/记忆视图都是自己的副本，平时靠用户操作或
+     * `ON_RESUME` 刷新；设置页里导入完再返回主页并不触发 `ON_RESUME`，
+     * 所以需要一个显式的「数据变了」信号，由持有 UI 状态的层自行 reload。
+     * 用单调递增计数而不是布尔：多次导入后订阅方仍能感知到每次变化。
+     *
+     * 用 `MutableStateFlow` 的委托 getter 暴露（而非 `by lazy` 的 StateFlow 字段）：
+     * 单测里 `container` 是 Mockito mock，lazy 字段的 getter 未被 stub 会返回 null。
+     */
+    private val _dataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    /** 数据修订号；订阅它即可在导入后刷新自己的视图。 */
+    val dataRevision: kotlinx.coroutines.flow.StateFlow<Long> get() = _dataRevision
+
+    /** 通知所有订阅方：底层数据已被整批替换（当前仅备份导入调用）。 */
+    fun notifyDataReplaced() {
+        _dataRevision.value = _dataRevision.value + 1
+    }
+
     // ── 内部可变缓存（用于 reload） ──
 
     private val clientLock = Any()

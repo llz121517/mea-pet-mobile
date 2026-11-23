@@ -118,6 +118,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(initialLoadDone = true) }
         }
 
+        // 备份导入等「绕过 ChatService 的整库替换」完成后，本 ViewModel 的消息副本不会自动更新
+        // （设置页返回主页不走 ON_RESUME），订阅数据修订号做一次整表重载。
+        viewModelScope.launch {
+            container.dataRevision.collect { revision ->
+                if (revision > 0L) reloadAfterDataReplaced()
+            }
+        }
+
         // 监听 Live2D 触摸分区事件→添加系统消息气泡
         // 每条气泡独立生命周期，从产生开始倒计时 7 秒。
         // 新消息到达时按位置扣除旧气泡的剩余寿命（扣的是「还剩多久」，不是重新计时）：
@@ -221,6 +229,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val olderPrefix = if (firstIdx > 0) cur.messages.take(firstIdx) else emptyList()
                 cur.copy(messages = olderPrefix + mergeWithHistory(history, cur.messages.drop(olderPrefix.size)))
             }
+        }
+    }
+
+    /**
+     * 整表重载（备份导入后用）。
+     *
+     * 与 [reloadHistory] 的增量合并不同：导入是**整库替换**，本机旧消息基本都不存在了，
+     * 增量合并会把这些「history 里没有的旧消息」当成新追加留在尾部。所以这里直接丢弃
+     * 现有列表，按首屏规则重建（最近一页可见消息），并同步刷新压缩提示/入口。
+     */
+    fun reloadAfterDataReplaced() {
+        viewModelScope.launch {
+            val page = chatService.loadRecentForUi(UI_PAGE_SIZE)
+            _state.update {
+                it.copy(
+                    messages = page.messages,
+                    hasMoreHistory = page.rawCount >= UI_PAGE_SIZE,
+                    // 导入可能带来完全不同的会话：向上翻页锚点与撤销条都要重置
+                    isLoadingOlder = false,
+                    pendingUndo = null,
+                )
+            }
+            // 不要沿用旧的「本次已提示过压缩」标记：历史换了，提示条件要重新判断
+            compactHintShown = false
+            refreshCompactionUi()
         }
     }
 

@@ -80,6 +80,9 @@ class ChatViewModelTest {
         Mockito.doReturn(ttsManager).`when`(container).ttsManager
         Mockito.doReturn(settingsManager).`when`(container).settingsManager
         Mockito.doReturn(Job().apply { complete() }).`when`(container).warmUpJob
+        // 数据修订号流：ChatViewModel init 会订阅它做导入后整表重载；mock 未 stub 会拿到 null
+        Mockito.doReturn(kotlinx.coroutines.flow.MutableStateFlow(0L))
+            .`when`(container).dataRevision
         wheneverBlocking { updateChecker.check() }.thenReturn(UpdateCheckResult.UpToDate("1.0.0"))
         wheneverBlocking { memoryManager.getStats() }.thenReturn(MemoryStats())
         wheneverBlocking { memoryManager.getAllMemories() }.thenReturn(emptyList())

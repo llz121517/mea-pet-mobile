@@ -903,4 +903,22 @@ class ChatService(
         conversationManager.replaceAll(snapshot)
         Log.i(TAG, "Chat history restored from undo snapshot (${snapshot.size} messages)")
     }
+
+    /**
+     * 外部整库替换（备份导入）后重载本服务持有的缓存。
+     *
+     * 导入直接写 SQLite，绕过了本服务：内存窗口、压缩状态与 token 估算都还是旧数据。
+     * 这里一次性重建，保证下一轮请求用的是导入后的历史与摘要。
+     * - [conversationManager.reloadWindowFromRepository] 只读仓库不回写；
+     * - 压缩状态强制重新从存储加载（否则 [compactionLoaded] 会一直返回旧摘要）；
+     * - token 估算随之重算，供压缩提示/入口判断。
+     */
+    suspend fun reloadAfterExternalImport() {
+        conversationManager.reloadWindowFromRepository()
+        val reloaded = runCatching { compactionStore?.load() }.getOrNull() ?: CompactionState()
+        compactionState = reloaded
+        compactionLoaded = true
+        refreshContextTokens()
+        Log.i(TAG, "Reloaded after external import (compaction covered=${reloaded.coveredCount})")
+    }
 }

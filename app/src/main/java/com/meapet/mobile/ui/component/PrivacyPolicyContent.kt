@@ -19,7 +19,7 @@ import com.meapet.mobile.core.AppInfo
 // 硬编码在此而非 local.properties：修订政策必然改动本文件文案，版本号/日期随代码一起
 // 提交，避免放配置里时漏改。修订时必须同时递增版本号并更新日期（与 MainActivity 的
 // 版本比对逻辑配合：版本号变化 → 含统计 SDK 的构建会重新弹窗确认）。
-const val PRIVACY_POLICY_VERSION = "1.4"
+const val PRIVACY_POLICY_VERSION = "1.3"
 const val PRIVACY_POLICY_EFFECTIVE_DATE = "2026-07-29"
 const val PRIVACY_POLICY_UPDATE_DATE = "2026-11-23"
 
@@ -33,7 +33,7 @@ const val PRIVACY_POLICY_UPDATE_DATE = "2026-11-23"
  * - AI 对话请求（含系统提示词、记忆检索/写入结果、记忆摘要、上下文压缩摘要与容量
  *   探测请求）发往**用户自己配置**的 API 地址，应用不运营服务器、不中转、不保存；
  * - 联网搜索的查询词与网页地址发往 DeepSeek / AnySearch，自动模式可能切换服务商；
- * - 备份与导出由用户主动发起，写到用户自己选择的位置，导出包强制 AES-256 口令加密，
+ * - 备份与导出由用户主动发起，写到用户自己选择的位置，导出包强制 AES-256 密码加密，
  *   应用不上传、也不保留任何备份副本。
  *
  * ## 两份政策分开维护（同一文件）
@@ -79,7 +79,7 @@ private fun PrivacyPolicyWithUmeng() {
     PrivacySection("三、备份与导出") {
         PrivacyBullet("备份与导出由你主动发起，应用不会自动创建备份；导出时由系统文件选择器指定保存位置（本地存储或你信任的云盘），应用不保留备份副本，也不会上传任何备份")
         PrivacyBullet("备份包包含你勾选的数据：设置、对话历史、记忆库、上下文压缩状态与背景壁纸；文件写入你选择的位置后，即由该位置（含云盘服务商）负责存储与保护")
-        PrivacyBullet("导出包强制使用 AES-256 口令加密，口令由你设置且应用不会保存，遗忘后无法找回")
+        PrivacyBullet("导出包强制使用 AES-256 密码加密，密码由你设置且应用不会保存，遗忘后无法找回")
         PrivacyBullet("API Key（「API 配置」中的聊天 Key 与 DeepSeek / AnySearch 的独立 Key）默认不写入备份包，只有你显式勾选「包含 API Key」才会写入")
         PrivacyBullet("导入时按类别整体覆盖本机对应数据（例如「对话历史」会替换本机全部对话），导入前需在确认弹窗中逐项确认；导入用的暂存文件在进入「数据与备份」页面时清扫")
     }
@@ -192,7 +192,7 @@ private fun PrivacyPolicyWithoutSdk() {
     PrivacySection("三、备份与导出") {
         PrivacyBullet("备份与导出由你主动发起，应用不会自动创建备份；导出时由系统文件选择器指定保存位置（本地存储或你信任的云盘），应用不保留备份副本，也不会上传任何备份")
         PrivacyBullet("备份包包含你勾选的数据：设置、对话历史、记忆库、上下文压缩状态与背景壁纸；文件写入你选择的位置后，即由该位置（含云盘服务商）负责存储与保护")
-        PrivacyBullet("导出包强制使用 AES-256 口令加密，口令由你设置且应用不会保存，遗忘后无法找回")
+        PrivacyBullet("导出包强制使用 AES-256 密码加密，密码由你设置且应用不会保存，遗忘后无法找回")
         PrivacyBullet("API Key（「API 配置」中的聊天 Key 与 DeepSeek / AnySearch 的独立 Key）默认不写入备份包，只有你显式勾选「包含 API Key」才会写入")
         PrivacyBullet("导入时按类别整体覆盖本机对应数据（例如「对话历史」会替换本机全部对话），导入前需在确认弹窗中逐项确认；导入用的暂存文件在进入「数据与备份」页面时清扫")
     }
