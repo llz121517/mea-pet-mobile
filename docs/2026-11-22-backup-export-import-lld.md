@@ -17,10 +17,11 @@
 
 **不能复制 `.db` 文件**：库里有内部 `seq`、SQLite `user_version`、以及未来可能新增的表；整库替换会让「只恢复对话不恢复记忆」这类按类别操作变成不可能，也会把本机库结构强加给导入方。
 
-关键接口（已存在，无需改动）：
-- `ConversationRepository`：`loadRecent(limit)` / `count()` / `replaceAll(list)` / `clear()`
-- `MemoryStore`：`getAll()` / `saveAll(items)` / `clear()` / `getExchangeCount()` / `setExchangeCount()`
+关键接口（**在实现中补齐了三个方法**，接口本身仍只做读/整体替换，不掺备份逻辑）：
+- `ConversationRepository`：`loadRecent(limit)` / `count()` / `replaceAll(list)` / `clear()` / **`contains(id)`**（压缩游标校验用）
+- `MemoryStore`：`getAll()` / `saveAll(items)` / `clear()` / `getExchangeCount()` / `setExchangeCount()` / **`replaceAll(items, exchangeCount)`**（默认实现走 clear+saveAll+setExchangeCount，SQLite 实现覆写为单事务）
 - `CompactionStore`：`load()` / `save(state)` / `clear()`
+- `ConversationManager`：**`reloadWindowFromRepository()`**（导入后只读仓库重建内存窗口，不回写）
 
 ---
 
@@ -121,6 +122,12 @@
 
 **明确排除**：`first_launch`（一次性状态）、`privacy_version_shown`（隐私确认必须重新走）、`exchange_count`（已废弃，仅 legacy 迁移读）。
 
+**导出/导入的实际行为**（实现细节，易被误读）：
+
+- **只导出 DataStore 里实际写过的键，不物化默认值**。这样导入到另一台设备时，未设置过的项继续沿用该设备的默认值，语义与旧机一致。
+- 导入**只写白名单内、且包里实际存在的键**：未知键与类型不符的键静默忽略（前向兼容）；`context_window: null` 表示「清除，回到自动」。
+- 用 `preferences.asMap()` 按类型读取再判断，而不是直接 `preferences[booleanPreferencesKey(...)]`——后者遇到脏类型会抛 `ClassCastException` 打断整个导出。
+
 #### chat（schema 1）
 
 ```json
@@ -183,24 +190,26 @@
 ```
 backup/
 ├── BackupFormat.kt        包级模型：ManifestEntry、BackupManifest、BackupCategory、
-│                          SUPPORTED_FORMAT、SUPPORTED_SCHEMA、编解码、拒绝异常、壁纸名安全化
+│                          SUPPORTED_FORMAT、SUPPORTED_SCHEMA、编解码、拒绝异常、
+│                          路径三态判定（已知/未知安全/越界）、壁纸名安全化
 ├── SettingsWhitelist.kt   设置键白名单 + 类型化编解码（含可选 Key 三键）
 ├── BackupCodec.kt         各条目 JSON 模型与编解码（ChatPayload/MemoryPayload/CompactionPayload）
 ├── BackupContract.kt      BackupItem、BackupSources、BackupTarget、SettingsSink
 ├── BackupCollector.kt     类别 + 数据源 → List<BackupItem>（Text / FileSource）+ manifest
 ├── BackupCounter.kt       导入前条数对比：对话 / 记忆的「本机 → 包内」条数
 ├── BackupExporter.kt      逐条目 AES-256 流式写出 + manifest 收尾
-├── BackupInspector.kt     读包 + 两级版本校验 + 文本条目内存闸（返回 BackupContentReader）
+├── BackupInspector.kt     读包 + 两级版本校验 + 未知条目忽略 + 文本条目内存闸
 ├── BackupImporter.kt      按类别事务化落地
 └── BackupService.kt       SAF 薄封装：暂存、开流、显示名、清扫
 viewmodel/
 └── BackupViewModel.kt     导出/导入状态机
 ui/screen/settings/
-└── DataSettings.kt        页面 UI
+└── DataSettings.kt        页面 UI（两个可折叠块 + Snackbar 回执）
 ```
 
 依赖注入：`AppContainer` 暴露 `backupService`、`backupSettingsSink`、`backupSources`、`backupTarget`
-（全部由既有 `SettingsManager` / `ConversationRepository` / `MemoryStore` / `CompactionStore` 组装）。
+（全部由既有 `SettingsManager` / `ConversationRepository` / `MemoryStore` / `CompactionStore` 组装），
+另提供导入后的数据变更广播：`dataRevision: StateFlow<Long>` + `notifyDataReplaced()`。
 
 ### 3.1 BackupFormat
 
@@ -221,6 +230,7 @@ enum class BackupCategory(val entryName: String, val label: String) {
     companion object {
         fun fromEntryName(name: String): BackupCategory?
         fun fromPath(path: String): BackupCategory?   // files/<entry> 或 files/wallpaper/<name>
+        fun isIllegalPath(path: String): Boolean      // 越界/畸形（`..`、空段、绝对路径…）
     }
 }
 
@@ -228,6 +238,7 @@ object BackupFormat {
     const val SUPPORTED_FORMAT = 1
     const val MANIFEST_ENTRY = "manifest.json"
     const val FILES_PREFIX = "files/"
+    const val MAX_PATH_LENGTH = 512
     val SUPPORTED_SCHEMA = mapOf(
         "settings" to 1, "memory" to 1, "chat" to 1,
         "compaction" to 1, "wallpaper" to 1,
@@ -243,6 +254,15 @@ object BackupFormat {
 ```
 
 `ManifestRejectException(message: String)`：所有校验失败统一抛这个，UI 只展示 message。
+
+**路径三态**（实现要点，决定「拒绝」还是「忽略」）：
+
+| 判定 | 条件 | 处理 |
+|---|---|---|
+| 已知 | `fromPath` 能归入类别 | 正常校验与导入 |
+| 未知但安全 | 形态合法（`files/<名>` 或 `files/wallpaper/<名>`）但类别名不认识 | **忽略 + logcat 警告** |
+| 越界/畸形 | `..`、空段、`.`、绝对路径、反斜杠、NUL、超长 | **整包拒绝** |
+
 壁纸文件名安全化 `safeWallpaperFileName(raw)` 是包级内部函数（只留最后一段、字符集收窄到
 `[A-Za-z0-9._-]`、截断 96 字符、空则兜底），导出与导入两侧共用。
 
@@ -398,10 +418,28 @@ data class BackupUiState(
 ```
 
 - 密码**不进状态、不落盘、不写日志**，只作为方法参数（用后 `fill('\u0000')`）或 `DataSettings` 的局部 `remember`。
-- 导出：`refreshAvailability()` → 勾选 → 密码两次 → 告知弹窗 → SAF → `runExport`。
-- 导入：SAF → `inspectPackage(uri, pwd)`（同时算好 `counts`）→ 展示清单（含条数对比）→ 勾选 → 强制确认（再列条数）→ `runImport`；`refreshCounts()` 可在停留期间按需重算。
-- 导入成功后：`ConversationManager.reloadWindowFromRepository()` 刷新内存窗口（使 UI 与模型上下文看到新数据）；
-  若设置类别成功则 `AppContainer.reloadClient()` 让新端点 / Key / 模型立即生效。
+- 导出：`refreshAvailability()` → 勾选 → 密码两次 → 「确认导出数据」弹窗 → SAF → `runExport`。
+- 导入：SAF → `inspectPackage(uri, pwd)`（**同时算好 `counts`**）→ 展示清单（每个类别显示包内大小，对话/记忆附加「本机 → 包内」条数）→ 勾选 → 强制确认（再列一次条数）→ `runImport`。
+- 回执一律走 **Snackbar**（带可手动关闭的 ✕），不占用页面纵向空间。
+
+### 3.7 导入后的刷新链路
+
+导入直接写 SQLite、绕过 `ChatService` 与 `ChatViewModel`；设置页返回主页**不触发 `ON_RESUME`**，
+因此 `runImport` 成功后按顺序做四件事：
+
+```kotlin
+container.chatService.reloadAfterExternalImport()   // 窗口 + 压缩状态 + token 估算
+if (SETTINGS in outcome.succeeded) container.reloadClient()   // 新端点/Key/模型生效
+container.notifyDataReplaced()                      // dataRevision 自增，广播给 UI 层
+refreshAvailability()                               // 备份页自身的可用性标记
+```
+
+- `ChatService.reloadAfterExternalImport()`：`conversationManager.reloadWindowFromRepository()` +
+  强制 `compactionStore.load()`（绕开 `compactionLoaded` 一次性缓存）+ `refreshContextTokens()`。
+- `ChatViewModel` 订阅 `dataRevision` 后调 `reloadAfterDataReplaced()`：**整表替换**
+  （导入是整库替换，增量合并会把本机旧消息当成新追加留在尾部），重置
+  `hasMoreHistory` / `isLoadingOlder` / `pendingUndo` / 压缩提示标记。
+- 设置项与壁纸由 DataStore Flow 自动刷新；记忆弹窗打开时按需读库，无需额外处理。
 
 ---
 
@@ -422,8 +460,10 @@ data class BackupUiState(
 | 条目缺失/未登记 | 「备份包结构不完整」 |
 | 文本条目超限 | 「备份中的文本条目过大（超过 64 MiB）」 |
 | 空间不足 | 「写入失败，请检查可用空间」 |
-| 用户取消 | 「已取消，没有写出/改动任何文件」 |
-| 导入后 | 「已恢复：设置、对话历史…（记忆库失败：原因）」 |
+| 用户取消 | 「已取消，未改动任何数据」 |
+| 导入后 | 「已恢复 设置、对话历史…；失败：记忆库（原因）」 |
+| 导出后 | 「已导出 <文件名>（<大小>）」 |
+| 未知条目 | 不进 UI 文案，仅 logcat：`忽略未知备份条目：<path>` |
 
 ---
 
@@ -431,7 +471,7 @@ data class BackupUiState(
 
 | 层 | 用例 |
 |---|---|
-| `BackupFormatTest` | format 不等拒绝、schema 不等拒绝、未知路径拒绝、类别↔路径映射、manifest 往返、壁纸名安全化 |
+| `BackupFormatTest` | format 不等拒绝、schema 不等拒绝、**越界/未知路径区分**、类别↔路径映射、manifest 往返、壁纸名安全化 |
 | `SettingsWhitelistTest` | 白名单外的键不进包、Optional Key 三键受开关控制、只导出实际写过的键、类型正确性、未知/类型不符键在导入时忽略、null 上下文窗口清除 |
 | `BackupCodecTest` | chat/memory/compaction 往返、rawAssistantJson 与工具字段保留、损坏内容拒绝、未知字段忽略 |
 | `BackupCollectorTest` | 可用性判定、各类别条目与 manifest 对账、未勾选类别不进包、壁纸文件缺失时跳过 |
@@ -445,16 +485,20 @@ data class BackupUiState(
 
 ---
 
-## 7. 实施顺序（建议）
+## 7. 实施顺序（实际落地）
 
 1. `BackupFormat` + `SettingsWhitelist` + 单测（纯 JVM，无 Android 依赖）。
 2. `BackupCodec`（三份 payload 模型）+ 往返单测。
 3. `BackupExporter` / `BackupInspector`（zip4j）+ 单测。
 4. `BackupImporter` + 事务与失败语义单测（用 `InMemoryConversationRepository` 等既有测试替身）。
-5. `BackupService` + `AppContainer` 装配。
+5. `BackupService` + `AppContainer` 装配（含 `dataRevision` 广播）。
 6. `BackupViewModel` + `DataSettings` UI。
 7. `NOTICE.md` 补 zip4j、隐私政策补备份章节、`docs/README.md` 登记本文、CHANGELOG 补条目。
-8. 真机验收：导出→改数据→导入→核对；错误密码；取消路径；大壁纸。
+8. 真机验收：导出→改数据→导入→核对；错误密码；取消路径；大壁纸。**（当前未执行，见 [`TODO.md`](TODO.md)）**
+
+> 后续（未做）：与社区参考实现的互通。审计结论是最小方案只需一层**按 JSON 形状归一化**
+> 的解码前适配（不看来源、只看形状），约 1 人日、不必动 `format`/`schema`；详见
+> [`2026-11-23-backup-format-compat.md`](2026-11-23-backup-format-compat.md)。
 
 ---
 
@@ -465,5 +509,8 @@ data class BackupUiState(
 | 导入把库写坏 | 按类别事务 + 导入前取快照（可选：提供「导入前自动导出一次」作为无痛兜底） |
 | 密码遗忘导致包报废 | UI 明示「无法找回」；弱密码只提示不拦（用户自担） |
 | zip4j 的 API 与直觉不符 | 已在 §3.2 写明：只有 `ZipOutputStream` 能往任意流写；`STORE` 条目必须 `setEntrySize(...)`；`ZipParameters` 无 `isCompressed` |
+| zip4j 持有密码数组的**引用** | `open()` 内 `password.copyOf()` 交给 `ZipFile`，副本由 reader 持有并在 `close()` 清零；否则调用方读包后清零会让后续导入解密失败（已修复，有回归用例） |
+| 导入后 UI 不刷新 | `dataRevision` 广播 + `reloadAfterExternalImport()`，见 §3.7 |
 | 未来新增设置键被意外导出 | 白名单是显式枚举，新增键默认不进包，有单测守护 |
+| 未来新增类别的包在旧版打不开 | 未知条目改为忽略 + 警告（仅越界路径与结构矛盾拒绝） |
 | 未来备份格式升级 | 遵循 `docs/legacy-compat.md` §8：格式升级与导入兼容 step 同步提供 |

@@ -600,7 +600,7 @@ private fun ExpandableHeader(
     }
 }
 
-/** 类别勾选行：复选框 + 类别名 + 「有内容 / 本机这一类还没有东西」（或包内体积）。 */
+/** 类别勾选行：复选框 + 类别名 + 「有内容 / 本机这类还没有东西」（或包内体积/条数）。 */
 @Composable
 private fun CategoryCheckRow(
     label: String,
