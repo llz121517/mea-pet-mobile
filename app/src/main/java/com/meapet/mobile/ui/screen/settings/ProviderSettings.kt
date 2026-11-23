@@ -69,7 +69,7 @@ internal fun ApiConfigSection(
 
     OutlinedTextField(
         value = local.apiKey,
-        onValueChange = { local.apiKey = it },
+        onValueChange = { local.updateApiKey(it) },
         label = { Text("API Key") },
         placeholder = { Text("sk-...") },
         modifier = Modifier
@@ -99,7 +99,7 @@ internal fun ApiConfigSection(
 
     OutlinedTextField(
         value = local.apiUrl,
-        onValueChange = { local.apiUrl = it },
+        onValueChange = { local.updateApiUrl(it) },
         label = { Text("API 地址") },
         modifier = Modifier
             .fillMaxWidth()
@@ -120,7 +120,7 @@ internal fun ModelParamsSection(
 
     OutlinedTextField(
         value = local.model,
-        onValueChange = { local.model = it },
+        onValueChange = { local.updateModel(it) },
         label = { Text("模型") },
         modifier = Modifier
             .fillMaxWidth()
@@ -189,7 +189,7 @@ internal fun ModelParamsSection(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                local.model = modelId
+                                local.updateModel(modelId)
                                 viewModel.selectModel(modelId)
                             }
                             .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -226,7 +226,7 @@ internal fun ModelParamsSection(
 
     OutlinedTextField(
         value = local.contextWindow,
-        onValueChange = { v -> local.contextWindow = v.filter { it.isDigit() }.take(8) },
+        onValueChange = { v -> local.updateContextWindow(v.filter { it.isDigit() }.take(8)) },
         label = {
             ParamLabelWithHelp(
                 label = "上下文窗口",
@@ -246,7 +246,7 @@ internal fun ModelParamsSection(
         trailingIcon = {
             if (local.contextWindow.isNotEmpty()) {
                 IconButton(onClick = {
-                    local.contextWindow = ""
+                    local.updateContextWindow("")
                     viewModel.saveContextWindow("")
                 }) {
                     Icon(Icons.Filled.Close, contentDescription = "重置为自动")
@@ -268,7 +268,7 @@ internal fun ModelParamsSection(
     // 重新检测：清除手动值并强制重新探测（探测失败会回退兜底，不报错）
     TextButton(
         onClick = {
-            local.contextWindow = ""
+            local.updateContextWindow("")
             viewModel.redetectContextWindow()
         },
         modifier = Modifier.saveOnFocusChange { }
@@ -398,7 +398,7 @@ internal fun WebSearchSection(
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = local.webSearchDeepSeekKey,
-                        onValueChange = { local.webSearchDeepSeekKey = it },
+                        onValueChange = { local.updateDeepSeekKey(it) },
                         label = { Text("DeepSeek API Key") },
                         placeholder = { Text("必填，仅用于联网搜索的 DeepSeek 服务商") },
                         modifier = Modifier
@@ -423,7 +423,7 @@ internal fun WebSearchSection(
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = local.webSearchAnySearchKey,
-                    onValueChange = { local.webSearchAnySearchKey = it },
+                    onValueChange = { local.updateAnySearchKey(it) },
                     label = { Text("AnySearch API Key（可选）") },
                     placeholder = { Text("留空使用匿名档") },
                     modifier = Modifier

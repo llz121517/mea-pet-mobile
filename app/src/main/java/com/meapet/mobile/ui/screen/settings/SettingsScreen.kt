@@ -117,7 +117,7 @@ fun SettingsScreen(
         onUndo = { undo ->
             settingsViewModel.undoPending()
             // 文本框是本地编辑态、不跟随 DataStore 流，撤销后要手动同步回原值
-            if (undo is SettingsUndo.ResetPrompt) local.systemPrompt = undo.previousPrompt
+            if (undo is SettingsUndo.ResetPrompt) local.updateSystemPrompt(undo.previousPrompt)
         }
     )
 
@@ -126,9 +126,15 @@ fun SettingsScreen(
         onDispose { local.persist(settingsViewModel) }
     }
 
-    // 从列表点选模型时，同步本地输入框
-    LaunchedEffect(state.model) {
-        if (local.model != state.model) local.model = state.model
+    // 外部写入（典型是「数据与备份」里的导入）后，把未编辑的字段同步到界面。
+    // 用户正在改的字段有脏标记保护，不会被覆盖；未编辑字段若不同步，离开页面时的
+    // 兜底保存会把本地旧副本写回，等于把刚导入的设置冲掉（API Key 就是这样丢的）。
+    LaunchedEffect(state.apiKey, state.apiUrl, state.model, state.systemPrompt, state.contextWindow) {
+        local.syncFrom(
+            state = state,
+            anySearchKey = settingsViewModel.currentWebSearchAnySearchKey(),
+            deepSeekKey = settingsViewModel.currentWebSearchDeepSeekKey(),
+        )
     }
 
     // 离开关于页时清掉手动检测更新的结果文案，避免下次进入还残留着上次的回执

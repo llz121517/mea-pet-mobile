@@ -41,7 +41,7 @@ internal fun SystemPromptSection(
     Column {
         OutlinedTextField(
             value = local.systemPrompt,
-            onValueChange = { local.systemPrompt = it },
+            onValueChange = { local.updateSystemPrompt(it) },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(120.dp)
@@ -58,7 +58,7 @@ internal fun SystemPromptSection(
         OutlinedButton(
             onClick = {
                 val previous = local.systemPrompt
-                local.systemPrompt = SettingsKeys.Defaults.SYSTEM_PROMPT
+                local.updateSystemPrompt(SettingsKeys.Defaults.SYSTEM_PROMPT)
                 viewModel.resetSystemPrompt(previous)
             },
             // 已是默认值就置灰：没有可重置的内容（与背景壁纸的「恢复默认」一致）
