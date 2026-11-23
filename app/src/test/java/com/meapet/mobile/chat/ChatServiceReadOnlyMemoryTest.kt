@@ -171,6 +171,81 @@ class ChatServiceReadOnlyMemoryTest {
         }
     }
 
+    /**
+     * 实测：历史里已有工具轮记录后，来回切换「支持工具」与「不支持工具」的模型。
+     *
+     * 关注三点：
+     * 1. 切到不支持工具的模型时，旧工具历史必须被过滤成纯文本（否则服务端 400）；
+     * 2. 切回支持工具的模型时，必须重新尝试工具（负缓存不能跨模型生效）；
+     * 3. 来回切换不应让历史里的工具记录丢失或被改写。
+     */
+    @Test
+    fun `已有工具历史时来回切换支持与不支持工具的模型`() = runTest {
+        val repository = MemoryRepository(temp.newFolder())
+        val settings = settings(MemoryMode.AUTO)
+        whenever(settings.getApiConnection())
+            .thenReturn(ApiConnection("https://example.org/v1", "key"))
+        val manager = MemoryManager(MemoryService(repository, { null }, settings), repository, settings)
+        val history = ConversationManager()
+        // 预置一轮真实的工具历史（assistant 带 tool_calls + tool 结果）
+        history.addMessages(toolHistoryTurn())
+
+        var calls = 0
+        val engine = FakeHttpClientEngine {
+            val body = (it.body as RequestBody.Json).content
+            val model = Json.parseToJsonElement(body).jsonObject.getValue("model").jsonPrimitive.content
+            calls++
+            if (model == "bad-model" && body.contains("\"tools\"")) rejectedTools() else text("回复$calls")
+        }
+        val service = service(engine, settings, manager, history, backgroundScope, repository)
+
+        whenever(settings.getModel()).thenReturn("good-model")
+        assertTrue(service.sendMessage("第一轮").isSuccess)
+
+        whenever(settings.getModel()).thenReturn("bad-model")
+        val badTurn = service.sendMessage("第二轮")
+        assertTrue(badTurn.isSuccess, "不支持工具的模型也应成功回复")
+
+        whenever(settings.getModel()).thenReturn("good-model")
+        assertTrue(service.sendMessage("第三轮").isSuccess)
+
+        val requests = engine.requests.map {
+            Json.parseToJsonElement((it.body as RequestBody.Json).content).jsonObject
+        }
+        val trace = requests.map { req ->
+            val m = req.getValue("model").jsonPrimitive.content
+            val tools = req.containsKey("tools")
+            val toolRows = req.getValue("messages").jsonArray.count {
+                it.jsonObject["role"]?.jsonPrimitive?.content == "tool"
+            }
+            "$m|tools=$tools|toolRows=$toolRows"
+        }
+        println("SWITCH_TRACE: " + trace.joinToString(" -> "))
+
+        assertTrue(requests.last().containsKey("tools"), "切回后请求应重新包含 tools")
+    }
+
+    /** 一轮带 tool_calls 与 tool 结果的合法历史。 */
+    private fun toolHistoryTurn() = listOf(
+        ChatMessage(role = ChatRole.user, content = "查一下", id = "h-u", turnId = "h"),
+        ChatMessage(
+            role = ChatRole.assistant,
+            content = "我查查",
+            id = "h-a1",
+            turnId = "h",
+            rawAssistantJson = """{"role":"assistant","content":"我查查","tool_calls":[{"id":"h-c1","type":"function","function":{"name":"search_memory","arguments":"{}"}}]}"""
+        ),
+        ChatMessage(
+            role = ChatRole.tool,
+            content = """{"ok":true}""",
+            id = "h-t1",
+            turnId = "h",
+            toolCallId = "h-c1",
+            toolName = "search_memory"
+        ),
+        ChatMessage(role = ChatRole.assistant, content = "查到了", id = "h-a2", turnId = "h")
+    )
+
     @Test
     fun `ordinary HTTP errors do not disable tools or retry silently`() = runTest {
         for (status in listOf(400, 404, 422, 501)) {
