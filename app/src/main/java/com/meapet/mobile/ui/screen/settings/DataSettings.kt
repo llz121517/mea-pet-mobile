@@ -225,10 +225,10 @@ private fun ExportBlock(
 
             Spacer(Modifier.height(4.dp))
 
-            // API Key 默认不进包；勾选时在告知弹窗里再次提示风险
+            // API Key 默认不进包；勾选后随设置条目一起写入
             SettingsSwitchRow(
                 label = "包含 API Key",
-                description = "默认不包含。勾选后聊天 / 联网服务的 Key 会写进设置条目（包已加密，仍请妥善保管）。",
+                description = "默认不包含。勾选后聊天 / 联网服务的 Key 会写进设置条目。",
                 checked = state.includeApiKeys,
                 darkTheme = darkTheme,
                 onCheckedChange = { viewModel.setIncludeApiKeys(it) },
@@ -311,7 +311,7 @@ private fun ExportBlock(
     }
 }
 
-/** 「包里有什么」告知弹窗：列出勾选类别、Key 风险与「口令遗忘无法找回」。 */
+/** 「包里有什么」告知弹窗：列出勾选类别与「口令遗忘无法找回」。 */
 @Composable
 private fun ExportNoticeDialog(
     selection: Set<BackupCategory>,
@@ -334,10 +334,7 @@ private fun ExportNoticeDialog(
                 }
                 if (includeApiKeys) {
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "· 已包含 API Key：备份文件泄露且口令被猜中时，Key 也会随之泄露，请妥善保管。",
-                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
-                    )
+                    Text("· API Key")
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(

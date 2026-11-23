@@ -526,7 +526,7 @@ class BackupCollectorTest {
                 memoryStore = memories,
                 compactionStore = compaction,
                 filesDir = filesDir,
-                appVersion = "1.10.0-test",
+                appVersion = "1.9.0-test",
             )
         )
     }
@@ -584,7 +584,7 @@ class BackupCollectorTest {
         assertEquals(item.bytes, entry.bytes)
         assertEquals("files/chat", entry.path)
         assertEquals(BackupFormat.SUPPORTED_FORMAT, collected.manifest.format)
-        assertEquals("1.10.0-test", collected.manifest.appVersion)
+        assertEquals("1.9.0-test", collected.manifest.appVersion)
         assertTrue(collected.manifest.createdAt.endsWith("Z"))
         // 未勾选的记忆类别不进 manifest。
         assertFalse(collected.manifest.entries.any { it.name == "memory" })

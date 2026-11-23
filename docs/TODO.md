@@ -42,7 +42,7 @@
 - [ ] **1.10：清理备胎代码** — `MemoryRepository`（JSON 实现）、`ConversationStore` 与相关单测；legacy 导入保留到 1.11（见 `legacy-compat.md`）。**2026-11-22 复核**：`MemoryRepository` 已无任何实例化点、`ConversationStore` 只剩一个无人读取的 `lazy` 属性，两者实际已是死代码，可提前到 1.9.x 删除。
 - [ ] **被打断 turn 的 `interrupted` 落库标记** — 当前仅 `TurnMetrics` 日志记录，无消费方；等有「中断轮次分析」需求再补（`extra_json` 或 meta 记录，不改 schema）。
 - [ ] **备用 tail 模式（`SEPARATE_USER`）未接线** — 只有常量与单测，没有设置入口，也没有计划里的「返回 400/500 且正文命中模板报错 → 回退 MERGE_USER 并按 baseUrl+model 缓存」探测 / 降级逻辑；默认 MERGE_USER 兼容性最好，暂不启用，等确有端点需要连续 user 时再做（避免写永不执行的死代码）。
-- [ ] **1.10 数据与备份真机验收**（[PRD](2026-11-22-backup-export-import-prd.md) §8）— 导出→改数据→导入→逐类核对（设置/对话/记忆/压缩状态/壁纸）；错误口令与版本不符整包拒绝；SAF 取消路径；大壁纸（不触发文本 64 MiB 上限）；导入后 UI 与模型上下文都能读到新数据。单测已覆盖 81 例（`app/src/test/java/com/meapet/mobile/backup/`），真机验收未做。
+- [ ] **数据与备份真机验收（1.9.0）**（[PRD](2026-11-22-backup-export-import-prd.md) §8）— 导出→改数据→导入→逐类核对（设置/对话/记忆/压缩状态/壁纸）；错误口令与版本不符整包拒绝；SAF 取消路径；大壁纸（不触发文本 64 MiB 上限）；导入后 UI 与模型上下文都能读到新数据。单测已覆盖 81 例（`app/src/test/java/com/meapet/mobile/backup/`），真机验收未做。
 - [ ] **联网工具真机验收**（见 [联网工具方案](2026-11-19-web-search-plan.md)）— 验证 DeepSeek 官方 Key、AnySearch 匿名与 token、搜索后读取正文、设置切换、限流和额度提示。
 - [ ] **设备残留数据清理**（可选，下次接设备时）— 测试注入的长消息、重复记忆 `mem_ln3glfhc` / `mem_39ypzmxj`。
 

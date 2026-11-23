@@ -87,7 +87,7 @@ class BackupRoundTripTest {
             memoryStore = sourceMemory,
             compactionStore = sourceCompaction,
             filesDir = sourceDir,
-            appVersion = "1.10.0-roundtrip",
+            appVersion = "1.9.0-roundtrip",
         )
 
         // ── 导出 ──
@@ -95,7 +95,7 @@ class BackupRoundTripTest {
             .collect(BackupCategory.entries.toSet(), includeApiKeys = true)
         assertEquals(BackupCategory.entries.size, collected.items.size)
         assertEquals(BackupFormat.SUPPORTED_FORMAT, collected.manifest.format)
-        assertEquals("1.10.0-roundtrip", collected.manifest.appVersion)
+        assertEquals("1.9.0-roundtrip", collected.manifest.appVersion)
         assertEquals(
             BackupCategory.entries.map { it.entryName }.toSet(),
             collected.manifest.entries.map { it.name }.toSet(),

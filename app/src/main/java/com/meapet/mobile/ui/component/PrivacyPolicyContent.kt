@@ -80,7 +80,7 @@ private fun PrivacyPolicyWithUmeng() {
         PrivacyBullet("备份与导出由你主动发起，应用不会自动创建备份；导出时由系统文件选择器指定保存位置（本地存储或你信任的云盘），应用不保留备份副本，也不会上传任何备份")
         PrivacyBullet("备份包包含你勾选的数据：设置、对话历史、记忆库、上下文压缩状态与背景壁纸；文件写入你选择的位置后，即由该位置（含云盘服务商）负责存储与保护")
         PrivacyBullet("导出包强制使用 AES-256 口令加密，口令由你设置且应用不会保存，遗忘后无法找回")
-        PrivacyBullet("API Key（「API 配置」中的聊天 Key 与 DeepSeek / AnySearch 的独立 Key）默认不写入备份包，只有你显式勾选「包含 API Key」才会写入，界面会同时提示相关风险")
+        PrivacyBullet("API Key（「API 配置」中的聊天 Key 与 DeepSeek / AnySearch 的独立 Key）默认不写入备份包，只有你显式勾选「包含 API Key」才会写入")
         PrivacyBullet("导入时按类别整体覆盖本机对应数据（例如「对话历史」会替换本机全部对话），导入前需在确认弹窗中逐项确认；导入用的暂存文件在进入「数据与备份」页面时清扫")
     }
 
@@ -193,7 +193,7 @@ private fun PrivacyPolicyWithoutSdk() {
         PrivacyBullet("备份与导出由你主动发起，应用不会自动创建备份；导出时由系统文件选择器指定保存位置（本地存储或你信任的云盘），应用不保留备份副本，也不会上传任何备份")
         PrivacyBullet("备份包包含你勾选的数据：设置、对话历史、记忆库、上下文压缩状态与背景壁纸；文件写入你选择的位置后，即由该位置（含云盘服务商）负责存储与保护")
         PrivacyBullet("导出包强制使用 AES-256 口令加密，口令由你设置且应用不会保存，遗忘后无法找回")
-        PrivacyBullet("API Key（「API 配置」中的聊天 Key 与 DeepSeek / AnySearch 的独立 Key）默认不写入备份包，只有你显式勾选「包含 API Key」才会写入，界面会同时提示相关风险")
+        PrivacyBullet("API Key（「API 配置」中的聊天 Key 与 DeepSeek / AnySearch 的独立 Key）默认不写入备份包，只有你显式勾选「包含 API Key」才会写入")
         PrivacyBullet("导入时按类别整体覆盖本机对应数据（例如「对话历史」会替换本机全部对话），导入前需在确认弹窗中逐项确认；导入用的暂存文件在进入「数据与备份」页面时清扫")
     }
 

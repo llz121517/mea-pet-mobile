@@ -353,7 +353,7 @@ class BackupInspectorTest {
         BackupManifest(
             format = format,
             createdAt = "2026-11-22T15:30:00Z",
-            appVersion = "1.10.0",
+            appVersion = "1.9.0",
             entries = entries.toList(),
         )
     )

@@ -189,7 +189,7 @@ class BackupExporterTest {
     private fun manifestFor(items: List<BackupItem>): BackupManifest = BackupManifest(
         format = BackupFormat.SUPPORTED_FORMAT,
         createdAt = "2026-11-22T15:30:00Z",
-        appVersion = "1.10.0",
+        appVersion = "1.9.0",
         entries = items.map { item ->
             val category = requireNotNull(BackupCategory.fromPath(item.zipPath)) {
                 "测试条目路径无法归入类别：${item.zipPath}"

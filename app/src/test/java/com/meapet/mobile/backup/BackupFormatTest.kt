@@ -18,7 +18,7 @@ class BackupFormatTest {
         BackupManifest(
             format = format,
             createdAt = "2026-11-22T15:30:00Z",
-            appVersion = "1.10.0",
+            appVersion = "1.9.0",
             entries = listOf(
                 ManifestEntry(
                     name = BackupCategory.SETTINGS.entryName,
@@ -34,7 +34,7 @@ class BackupFormatTest {
         val decoded = BackupFormat.decode(BackupFormat.encode(manifest()))
         assertEquals(BackupFormat.SUPPORTED_FORMAT, decoded.format)
         assertEquals("2026-11-22T15:30:00Z", decoded.createdAt)
-        assertEquals("1.10.0", decoded.appVersion)
+        assertEquals("1.9.0", decoded.appVersion)
         assertEquals(1, decoded.entries.size)
         assertEquals("settings", decoded.entries[0].name)
         assertEquals(1234L, decoded.entries[0].bytes)

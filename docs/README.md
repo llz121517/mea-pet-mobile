@@ -60,8 +60,8 @@
 | [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) | 1.9 记忆系统当前实现：工具写入、只读关键词注入、自动摘要边界、历史与旧数据兼容 |
 | [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) | 1.9 SQLite 存储、上下文压缩、容量探测及遗留决策 / 待验收项 |
 | [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) | 联网搜索与抓取的已接入行为、适配器配置与待真机验收项 |
-| [`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md) | 1.10 数据与备份：需求决策、包格式、交互流程与测试清单（**已实现**，状态见文首） |
-| [`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md) | 1.10 数据与备份详细设计：模块划分、条目结构、接口、错误文案与测试设计（实现状态见 §3 开头） |
+| [`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md) | 1.9 数据与备份：需求决策、包格式、交互流程与测试清单（**已实现**，状态见文首） |
+| [`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md) | 1.9 数据与备份详细设计：模块划分、条目结构、接口、错误文案与测试设计（实现状态见 §3 开头） |
 
 ## 3. 历史归档（只读，不再维护）
 

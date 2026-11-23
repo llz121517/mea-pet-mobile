@@ -1,7 +1,7 @@
 # 配置与数据导出导入与备份 — LLD（详细设计）
 
 > 状态：**已实现（2026-11-23）**。需求与决策见 [`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md)。
-> 参考实现：[`mea-pet-mobile-fork-fo-pr`](https://gitee.com/flexiatom/mea-pet-mobile-fork-fo-pr) 的 `backup/` 包 —— **抄设计不抄实现**（它按磁盘 JSON 文件采集，本项目数据在 SQLite 单库）。
+> 参考实现：[`mea-pet-mobile-fork-fo-pr`](https://gitee.com/flexiatom/mea-pet-mobile-fork-fo-pr) 的 `backup/` 包 —— **借鉴设计，不借鉴实现**（它按磁盘 JSON 文件采集，本项目数据在 SQLite 单库）。
 
 ---
 
@@ -45,7 +45,7 @@
 {
   "format": 1,
   "createdAt": "2026-11-22T15:30:00Z",
-  "appVersion": "1.10.0",
+  "appVersion": "1.9.0",
   "entries": [
     { "name": "settings",   "schema": 1, "bytes": 1234,  "path": "files/settings" },
     { "name": "wallpaper",  "schema": 1, "bytes": 90210, "path": "files/wallpaper/1758..._wallpaper.jpg" }

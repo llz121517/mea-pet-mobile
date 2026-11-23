@@ -16,27 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.10.0] - 未发布（dev 分支）
-
-### Added
-
-- **数据与备份** — 设置页新增「数据与备份」分组，可把设置、对话历史、记忆库、上下文压缩状态与背景壁纸导出为一个备份包，经系统文件选择器保存到用户自己选择的位置（本地存储 / 云盘），换机或重装后按类别整体恢复。导出包强制 AES-256 口令加密，口令不保存、遗忘无法找回；API Key（聊天 Key、DeepSeek / AnySearch 独立 Key）默认不进包，只有勾选「包含 API Key」才写入并提示风险；包级格式或条目版本不匹配时整包拒绝；文本条目解压后限 64 MiB，二进制条目流式写盘不设上限。
-
-### Changed
-
-- **隐私政策修订至 1.4（2026-11-23）** — 新增「备份与导出」小节，说明备份由用户主动发起、导出包强制 AES-256 口令加密、API Key 默认不进包、应用不保留副本也不上传，导入按类别整体覆盖本机数据。含统计 SDK 的构建中，老用户会因版本号变化重新确认一次隐私政策。
-
-### Notes
-
-- 实现落点：`app/src/main/java/com/meapet/mobile/backup/`（格式、设置白名单、编解码、采集、导出、校验、导入、SAF 封装）、`viewmodel/BackupViewModel.kt`、`ui/screen/settings/DataSettings.kt`，单测在 `app/src/test/java/com/meapet/mobile/backup/`。
-- 版本号在发版时统一调整（`versionName` / `versionCode` 未随本条目改动）。
-
----
-
 ## [1.9.0] - 未发布（dev 分支）
 
 ### Added
 
+- **数据与备份** — 设置页新增「数据与备份」分组，可把设置、对话历史、记忆库、上下文压缩状态与背景壁纸导出为一个备份包，经系统文件选择器保存到用户自己选择的位置（本地存储 / 云盘），换机或重装后按类别整体恢复。导出包强制 AES-256 口令加密，口令不保存、遗忘无法找回；API Key（聊天 Key、DeepSeek / AnySearch 独立 Key）默认不进包，只有勾选「包含 API Key」才写入；包级格式或条目版本不匹配时整包拒绝；文本条目解压后限 64 MiB，二进制条目流式写盘不设上限。
 - **记忆工具** — 在支持工具调用的模式下，模型可按需检索、创建、更新或删除记忆；写入按对话轮次暂存处理，删除支持撤销。
 - **联网搜索** — 可在设置中启用 `web_search` 与 `web_fetch`，默认关闭；支持自动选择服务商或手动选择，并可配置 DeepSeek / AnySearch 独立 API Key。Auto 在请求失败或超时时会尝试下一家服务商。
 - **DeepSeek Key 复用开关** — 新增「复用「API 配置」中的 Key」开关（默认开启）。开启时沿用既有行为：独立 Key 优先，留空且聊天地址是官方 DeepSeek HTTPS 地址时复用聊天 Key。关闭后只用独立 Key、不再回退聊天 Key，此时设置页显示单独的 DeepSeek Key 输入框（自动与 DeepSeek 两种服务商选择都生效）。此前是否复用只取决于地址，用户无法干预，存在把中转/聚合服务的 Key 发给 DeepSeek 而不自知的风险。
@@ -62,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **背景效果文案** — 壁纸调节项改称「背景虚化强度」，准确说明整张背景的模糊效果。
 - **默认模型** — 新装默认模型由 `deepseek-v4-flash` 改为 `deepseek-flash`，与 DeepSeek `/models` 返回的 id 对齐；老用户已保存的模型名与端点配置不受影响。
 - **首屏定位与开屏动画** — 首屏改用一次性无动画定位（`initialLoadDone`），避免先按 35 条窗口滚到底、首屏 50 条在头部插入后停在半途；定位完成前列表透明，消除开屏闪空。
-- **隐私政策修订至 1.3（2026-11-22）** — 补充联网搜索的数据流向（查询词 / 网页地址发往 DeepSeek / AnySearch，Auto 失败时可能切换下一家；DeepSeek Key 复用条件与 AnySearch 匿名模式；不记录查询、正文或 Key）与 AI 对话数据流向（对话、记忆工具结果、系统提示词、记忆摘要、压缩摘要、容量探测均发往用户配置的 API）；明确应用不运营服务器、数据仅存本机。含统计 SDK 的构建中，老用户会因版本号变化重新确认一次隐私政策。
+- **隐私政策修订至 1.4（2026-11-23）** — 补充联网搜索的数据流向（查询词 / 网页地址发往 DeepSeek / AnySearch，Auto 失败时可能切换下一家；DeepSeek Key 复用条件与 AnySearch 匿名模式；不记录查询、正文或 Key）与 AI 对话数据流向（对话、记忆工具结果、系统提示词、记忆摘要、压缩摘要、容量探测均发往用户配置的 API）；新增「备份与导出」小节，说明备份由用户主动发起、写到用户自己选择的位置、导出包强制 AES-256 口令加密且口令不保存、API Key 默认不进包、应用不保留副本也不上传、导入按类别整体覆盖；明确应用不运营服务器、数据仅存本机。含统计 SDK 的构建中，老用户会因版本号变化重新确认一次隐私政策。
 - **日文数字与日期按日文读** — 日文句子里的阿拉伯数字原先走 sherpa 的中文数字前端，`15 時` 会读成中文数词；现在在归一化层按日文上下文转成假名读法：日期（1日→ついたち、20日→はつか）、月份（9月→くがつ）、时刻（15時→じゅうごじ、4時→よじ）、分钟、人数、年龄与常见量词音变。中日文同形的数字串靠「整段是否含假名」区分，判不出时保留原数字由原有前端兜底，中文句子的读法不受影响。
 - **历史与模型上下文分离** — 聊天记录保留并分页加载，发送给模型的上下文可按容量压缩，不再因上下文裁剪而从界面历史中消失。
 - **升级与数据迁移** — 首次启动把旧版 JSON 会话与记忆一次性导入 SQLite（单事务、幂等、读回校验；旧 JSON 文件原样保留不删除，失败下次启动重试）；开发期旧库中的废弃记忆操作列忽略不迁移；SQLite 库版本高于应用时拒绝打开（不支持降级）。建议升级前按需备份。
@@ -71,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 
 - 版本号升至 1.9.0（versionCode 15）；自动构建的 `versionName` 追加提交短哈希后缀（见 Added「版本号与构建时间」），「检测更新」比较时会先剥离该后缀，不会误判需要更新。
+- 数据与备份的实现落点：`app/src/main/java/com/meapet/mobile/backup/`（格式、设置白名单、编解码、采集、导出、校验、导入、SAF 封装）、`viewmodel/BackupViewModel.kt`、`ui/screen/settings/DataSettings.kt`，单测在 `app/src/test/java/com/meapet/mobile/backup/`；需求与设计见 [备份 PRD](docs/2026-11-22-backup-export-import-prd.md) / [备份 LLD](docs/2026-11-22-backup-export-import-lld.md)。
 
 ---
 

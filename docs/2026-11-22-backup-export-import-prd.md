@@ -1,8 +1,8 @@
-# 配置与数据导出导入与备份（1.10 计划）
+# 配置与数据导出导入与备份（1.9 计划）
 
 > 状态：**已实现（2026-11-23）**。实现落点：`app/src/main/java/com/meapet/mobile/backup/`（格式、设置白名单、编解码、采集、导出、校验、导入、SAF 封装）、`app/src/main/java/com/meapet/mobile/viewmodel/BackupViewModel.kt`、`app/src/main/java/com/meapet/mobile/ui/screen/settings/DataSettings.kt`，单测在 `app/src/test/java/com/meapet/mobile/backup/`。详细设计见 [`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md)。参考实现：社区版分支 [`mea-pet-mobile-fork-fo-pr`](https://gitee.com/flexiatom/mea-pet-mobile-fork-fo-pr)（其 `backup/` 包 + `DataSettings.kt`）。
 >
-> **借鉴原则：抄设计，不抄实现。**
+> **借鉴原则：借鉴设计，不借鉴实现。**
 >
 > - **对齐**：包结构与 manifest 语义、两级版本校验、按类别选择/按类别覆盖、SAF 选位置、口令不落盘不进状态、暂存目录清扫、文本条目内存闸 + 二进制流式写盘、口令错误不泄露包内信息。
 > - **不照搬**：参考版按「磁盘 JSON 文件」采集（`chatFile`/`memoryFile` 直接 `readText` 透传）。本项目 1.9 起会话、记忆、压缩状态都在 **SQLite 单库**，必须从库中读业务数据再序列化，不能复制 `.db` 文件，也不能沿用它的文件路径假设。
@@ -17,7 +17,7 @@
 | 议题 | 决策 |
 |---|---|
 | 加密 | **必须**口令加密，AES-256 zip（不可导出明文） |
-| API Key | **可选勾选**，默认不勾；勾选时进包，UI 明确提示风险 |
+| API Key | **可选勾选**，默认不勾；勾选时进包 |
 | API 地址与模型名 | 都进包（换机可直接继续使用） |
 | 导入策略 | **按类别整体覆盖**，导入前强制点名确认 |
 | 覆盖范围 | 设置、对话历史、记忆库、上下文压缩状态、背景壁纸 |
@@ -48,7 +48,7 @@
 {
   "format": 1,
   "createdAt": "2026-11-22T15:30:00Z",
-  "appVersion": "1.10.0",
+  "appVersion": "1.9.0",
   "entries": [
     { "name": "settings", "schema": 1, "bytes": 1234, "path": "files/settings" }
   ]
@@ -69,7 +69,7 @@
 | `chat` | 对话历史 | 对齐参考版 |
 | `wallpaper` | 背景壁纸 | 对齐参考版（按磁盘现名入包，路径 `files/wallpaper/<现名>`） |
 | `compaction` | 上下文压缩状态 | **本项目新增**（参考版无此数据） |
-| `pet_form` | 导入的 Live2D 形象 | 参考版有，**本项目 1.10 不做**（见 §9） |
+| `pet_form` | 导入的 Live2D 形象 | 参考版有，**本项目 1.9 不做**（见 §9） |
 
 
 ### 3.2 settings 条目
@@ -93,7 +93,7 @@
 1. 设置 →「数据与备份」→ 展开「导出」。
 2. 勾选类别（默认全勾除 Key）；每项显示「有内容 / 本机这一类还没有东西」。
 3. 输入口令两次（不一致不允许继续；短于 8 位只提示不拦）。
-4. 首次点「导出」先弹一次「包里有什么」的告知（含 Key 风险提示），关闭后才走系统保存面板。
+4. 首次点「导出」先弹一次「包里有什么」的告知，关闭后才走系统保存面板。
 5. 系统面板选位置 → 写出 → 回执显示文件名与大小。
 
 ### 4.2 导入

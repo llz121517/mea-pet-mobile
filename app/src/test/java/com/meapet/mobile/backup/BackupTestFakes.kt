@@ -284,7 +284,7 @@ internal fun backupContentsOf(
     val manifest = BackupManifest(
         format = BackupFormat.SUPPORTED_FORMAT,
         createdAt = "2026-11-22T15:30:00Z",
-        appVersion = "1.10.0-test",
+        appVersion = "1.9.0-test",
         entries = entries.map { (category, entry) ->
             ManifestEntry(
                 name = category.entryName,
