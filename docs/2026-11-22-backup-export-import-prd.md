@@ -1,6 +1,6 @@
 # 配置与数据导出导入与备份（1.10 计划）
 
-> 状态：**PRD 草稿（2026-11-22）**，待实现。详细设计见 [`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md)。参考实现：社区版分支 [`mea-pet-mobile-fork-fo-pr`](https://gitee.com/flexiatom/mea-pet-mobile-fork-fo-pr)（其 `backup/` 包 + `DataSettings.kt`）。
+> 状态：**已实现（2026-11-23）**。实现落点：`app/src/main/java/com/meapet/mobile/backup/`（格式、设置白名单、编解码、采集、导出、校验、导入、SAF 封装）、`app/src/main/java/com/meapet/mobile/viewmodel/BackupViewModel.kt`、`app/src/main/java/com/meapet/mobile/ui/screen/settings/DataSettings.kt`，单测在 `app/src/test/java/com/meapet/mobile/backup/`。详细设计见 [`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md)。参考实现：社区版分支 [`mea-pet-mobile-fork-fo-pr`](https://gitee.com/flexiatom/mea-pet-mobile-fork-fo-pr)（其 `backup/` 包 + `DataSettings.kt`）。
 >
 > **借鉴原则：抄设计，不抄实现。**
 >

@@ -404,6 +404,27 @@ I/O library used by DataStore's okio backend.
 
 ---
 
+## zip4j
+
+AES-256 encrypted zip reading / writing used by the settings →「数据与备份」
+export and import flow (`app/src/main/java/com/meapet/mobile/backup/`).
+
+- **Location in this repo:** not vendored — declared in
+  `gradle/libs.versions.toml` (not embedded source).
+- **Version:** 2.11.5 (`net.lingala.zip4j:zip4j`, see
+  `gradle/libs.versions.toml`).
+- **Copyright:** Copyright (c) Srikanth Reddy Lingala (zip4j project
+  contributors).
+- **License:** Apache License 2.0.
+- **URL:** https://github.com/srikanth-lingala/zip4j
+- **License text:** https://www.apache.org/licenses/LICENSE-2.0
+- **Distribution:** bundled in the APK.
+- **Notes:** used only to write / read the AES-256 encrypted backup package
+  (settings, chat history, memory, compaction state and wallpaper). It
+  performs no network access; the app never uploads the backup package.
+
+---
+
 ## JSpecify & Guava ListenableFuture
 
 Small annotation / utility artifacts pulled in by AndroidX.

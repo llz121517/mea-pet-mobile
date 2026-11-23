@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.10.0] - 未发布（dev 分支）
+
+### Added
+
+- **数据与备份** — 设置页新增「数据与备份」分组，可把设置、对话历史、记忆库、上下文压缩状态与背景壁纸导出为一个备份包，经系统文件选择器保存到用户自己选择的位置（本地存储 / 云盘），换机或重装后按类别整体恢复。导出包强制 AES-256 口令加密，口令不保存、遗忘无法找回；API Key（聊天 Key、DeepSeek / AnySearch 独立 Key）默认不进包，只有勾选「包含 API Key」才写入并提示风险；包级格式或条目版本不匹配时整包拒绝；文本条目解压后限 64 MiB，二进制条目流式写盘不设上限。
+
+### Changed
+
+- **隐私政策修订至 1.4（2026-11-23）** — 新增「备份与导出」小节，说明备份由用户主动发起、导出包强制 AES-256 口令加密、API Key 默认不进包、应用不保留副本也不上传，导入按类别整体覆盖本机数据。含统计 SDK 的构建中，老用户会因版本号变化重新确认一次隐私政策。
+
+### Notes
+
+- 实现落点：`app/src/main/java/com/meapet/mobile/backup/`（格式、设置白名单、编解码、采集、导出、校验、导入、SAF 封装）、`viewmodel/BackupViewModel.kt`、`ui/screen/settings/DataSettings.kt`，单测在 `app/src/test/java/com/meapet/mobile/backup/`。
+- 版本号在发版时统一调整（`versionName` / `versionCode` 未随本条目改动）。
+
+---
+
 ## [1.9.0] - 未发布（dev 分支）
 
 ### Added

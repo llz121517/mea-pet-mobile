@@ -1,6 +1,6 @@
 # 配置与数据导出导入与备份 — LLD（详细设计）
 
-> 状态：**设计稿（2026-11-22）**，未实现。需求与决策见 [`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md)。
+> 状态：**已实现（2026-11-23）**。需求与决策见 [`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md)。
 > 参考实现：[`mea-pet-mobile-fork-fo-pr`](https://gitee.com/flexiatom/mea-pet-mobile-fork-fo-pr) 的 `backup/` 包 —— **抄设计不抄实现**（它按磁盘 JSON 文件采集，本项目数据在 SQLite 单库）。
 
 ---
@@ -177,15 +177,19 @@
 
 ## 3. 模块设计
 
+> **实现状态（2026-11-23）**：本文已按实现同步。较早草稿中的 `BackupInspector.inspect()` /
+> `BackupTargetSetters` 等形态已由下方实际接口取代（`open()` 返回 `BackupContentReader`，口令不进 UI 状态）。
+
 ```
 backup/
 ├── BackupFormat.kt        包级模型：ManifestEntry、BackupManifest、BackupCategory、
-│                          SUPPORTED_FORMAT、SUPPORTED_SCHEMA、编解码、拒绝异常
+│                          SUPPORTED_FORMAT、SUPPORTED_SCHEMA、编解码、拒绝异常、壁纸名安全化
 ├── SettingsWhitelist.kt   设置键白名单 + 类型化编解码（含可选 Key 三键）
 ├── BackupCodec.kt         各条目 JSON 模型与编解码（ChatPayload/MemoryPayload/CompactionPayload）
-├── BackupCollector.kt     类别 + 数据源 → List<BackupItem>（Text / FileSource）
+├── BackupContract.kt      BackupItem、BackupSources、BackupTarget、SettingsSink
+├── BackupCollector.kt     类别 + 数据源 → List<BackupItem>（Text / FileSource）+ manifest
 ├── BackupExporter.kt      逐条目 AES-256 流式写出 + manifest 收尾
-├── BackupInspector.kt     读包 + 两级版本校验 + 文本条目内存闸
+├── BackupInspector.kt     读包 + 两级版本校验 + 文本条目内存闸（返回 BackupContentReader）
 ├── BackupImporter.kt      按类别事务化落地
 └── BackupService.kt       SAF 薄封装：暂存、开流、显示名、清扫
 viewmodel/
@@ -194,7 +198,8 @@ ui/screen/settings/
 └── DataSettings.kt        页面 UI
 ```
 
-依赖注入：`AppContainer` 暴露 `backupService`、`backupSources`（由既有 manager/repository 组装）。
+依赖注入：`AppContainer` 暴露 `backupService`、`backupSettingsSink`、`backupSources`、`backupTarget`
+（全部由既有 `SettingsManager` / `ConversationRepository` / `MemoryStore` / `CompactionStore` 组装）。
 
 ### 3.1 BackupFormat
 
@@ -208,41 +213,50 @@ data class BackupManifest(
     val entries: List<ManifestEntry>,
 )
 
-enum class BackupCategory(val entryName: String) {
-    SETTINGS("settings"), MEMORY("memory"), CHAT("chat"),
-    COMPACTION("compaction"), WALLPAPER("wallpaper");
+enum class BackupCategory(val entryName: String, val label: String) {
+    SETTINGS("settings", "设置"), MEMORY("memory", "记忆库"), CHAT("chat", "对话历史"),
+    COMPACTION("compaction", "上下文压缩状态"), WALLPAPER("wallpaper", "背景壁纸");
 
     companion object {
         fun fromEntryName(name: String): BackupCategory?
-        fun fromPath(path: String): BackupCategory?   // files/<entry> 或 files/<entry>/…
+        fun fromPath(path: String): BackupCategory?   // files/<entry> 或 files/wallpaper/<name>
     }
 }
 
 object BackupFormat {
     const val SUPPORTED_FORMAT = 1
+    const val MANIFEST_ENTRY = "manifest.json"
+    const val FILES_PREFIX = "files/"
     val SUPPORTED_SCHEMA = mapOf(
         "settings" to 1, "memory" to 1, "chat" to 1,
         "compaction" to 1, "wallpaper" to 1,
     )
+    val categories: List<BackupCategory>
+    fun schemaFor(category: BackupCategory): Int
+    fun pathFor(category: BackupCategory): String      // files/<entryName>
+    fun encode(manifest: BackupManifest): String
     fun decode(text: String): BackupManifest          // format 不等即抛
     fun entrySupported(entry: ManifestEntry): Boolean // schema 不等即 false
+    fun unsupportedEntryMessage(entry: ManifestEntry): String
 }
 ```
 
 `ManifestRejectException(message: String)`：所有校验失败统一抛这个，UI 只展示 message。
+壁纸文件名安全化 `safeWallpaperFileName(raw)` 是包级内部函数（只留最后一段、字符集收窄到
+`[A-Za-z0-9._-]`、截断 96 字符、空则兜底），导出与导入两侧共用。
 
 ### 3.2 BackupItem 与 Exporter
 
 ```kotlin
 sealed interface BackupItem {
     val zipPath: String
+    val bytes: Long                                         // 未压缩字节数（写 manifest 用）
     data class Text(override val zipPath: String, val content: String) : BackupItem
     data class FileSource(override val zipPath: String, val file: File) : BackupItem
 }
 
 object BackupExporter {
     const val MANIFEST_ENTRY = "manifest.json"
-    fun pathFor(category: BackupCategory): String
     fun defaultFileName(utcCompact: String): String        // <utc>_MeaPet-Android.zip
     fun export(items: List<BackupItem>, manifest: BackupManifest,
                password: CharArray, sink: OutputStream)
@@ -251,31 +265,41 @@ object BackupExporter {
 
 实现要点：
 - 用 zip4j 的 `io.outputstream.ZipOutputStream(OutputStream, char[])`（**`ZipFile` 没有 OutputStream 构造器**），逐条目 `putNextEntry(ZipParameters)` → `write` → `closeEntry`，最后写 manifest。
-- `ZipParameters`：AES-256、`setFileNameInZip(path)`、图片用 `STORE`（已压缩），文本用 `DEFLATE`。
+- `ZipParameters`：AES-256（`EncryptionMethod.AES` / `AesKeyStrength.KEY_STRENGTH_256`）、`setFileNameInZip(path)`、图片用 `STORE`（已压缩），文本用 `DEFLATE`。**写入任一流的 `STORE` 条目必须 `setEntrySize(...)`**（zip4j 不能回填大小，否则 `putNextEntry` 抛 "uncompressed size should be set"）。
 - 明文不落盘：文本在内存、图片直读源文件进加密流。
 - 包里**不含**口令、不含设备标识。
 
 ### 3.3 Inspector
 
 ```kotlin
+data class BackupContentEntry(val path: String, val bytes: Long)
 data class BackupContents(
     val manifest: BackupManifest,
-    val perCategory: Map<BackupCategory, Pair<String, FileHeader>>,
-) { val categories: Set<BackupCategory> get() = perCategory.keys }
+    val entries: Map<BackupCategory, BackupContentEntry>,
+) { val categories: Set<BackupCategory> get() = entries.keys }
+
+interface BackupContentReader : Closeable {
+    val contents: BackupContents
+    fun extractText(category: BackupCategory, maxBytes: Long = BackupInspector.MAX_TEXT_BYTES): String
+    fun extractToFile(category: BackupCategory, target: File)
+}
 
 object BackupInspector {
-    fun inspect(stageFile: File, password: CharArray): BackupContents
-    fun extractText(contents: BackupContents, category: BackupCategory): String
-    fun extractToFile(contents: BackupContents, category: BackupCategory, target: File)
+    const val MAX_TEXT_BYTES = 64L * 1024 * 1024
+    const val MAX_MANIFEST_BYTES = 1024L * 1024
+    fun open(stageFile: File, password: CharArray): BackupContentReader
 }
 ```
 
+口令不落 UI 状态：zip 句柄与口令由 `BackupContentReader` 私有持有，`BackupUiState` 只放
+`contents`（元信息）。读取器在重新选包 / 关闭 / `onCleared` 时 `close()`。
+
 校验顺序（任一失败整包拒绝）：
 1. 能打开（口令错 → 「口令错误或文件已损坏」）。
-2. 有 `manifest.json` 且可解析。
+2. 有且只有一个 `manifest.json`（读取上限 1 MiB）且可解析。
 3. `format == SUPPORTED_FORMAT`。
-4. 每个 zip 条目：路径能归入已知类别（未知路径拒绝）、manifest 有登记（未登记拒绝）、`schema` 匹配。
-5. 一个类别只允许出现一次。
+4. 每个 zip 条目：路径能归入已知类别（未知路径拒绝）、manifest 有登记且 name/path 一致、`schema` 匹配。
+5. 一个类别只允许出现一次；manifest 登记数必须等于包内条目数（缺条目拒绝）。
 
 **体积闸**：文本条目边读边计数，超 64 MiB 抛；二进制条目流式写盘不设上限（磁盘是边界）。
 
@@ -284,11 +308,10 @@ object BackupInspector {
 ```kotlin
 object BackupImporter {
     suspend fun import(
-        contents: BackupContents,
+        reader: BackupContentReader,
         selected: Set<BackupCategory>,
         target: BackupTarget,
-        setters: BackupTargetSetters,
-    )
+    ): ImportOutcome
 }
 
 data class BackupTarget(
@@ -296,18 +319,21 @@ data class BackupTarget(
     val memoryStore: MemoryStore,
     val compactionStore: CompactionStore,
     val filesDir: File,
+    val settings: SettingsSink,
 )
+
+data class ImportOutcome(val succeeded: Set<BackupCategory>, val failed: Map<BackupCategory, String>)
 ```
 
 按类别独立落地，**每个类别一个事务**：
 
 | 类别 | 落地动作 |
 |---|---|
-| settings | 逐键写 DataStore（只写白名单内的键；可选 Key 按包里实际有无） |
-| chat | `conversationRepository.clear()` → `replaceAll(messages)` |
-| memory | `memoryStore.clear()` → `saveAll(items)` → `setExchangeCount(n)` |
-| compaction | 校验 `coveredToMessageId` 存在于目标对话；不存在则写空状态 |
-| wallpaper | 写 `filesDir/<name>` → 更新 `wallpaper_path` |
+| settings | `SettingsWhitelist.decode` → 逐键写 DataStore（只写白名单内、包里实际存在的键；可选 Key 按包里有无） |
+| chat | `conversationRepository.replaceAll(messages)`（单事务整体替换） |
+| memory | `memoryStore.replaceAll(items, exchangeCount)`（单事务整体替换 + 轮数计数） |
+| compaction | 校验 `coveredToMessageId` 是否被 `conversationRepository.contains(id)` 找到；找不到则写空状态 |
+| wallpaper | 解到 `filesDir/wallpaper/<安全化文件名>` → 更新 `wallpaper_path` → 清理其它旧壁纸 |
 
 失败语义：某类别失败时该类别回滚（事务），**其它类别按用户原本勾选继续**，回执里分别报告成功/失败类别。
 
@@ -317,12 +343,14 @@ data class BackupTarget(
 class BackupService(context: Context) {
     val stagingDir: File                                  // cacheDir/backup
     fun stageForRead(uri: Uri): File                      // 拷到 cacheDir 再按中央目录读
-    fun openWriteSink(uri: Uri): OutputStream             // SAF CreateDocument
-    fun displayName(uri: Uri): String?
+    fun openWriteSink(uri: Uri): OutputStream             // SAF CreateDocument（"wt" 截断）
+    fun displayName(uri: Uri): String?                    // OpenableColumns.DISPLAY_NAME
     fun sweepStaleStaging()                               // 进页清扫
     companion object { fun utcCompactNow(): String }
 }
 ```
+
+清扫逻辑抽成 `internal fun sweepStagingDir(dir: File)`（纯函数，JVM 单测可验证）。
 
 ### 3.6 ViewModel 状态机
 
@@ -332,15 +360,18 @@ data class BackupUiState(
     val available: Set<BackupCategory> = emptySet(),   // 本机有内容的类别
     val exportSelection: Set<BackupCategory> = …全选…,
     val includeApiKeys: Boolean = false,
-    val staged: BackupContents? = null,                // 已校验的待导入包
+    val staged: BackupContents? = null,                // 已校验的待导入包（只含元信息）
+    val stagedFileName: String? = null,                // 备份包显示名（SAF 取不到时为 null）
     val importSelection: Set<BackupCategory> = emptySet(),
     val receipt: String? = null,
 )
 ```
 
-- 口令**不进状态、不落盘、不写日志**，只存在于 `DataSettings` 的局部 `remember`。
+- 口令**不进状态、不落盘、不写日志**，只作为方法参数（用后 `fill('\u0000')`）或 `DataSettings` 的局部 `remember`。
 - 导出：`refreshAvailability()` → 勾选 → 口令两次 → 告知弹窗 → SAF → `runExport`。
 - 导入：SAF → `inspectPackage(uri, pwd)` → 展示清单 → 勾选 → 强制确认 → `runImport`。
+- 导入成功后：`ConversationManager.reloadWindowFromRepository()` 刷新内存窗口（使 UI 与模型上下文看到新数据）；
+  若设置类别成功则 `AppContainer.reloadClient()` 让新端点 / Key / 模型立即生效。
 
 ---
 
@@ -370,14 +401,16 @@ data class BackupUiState(
 
 | 层 | 用例 |
 |---|---|
-| `BackupFormatTest` | format 不等拒绝、schema 不等拒绝、未知路径拒绝、类别↔路径映射、manifest 往返 |
-| `SettingsWhitelistTest` | 白名单外的键不进包、Optional Key 三键受开关控制、类型正确性、未知键在导入时忽略 |
+| `BackupFormatTest` | format 不等拒绝、schema 不等拒绝、未知路径拒绝、类别↔路径映射、manifest 往返、壁纸名安全化 |
+| `SettingsWhitelistTest` | 白名单外的键不进包、Optional Key 三键受开关控制、只导出实际写过的键、类型正确性、未知/类型不符键在导入时忽略、null 上下文窗口清除 |
+| `BackupCodecTest` | chat/memory/compaction 往返、rawAssistantJson 与工具字段保留、损坏内容拒绝、未知字段忽略 |
+| `BackupCollectorTest` | 可用性判定、各类别条目与 manifest 对账、未勾选类别不进包、壁纸文件缺失时跳过 |
 | `BackupExporterTest` | 文本+文件混合写出、明文不出现在字节里、口令能解、错误口令打不开、manifest 条目数与实际一致 |
-| `BackupInspectorTest` | 正常包解析、口令错、缺 manifest、未登记条目、重复类别、超 64 MiB 文本闸 |
-| `BackupImporterTest` | 各类别覆盖（原有数据 / 空库两种）、单类别失败不影响其它、compaction 的 coveredToMessageId 失效重置、壁纸路径安全化 |
-| `BackupRoundTripTest` | 全类别导出→导入→比对：消息条数与关键字段、记忆条数与类型、设置值、压缩状态 |
-| `BackupServiceTest` | 文件名生成、显示名兜底、清扫 |
-| 安全 | 全流程日志不含口令、Key、对话正文（grep logcat 断言） |
+| `BackupInspectorTest` | 正常包解析、口令错、缺 manifest、未登记条目、重复类别、未知路径、schema 不符、文本大小闸 |
+| `BackupImporterTest` | 各类别覆盖（原有数据 / 空库两种）、单类别失败不影响其它、compaction 的 coveredToMessageId 失效重置、壁纸路径安全化、未勾选类别不动 |
+| `BackupRoundTripTest` | 全类别导出→导入→比对：消息、记忆、设置、压缩状态、壁纸字节；错误口令拒绝 |
+| `BackupServiceTest` | 文件名生成（UTC 紧凑）、暂存目录清扫 |
+| 安全 | 全流程日志不含口令、Key、对话正文（代码审查 + grep 断言） |
 
 ---
 
@@ -400,6 +433,6 @@ data class BackupUiState(
 |---|---|
 | 导入把库写坏 | 按类别事务 + 导入前取快照（可选：提供「导入前自动导出一次」作为无痛兜底） |
 | 口令遗忘导致包报废 | UI 明示「无法找回」；弱口令只提示不拦（用户自担） |
-| zip4j 的 API 与直觉不符 | 已在 §3.2 写明：只有 `ZipOutputStream` 能往任意流写；`ZipParameters` 无 `isCompressed` |
+| zip4j 的 API 与直觉不符 | 已在 §3.2 写明：只有 `ZipOutputStream` 能往任意流写；`STORE` 条目必须 `setEntrySize(...)`；`ZipParameters` 无 `isCompressed` |
 | 未来新增设置键被意外导出 | 白名单是显式枚举，新增键默认不进包，有单测守护 |
 | 未来备份格式升级 | 遵循 `docs/legacy-compat.md` §8：格式升级与导入兼容 step 同步提供 |
