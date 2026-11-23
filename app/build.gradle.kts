@@ -36,6 +36,15 @@ val ttsModelBaseUrl: String = localProperties.getProperty("app.ttsModelBaseUrl",
 // 供 tools/build-release.* 依次产出分 ABI 的 release APK；v7a/v8a 各自只带对应 so。
 val appAbi: String = (project.findProperty("appAbi") as String?) ?: "both"
 
+// ── 测试版共存开关 ──
+// gradle -PtestApp=true 时产出「测试版」：applicationId 加 .test 后缀，可与正式版同时安装，
+// 用来双版本对照（例如验证备份包在两个版本间能否互相导入）。
+// 只改 applicationId：namespace（R 类包名）保持不变，源码无需任何改动。
+// 注意两者数据互相独立（各自有私有目录），备份包才是它们之间传递数据的通道。
+val testApp: Boolean = (project.findProperty("testApp") as String?)?.lowercase() == "true"
+val applicationIdBase = "com.meapet.mobile"
+val applicationIdEffective = if (testApp) "$applicationIdBase.test" else applicationIdBase
+
 // 自动构建脚本（tools/build-release.*）用 `git rev-parse --short=9 HEAD` 取当前提交的
 // 9 位短哈希，再通过 -PversionSuffix 传入；拼到 versionName 末尾后形如 1.9.0-1a2b3c4d5，
 // 便于从安装包直接识别构建来源（git 短哈希冲突时 git 会自动加长，最多 40 位）。
@@ -51,15 +60,15 @@ val versionSuffix: String? = (project.findProperty("versionSuffix") as String?)
     }
 
 // ── 构建时间 ──
-// 自动构建与手动构建（Android Studio / gradlew assembleDebug）都注入 BuildConfig.BUILD_TIME。
+// **只给 release 注入**，debug 固定 0（关于页据此隐藏该行）。
+// 为什么不一刀切注入：时间戳每次配置阶段都变，会让 generate*BuildConfig → compile*Kotlin
+// 每次都要重跑，增量构建缓存基本失效；而构建时间只有发布产物才需要（排障时反查是哪次
+// 构建），开发调试包不需要这行信息。
 // 这里只存时间戳本身（epoch 毫秒，Long 常量），不预先格式化、不固定时区；
 // 关于页展示时用设备当前时区解析成可读文本，格式与语言跟随系统。
 // 实现说明：
 //  - 用 providers.provider 生成时间戳，configuration cache 可缓存该值，不引入不可序列化状态；
-//  - BUILD_TIME 只影响 generate*BuildConfig → compile*Kotlin（BuildConfig 常量变化才重编译），
-//    不会让资源、依赖解析等无关任务失效；
-//  - 配置阶段被 configuration cache 跳过时会复用缓存中的时间戳（Gradle 固有行为）；
-//    自动构建每次传入不同的 -PversionSuffix（不同提交哈希会改变配置缓存键），
+//  - 自动构建每次传入不同的 -PversionSuffix（不同提交哈希会改变配置缓存键），
 //    因此发布构建总能拿到当次构建时间戳。
 val buildTimeMillis: Long = providers.provider<Long> { System.currentTimeMillis() }.get()
 
@@ -107,14 +116,16 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.meapet.mobile"
+        applicationId = applicationIdEffective
         minSdk = 26
         targetSdk = 36
         versionCode = 15
         // 自动构建追加 -<提交短哈希>；手动构建保持 "1.9.0"。
         // 注意：tools/build-release.* 与 tools/release_meta.py 用正则在 "1.9.0" 字面量上
         // 解析基础版本号，因此保留引号内的字面量，不要改成变量引用。
-        versionName = "1.9.0" + versionSuffix?.let { "-$it" }.orEmpty()
+        // 测试版（-PtestApp=true）额外加 `.test` 后缀，便于在「关于」页区分两个共存版本。
+        versionName = "1.9.0" + versionSuffix?.let { "-$it" }.orEmpty() +
+            if (testApp) ".test" else ""
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -139,12 +150,14 @@ android {
         buildConfigField("String", "QQ_GROUP_URL", "\"$qqGroupUrl\"")
         buildConfigField("String", "UMENG_POLICY_URL", "\"$umengPolicyUrl\"")
         buildConfigField("String", "TTS_MODEL_BASE_URL", "\"$ttsModelBaseUrl\"")
-        // 构建时间戳（epoch 毫秒，Long）：自动 / 手动构建都有值，关于页按设备时区展示
-        buildConfigField("long", "BUILD_TIME", "${buildTimeMillis}L")
     }
 
     buildTypes {
         release {
+            // 构建时间戳（epoch 毫秒，Long）：只有发布产物注入真实值，关于页按设备时区展示。
+            // 放在 release 而不是 defaultConfig：debug 不注入时间戳，避免每次配置阶段生成
+            // 新常量导致 generate*BuildConfig / compile*Kotlin 无法增量复用。
+            buildConfigField("long", "BUILD_TIME", "${buildTimeMillis}L")
             // 开启 R8（代码收缩/混淆 + 资源收缩）；keep 规则见 proguard-rules.pro
             optimization {
                 enable = true
@@ -157,6 +170,11 @@ android {
             if (canSignRelease) {
                 signingConfig = signingConfigs.getByName("release")
             }
+        }
+        debug {
+            // 固定 0（= 无构建时间）：字段必须存在以保持源码一致，但取值恒定，
+            // 不会因时间戳变化触发重编译，关于页遇到 0 时隐藏该行。
+            buildConfigField("long", "BUILD_TIME", "0L")
         }
     }
     compileOptions {

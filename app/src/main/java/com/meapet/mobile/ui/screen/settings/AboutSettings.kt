@@ -59,11 +59,15 @@ private const val BUILD_TIME_DISPLAY_PATTERN = "yyyy-MM-dd HH:mm"
  * 把 `BuildConfig.BUILD_TIME`（构建时的 epoch 毫秒）按设备当前时区展示。
  *
  * 构建时只注入时间戳，不固定时区 / 不预先格式化；展示格式与语言跟随设备系统。
+ * 返回 null 表示本构建没有构建时间信息（debug 固定注入 0，见 `app/build.gradle.kts`），
+ * 调用方据此隐藏整行——debug 包不需要这行信息，也不该显示 1970 年的时间。
  */
-private fun formatBuildTime(epochMillis: Long): String =
-    Instant.ofEpochMilli(epochMillis)
+private fun formatBuildTime(epochMillis: Long): String? {
+    if (epochMillis <= 0L) return null
+    return Instant.ofEpochMilli(epochMillis)
         .atZone(ZoneId.systemDefault())
         .format(DateTimeFormatter.ofPattern(BUILD_TIME_DISPLAY_PATTERN, Locale.getDefault()))
+}
 
 /**
  * 应用信息：名称/简介/版本、致谢、外部链接与技术栈。
@@ -94,19 +98,22 @@ internal fun AppInfoSection() {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
-    Spacer(Modifier.height(2.dp))
-    Text(
-        "构建时间 $buildTime",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+    // 构建时间只在 release 注入（debug 固定 0）；为 0 表示本次构建没有该信息，直接省略这行
+    if (buildTime != null) {
+        Spacer(Modifier.height(2.dp))
+        Text(
+            "构建时间 $buildTime",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 
     Spacer(Modifier.height(10.dp))
     HorizontalDivider()
     Spacer(Modifier.height(10.dp))
 
     Text(
-        "我见青山多妩媚，料青山见我应如是",
+        "我见青山多妩媚，料青山见我应如是。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )

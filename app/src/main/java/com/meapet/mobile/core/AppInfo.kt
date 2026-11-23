@@ -24,6 +24,14 @@ object AppInfo {
      */
     private val BUILD_HASH_SUFFIX = Regex("[-+][0-9a-fA-F]{7,40}$")
 
+    /**
+     * 测试版（`-PtestApp=true`）追加在 versionName 末尾的 `.test` 后缀。
+     *
+     * 测试版与正式版 applicationId 不同、可共存，但版本比较必须把两者视作同一版本，
+     * 否则测试版会永远提示「有新版本」（`1.9.0.test` vs 远端 `1.9.0`）。
+     */
+    private val TEST_SUFFIX = Regex("\\.test$")
+
     /** 开发者名称。 */
     val devName: String = BuildConfig.DEV_NAME.ifBlank { "llz121517" }
 
@@ -62,5 +70,5 @@ object AppInfo {
      * `1.9.0-1a2b3c4d5` 解析为 `1.9.0.1`，误判需要更新）。
      */
     fun baseVersion(versionName: String): String =
-        versionName.trim().replace(BUILD_HASH_SUFFIX, "")
+        versionName.trim().replace(BUILD_HASH_SUFFIX, "").replace(TEST_SUFFIX, "")
 }
