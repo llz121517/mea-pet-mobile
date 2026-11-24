@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 # Regression check:
 #   1. both release wrappers must publish uppercase .APK files in dist/ with the unchanged
 #      MeaPet-v<基础版本>-<ABI>.APK naming;
@@ -35,6 +35,10 @@ try {
     & git -C $fixture config --local user.email 'release-test@example.com' 2>&1 | Out-Null
     & git -C $fixture config --local user.name 'release test' 2>&1 | Out-Null
     & git -C $fixture config --local commit.gpgsign false 2>&1 | Out-Null
+    # fixture 里显式关掉 autocrlf：否则 `git add` 会往 stderr 写
+    # "LF will be replaced by CRLF"，Windows PowerShell 5.1 在
+    # $ErrorActionPreference='Stop' 下会把它当成 NativeCommandError 抛出。
+    & git -C $fixture config --local core.autocrlf false 2>&1 | Out-Null
     & git -C $fixture add -A 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'git add failed' }
     & git -C $fixture commit --allow-empty -qm 'fixture' 2>&1 | Out-Null
@@ -51,9 +55,17 @@ try {
         if (Test-Path $argsFile) { Remove-Item -Force $argsFile }
         if ($wrapper -eq 'sh') {
             $env:RELEASE_FIXTURE = $fixture
+            # 把 shell 片段写进临时文件再执行：Windows PowerShell 5.1 会破坏
+            # `-c '...'` 单引号字符串里的 `$(...)`（当成自己的子表达式解析），
+            # 导致 bash 收到残缺引号并报 "unexpected EOF"。走文件可绕开引号层。
+            $shRunner = Join-Path $fixture 'run-wrapper.sh'
+            $shBody = 'set -e' + "`n" +
+                      'cd "$(cygpath -u "$RELEASE_FIXTURE")"' + "`n" +
+                      'bash tools/build-release.sh' + "`n"
+            Set-Content $shRunner -Value $shBody -Encoding ascii
             try {
                 $env:ABIS = 'v8a'
-                & $bash -c 'cd "$(cygpath -u "$RELEASE_FIXTURE")" && bash tools/build-release.sh'
+                & $bash $shRunner
                 if ($LASTEXITCODE -ne 0) { throw "Shell wrapper failed: $LASTEXITCODE" }
             } finally {
                 Remove-Item Env:RELEASE_FIXTURE -ErrorAction SilentlyContinue
