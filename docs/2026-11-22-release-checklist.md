@@ -41,7 +41,7 @@
 
 ### 0.2 还差什么才能发版
 
-1. **构建与发布（§1.3，3 条未完成）** — 三档 ABI 产物（`dist/` 已清空，需用 `tools/build-release.*` 重出 v7a / v8a / both）、`dev → main` 合并、工作区干净（本文提交后即满足）。
+1. **构建与发布（§1.3，3 条未完成）** — 三档 ABI 产物（`dist/` 已清空，需用 `tools/build-release.*` 重出 v7a / v8a / both）、`dev → main` 经 origin PR 合并、工作区干净（本文提交后即满足）。
 2. **设置与隐私剩余（§2.8，1 条部分完成）** — 备份导入边界用例（版本不符 / SAF 取消 / 大壁纸），维护者决定延后；其余 8 项已通过。
 3. **§1.1 #1 整体验收** — 依赖上述 §2.8 与 §1.3 收口；§2.1~§2.7 已全部通过。
 
@@ -106,7 +106,7 @@
 | 6 | **工作区干净、改动已提交** | `git status --short` 为空；`gradle.properties` / `local.properties` / `gradlew` 不在暂存区 | ⬜ 本文改写后待提交 |
 | 7 | **三档 ABI 产物齐全且签名一致** | `dist/` 有 `MeaPet-v1.9.0-{v7a,v8a,both}.APK`，签名证书 SHA-256 一致；v7a 体积明显小于 v8a（缺 Cubism Core so） | ⬜ 当前只有 v8a（33.8 MB） |
 | 8 | **`CHANGELOG.md` 定稿** | `## [1.9.0] - 未发布（dev 分支）` 改为实际发布日；本版全部用户可见改动都在段内；日期与 tag 一致 | ✅ 2026-11-24（`## [1.9.0] - 2026-11-24`） |
-| 9 | **dev → main 合并** | `main` 含 `dev` 全部提交，tag 指向 `main` 上该提交（release workflow `--require-main`） | ⬜ `origin/main` 落后 `dev` 78 个提交 |
+| 9 | **dev → main 合并** | 经 origin PR 合并，`main` 含 `dev` 全部提交，tag 指向 `main` 上该提交（release workflow `--require-main`） | ⬜ `origin/main` 落后 `dev` 78 个提交 |
 
 **已验证明细**
 
@@ -418,7 +418,7 @@ node tools/check_doc_links.mjs
 
 1. 确认 `app/build.gradle.kts`：`versionCode = 15`、`versionName = "1.9.0"`（引号内保持字面量，`tools/release_meta.py` 与 `tools/build-release.*` 用正则取基础版本号）。
 2. `CHANGELOG.md` 的 `## [1.9.0] - 2026-11-24` 已定稿（发布日期与 tag 提交日一致）。
-3. 把 `dev` 合并到 `main` 并 `git push origin main`（release workflow 要求 tag 提交在 `main` 上）。
+3. 在 origin 上开 PR（`dev` → `main`）并通过 PR 合并（`main` 受保护，**不要本地 merge 后 push**）；release workflow 要求 tag 提交在 `main` 上。
 4. `git tag v1.9.0 && git push origin v1.9.0`。
    - tag 必须与 `versionName` **基础版本**一致，否则 `release_meta.py --require-main` 直接失败。
    - 带后缀的 tag（如 `v1.9.0-beta1`）照常发布但标为 pre-release：不占 Latest，也不影响「检测更新」。

@@ -52,3 +52,9 @@
 - 一个改动完成后（未完成时不要提交）默认提交。
 - 多次修改同一地方时，应使用 amend 提交。
 - 仅要求 Push 时 Push。
+
+### 分支保护
+
+- `main` 默认受保护：**不得直接提交**（包括本地 commit 后 `git push origin main`），也**不得在本地把其它分支 merge 进 `main`**。
+- 日常改动落在 `dev`；需要进 `main` 时一律在 **origin 上开 PR**（GitHub 网页或 `gh pr create`），由 PR 完成合并，本地只负责推送分支。
+- 发版 tag 从 `main` 上 PR 合并后的提交打（流程见发版检查单 §5.1）。
