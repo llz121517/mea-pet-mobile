@@ -65,6 +65,9 @@ class ChatViewModelTest {
     private lateinit var ttsManager: TtsManager
     private lateinit var settingsManager: SettingsManager
 
+    /** 备份导入等整库替换后的数据修订号（ChatViewModel init 订阅它做整表重载）。 */
+    private lateinit var dataRevision: kotlinx.coroutines.flow.MutableStateFlow<Long>
+
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
@@ -83,8 +86,8 @@ class ChatViewModelTest {
         Mockito.doReturn(settingsManager).`when`(container).settingsManager
         Mockito.doReturn(Job().apply { complete() }).`when`(container).warmUpJob
         // 数据修订号流：ChatViewModel init 会订阅它做导入后整表重载；mock 未 stub 会拿到 null
-        Mockito.doReturn(kotlinx.coroutines.flow.MutableStateFlow(0L))
-            .`when`(container).dataRevision
+        dataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+        Mockito.doReturn(dataRevision).`when`(container).dataRevision
         wheneverBlocking { updateChecker.check() }.thenReturn(UpdateCheckResult.UpToDate("1.0.0"))
         wheneverBlocking { memoryManager.getStats() }.thenReturn(MemoryStats())
         wheneverBlocking { memoryManager.getAllMemories() }.thenReturn(emptyList())
@@ -359,6 +362,52 @@ class ChatViewModelTest {
         assertNotNull("压缩完成应有回执", vm.state.value.compactionNotice)
         assertNotNull("更新提示被压缩结果误清", vm.state.value.updateNotice)
         assertNotNull("记忆弹窗被压缩结果误关", vm.state.value.memoryDialog)
+    }
+
+    /**
+     * 备份导入是绕过 ChatService 的整库替换：ViewModel 订阅数据修订号做整表重载，
+     * 并必须按**导入包里的压缩状态**刷新「早些时候」分隔条锚点（§2.8 导入刷新 ④）。
+     */
+    @Test
+    fun `备份导入后按导入的压缩状态刷新分隔条锚点`() = runTest(dispatcher.scheduler) {
+        val oldMsg = ChatMessage(role = ChatRole.user, content = "导入前")
+        whenever(chatService.getHistory()).thenReturn(listOf(oldMsg))
+        wheneverBlocking { chatService.compaction() }.thenReturn(CompactionState())
+
+        val vm = ChatViewModel(application)
+        vm.advance()
+        assertEquals(listOf(oldMsg), vm.state.value.messages)
+        assertNull("导入前不应有分隔条锚点", vm.state.value.compactedUpToMessageId)
+
+        // 导入包内容：3 条消息 + 覆盖前 2 条的摘要
+        val imported = listOf(
+            ChatMessage(role = ChatRole.user, content = "导入1"),
+            ChatMessage(role = ChatRole.assistant, content = "导入2"),
+            ChatMessage(role = ChatRole.user, content = "导入3"),
+        )
+        whenever(chatService.getHistory()).thenReturn(imported)
+        // setUp 里 loadRecentForUi 的答案直接取 getHistory()，这里无需重复 stub
+        wheneverBlocking { chatService.compaction() }.thenReturn(
+            CompactionState(
+                summary = "导入包里的摘要",
+                coveredToMessageId = imported[1].id,
+                coveredCount = 2,
+                updatedAt = 1L
+            )
+        )
+        wheneverBlocking { chatService.refreshContextTokens() }.thenReturn(4321)
+
+        // 导入器完成整库替换后自增修订号
+        dataRevision.value = 1L
+        vm.advance()
+
+        assertEquals(imported, vm.state.value.messages)
+        assertEquals(
+            "分隔条锚点应指向导入摘要覆盖的最后一条消息",
+            imported[1].id,
+            vm.state.value.compactedUpToMessageId
+        )
+        assertFalse(vm.state.value.hasMoreHistory)
     }
 
     /**
