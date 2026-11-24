@@ -555,8 +555,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         chatService.cancelActiveTurn()
         viewModelScope.launch {
         // 快照必须在清空之前取：撤销窗口内这是唯一的回滚依据。
-        // 取仓库里的完整历史（不是内存窗口），否则撤销会丢掉窗口之前的消息
-        val snapshot = chatService.loadFullHistory()
+        // 取仓库里的完整历史（不是内存窗口），否则撤销会丢掉窗口之前的消息；
+        // 压缩状态一并取，否则撤销后那段被压缩过的内容对模型永久不可见
+        val clearSnapshot = chatService.snapshotForClear()
+        val snapshot = clearSnapshot.messages
         chatService.clearHistory()
         // 清除后摘要已不对应任何现存历史：提醒与入口一并复位，下次再长到阈值才重新提醒
         compactHintShown = false
@@ -579,7 +581,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 ChatUndo.ClearConversation(
                     id = nextUndoId(),
                     deadlineMs = nextUndoDeadline(),
-                    snapshot = snapshot
+                    snapshot = snapshot,
+                    compaction = clearSnapshot.compaction
                 )
             )
         }
@@ -673,20 +676,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         undoTimer = null
         when (undo) {
             is ChatUndo.ClearConversation -> {
-                chatService.restoreHistory(undo.snapshot)
-                _state.update {
-                    // 快照是完整历史（含 tool/空 assistant），展示前必须过滤；
-                    // 分页判断也按可见条数
-                    val visibleSnapshot = undo.snapshot.forUi()
-                    it.copy(
-                        messages = visibleSnapshot.takeLast(UI_PAGE_SIZE),
-                        hasMoreHistory = visibleSnapshot.size > UI_PAGE_SIZE,
-                        pendingUndo = null,
-                        // 整份历史刚被替换：重建列表状态，避免沿用清空后的空列表状态
-                        conversationEpoch = it.conversationEpoch + 1
+                viewModelScope.launch {
+                    // 历史与摘要一起还原：只还原历史会让那段被压缩过的内容对模型不可见
+                    chatService.restoreHistory(
+                        ChatService.ClearSnapshot(
+                            messages = undo.snapshot,
+                            compaction = undo.compaction
+                        )
                     )
+                    _state.update {
+                        // 快照是完整历史（含 tool/空 assistant），展示前必须过滤；
+                        // 分页判断也按可见条数
+                        val visibleSnapshot = undo.snapshot.forUi()
+                        it.copy(
+                            messages = visibleSnapshot.takeLast(UI_PAGE_SIZE),
+                            hasMoreHistory = visibleSnapshot.size > UI_PAGE_SIZE,
+                            pendingUndo = null,
+                            // 整份历史刚被替换：重建列表状态，避免沿用清空后的空列表状态
+                            conversationEpoch = it.conversationEpoch + 1
+                        )
+                    }
+                    refreshCompactionUi()
                 }
-                refreshCompactionUi()
             }
             is ChatUndo.ClearMemory -> {
                 viewModelScope.launch {

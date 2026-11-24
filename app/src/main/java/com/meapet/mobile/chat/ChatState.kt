@@ -1,5 +1,6 @@
 package com.meapet.mobile.chat
 
+import com.meapet.mobile.chat.compaction.CompactionState
 import com.meapet.mobile.core.UndoableAction
 import com.meapet.mobile.memory.MemoryItem
 import com.meapet.mobile.memory.MemoryStats
@@ -92,11 +93,19 @@ data class MemoryDialogUi(
 sealed interface ChatUndo : UndoableAction {
     override val undoLabel: String get() = "撤销"
 
-    /** 清除对话：快照为清空前的完整会话历史。 */
+    /**
+     * 清除对话：快照为清空前的完整会话历史**与压缩状态**。
+     *
+     * 压缩状态必须一起存：清除时摘要已被删除，还原时若只回放历史、不还原摘要，那段被
+     * 压缩过的内容对模型就永久不可见（原文在覆盖点之前不再逐字发送，摘要又是空的）。
+     *
+     * @property compaction 清空前的压缩状态（[CompactionState] 无摘要时表示本来没压缩过）
+     */
     data class ClearConversation(
         override val id: Long,
         override val deadlineMs: Long,
-        val snapshot: List<ChatMessage>
+        val snapshot: List<ChatMessage>,
+        val compaction: CompactionState = CompactionState()
     ) : ChatUndo {
         override val message: String get() = "已清除 ${snapshot.size} 条对话"
     }

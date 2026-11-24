@@ -169,6 +169,61 @@ class ChatServiceCompactionTest {
         assertTrue(svc.compactContext().isFailure)
     }
 
+    // ── 撤销「清除对话」恢复压缩状态（G2 尾部）──────────────────
+
+    /**
+     * 清除前必须取到摘要快照；撤销后摘要要跟着回来。
+     *
+     * 只还原历史而不还原摘要，那段被压缩过的内容对模型就永久不可见：原文落在
+     * `coveredToMessageId` 之前不再逐字发送，摘要又是空的。
+     */
+    @Test
+    fun `撤销清除对话时一并还原压缩摘要`() = runTest {
+        val cm = ConversationManager()
+        preload(cm, turns = 12)
+        val store = InMemoryCompactionStore()
+        val engine = engine()
+        val svc = service(cm, store, engine)
+
+        // 先压缩出摘要
+        assertTrue(svc.compactContext().isSuccess)
+        val summaryBefore = store.load().summary
+        val coveredBefore = store.load().coveredToMessageId
+        assertTrue(summaryBefore.isNotBlank())
+
+        // 清除前取快照 → 清除 → 撤销还原
+        val snapshot = svc.snapshotForClear()
+        assertEquals(summaryBefore, snapshot.compaction.summary, "快照应带上摘要")
+        svc.clearHistory()
+        assertFalse(store.load().hasSummary, "清除后摘要应被删")
+
+        svc.restoreHistory(snapshot)
+
+        assertEquals(summaryBefore, store.load().summary, "撤销应还原摘要")
+        assertEquals(coveredBefore, store.load().coveredToMessageId, "覆盖点也应还原")
+        assertEquals(24, svc.getHistory().size, "历史应完整回来")
+    }
+
+    /** 撤销后下一轮请求仍能读到摘要（不只是存储里有）。 */
+    @Test
+    fun `撤销后下一轮请求仍注入还原的摘要`() = runTest {
+        val cm = ConversationManager()
+        preload(cm, turns = 12)
+        val store = InMemoryCompactionStore()
+        val engine = engine()
+        val svc = service(cm, store, engine)
+        svc.compactContext()
+
+        val snapshot = svc.snapshotForClear()
+        svc.clearHistory()
+        svc.restoreHistory(snapshot)
+        svc.sendMessage("继续聊")
+
+        val body = (engine.requests.last().body as RequestBody.Json).content
+        assertTrue(body.contains("【对话摘要】"), "撤销后摘要应重新注入: $body")
+        assertTrue(body.contains("摘要正文"))
+    }
+
     /**
      * 注入侧必须有冲突优先级约定（G15 成因④）：摘要是压缩那一刻的快照，保留窗口里可能已经
      * 完成/推翻它记录的事。不写「以后文为准」，模型面对矛盾结论只能猜。

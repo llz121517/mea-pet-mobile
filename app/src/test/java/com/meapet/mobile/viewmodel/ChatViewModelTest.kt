@@ -92,7 +92,9 @@ class ChatViewModelTest {
         wheneverBlocking { chatService.loadRecentForUi(any()) }.thenAnswer {
             com.meapet.mobile.chat.HistoryPage(chatService.getHistory(), chatService.getHistory().size)
         }
-        wheneverBlocking { chatService.loadFullHistory() }.thenAnswer { chatService.getHistory() }
+        wheneverBlocking { chatService.snapshotForClear() }.thenAnswer {
+            ChatService.ClearSnapshot(chatService.getHistory(), CompactionState())
+        }
         // 压缩状态与上下文估算：ViewModel 在发送成功后会刷新，mock 需显式给默认值（否则拆箱 NPE）
         wheneverBlocking { chatService.refreshContextTokens() }.thenReturn(0)
         wheneverBlocking { chatService.compaction() }.thenReturn(CompactionState())
@@ -346,7 +348,7 @@ class ChatViewModelTest {
         vm.undoPending()
         vm.advance()
 
-        verify(chatService).restoreHistory(history)
+        verify(chatService).restoreHistory(ChatService.ClearSnapshot(history, CompactionState()))
         assertEquals(history, vm.state.value.messages)
         assertNull(vm.state.value.pendingUndo)
     }

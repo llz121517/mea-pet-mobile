@@ -974,13 +974,6 @@ class ChatService(
     fun getHistory(): List<ChatMessage> = conversationManager.getMessages()
 
     /**
-     * 完整历史（撤销「清除对话」的快照用，不受内存窗口裁剪影响）。
-     *
-     * **不过滤** tool/空 assistant：撤销要恢复成清除前的精确状态。
-     */
-    suspend fun loadFullHistory(): List<ChatMessage> = conversationManager.loadFullHistory()
-
-    /**
      * UI 首屏：完整历史里最近 [limit] 条，**过滤掉 UI 不可见消息**
      * （tool 与纯 tool_calls 的空 assistant，见 [forUi]）。
      */
@@ -993,6 +986,32 @@ class ChatService(
     suspend fun loadOlder(beforeId: String, limit: Int): HistoryPage {
         val raw = conversationManager.pageBefore(beforeId, limit)
         return HistoryPage(raw.forUi(), raw.size)
+    }
+
+    /**
+     * 一次「清除对话」的完整快照：历史 + 压缩状态。
+     *
+     * 两者必须一起取、一起还：只还原历史而不还原摘要，那段被压缩过的内容对模型就永久
+     * 不可见了（摘要已删、原文又落在 `coveredToMessageId` 之前不再逐字发送）。
+     *
+     * @property compaction 清除前的压缩状态（[CompactionState] 空对象表示本来就没压缩过）
+     */
+    data class ClearSnapshot(
+        val messages: List<ChatMessage>,
+        val compaction: CompactionState
+    )
+
+    /**
+     * 取「清除对话」的撤销快照。**必须在 [clearHistory] 之前调用。**
+     *
+     * 历史取仓库里的完整历史（不是内存窗口），否则撤销会丢掉窗口之前的消息；
+     * 压缩状态在锁内读，避免读到正在被压缩改写的中间态。
+     */
+    suspend fun snapshotForClear(): ClearSnapshot = compactionMutex.withLock {
+        ClearSnapshot(
+            messages = conversationManager.loadFullHistory(),
+            compaction = ensureCompactionLoaded()
+        )
     }
 
     /** 清除历史（同时清除压缩状态：摘要已不对应任何现存历史）。 */
@@ -1015,13 +1034,29 @@ class ChatService(
     }
 
     /**
-     * 用快照恢复历史（撤销「清除对话」用）。
+     * 用快照恢复历史与压缩状态（撤销「清除对话」用）。
      *
-     * @param snapshot 清空前的 [getHistory] 结果
+     * 恢复摘要这一步不能省：清除时摘要已被删除，若不还原则撤销后这段历史对模型不可见——
+     * 原文落在覆盖点之前不再逐字发送，摘要又是空的，等于凭空丢掉一段上下文。
+     *
+     * @param snapshot 清空前的 [ClearSnapshot]
      */
-    fun restoreHistory(snapshot: List<ChatMessage>) {
-        conversationManager.replaceAll(snapshot)
-        Log.i(TAG, "Chat history restored from undo snapshot (${snapshot.size} messages)")
+    suspend fun restoreHistory(snapshot: ClearSnapshot) {
+        // 与在途压缩互斥，并让正在跑的压缩作废（它的结果基于已清除的历史）
+        compactionMutex.withLock {
+            compactionGeneration++
+            conversationManager.replaceAll(snapshot.messages)
+            compactionState = snapshot.compaction
+            compactionLoaded = true
+            runCatching { compactionStore?.save(snapshot.compaction) }
+                .onFailure { Log.w(TAG, "Failed to restore compaction state", it) }
+        }
+        refreshContextTokens()
+        Log.i(
+            TAG,
+            "Chat restored from undo snapshot (${snapshot.messages.size} messages, " +
+                "summary ${snapshot.compaction.summary.length} chars)"
+        )
     }
 
     /**
