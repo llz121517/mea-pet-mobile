@@ -56,10 +56,10 @@
 **2026-11-22 代码审查遗留(并发 / 数据一致性 / 正确性)**
 
 - [ ] **G1 清除对话与在途 turn 取消收尾竞态** — 取消旧 turn 与取撤销快照可能交错:快照可能缺已展示片段,或清空后旧 turn 的片段又落库/回显;需串行化并明确「取消完成后取快照」。
-- [ ] **G2 撤销「清除对话」不恢复压缩摘要** — `clearHistory` 异步清 `MetaCompactionStore`,撤销后旧摘要可能已删或残留并被注入新会话;撤销应一并恢复/作废压缩状态。
+- [x] **G2 撤销「清除对话」不恢复压缩摘要**（**2026-11-24 已解决大部分**）— 新增 `compactionGeneration`：每次 `clearHistory` / `reloadAfterExternalImport` 自增，压缩在调模型前后对比代次，变了就丢弃结果，不会把旧摘要写回清空的库（单测「压缩期间清除历史则结果作废」）。**仍未做**：撤销（undo）时把快照对应的旧摘要一并恢复——当前撤销后摘要为空、历史回来了，模型看不到那段的摘要。
 - [ ] **G3 整轮落库后记忆提交失败只回滚 user** — `ChatService` 先 `addMessages` 再 `memoryTools.onTurnSuccess()`,提交抛错时只移除 user,会留下无 user 的 assistant/tool 行;提交失败应与整轮落库同一失败边界。
 - [ ] **G4 `ConversationManager` 落盘消费者取消后静默丢数据 / `flush()` 永久挂起** — 消费协程被取消后 `Flush` 永不完成,恢复 1.8.0 曾有的 `isActive` 保护与失败兜底完成。
-- [ ] **G5 手动压缩与自动压缩无互斥、压缩状态读改写互相覆盖** — 两处 `compactionState` 的 load-modify-save 无共享锁,并发时后写覆盖先写,摘要/覆盖点可回退。
+- [x] **G5 手动压缩与自动压缩无互斥、压缩状态读改写互相覆盖**（**2026-11-24 已修复**）— 原来两处 `compactionState` 的 load-modify-save 各走各的，并发时后写覆盖先写，摘要与覆盖点可回退。修复：新增 `compactionMutex`，把「读状态 → 调摘要模型 → 写状态」整段串行化（`mutateCompaction` / `runAutoCompaction` 共用）；自动压缩用 `tryLock`，拿不到锁**直接跳过**并退化为窗口内按轮丢弃，不排队等一次 LLM 调用把本轮聊天卡住；`clearHistory` 的存储清理也进锁，避免与在途压缩的 save 交错。单测覆盖「两个手动压缩并发时串行且摘要不被回退」「手动压缩持锁时自动压缩跳过」。
 - [ ] **G6 并发 turn 无守卫** — 悬浮窗发送不检查 `isTurnActive`,`cancelActiveTurn` 只取消最新 job;可能出现两个 turn 同时读写历史/记忆。
 - [ ] **G7 `removeMessages` 逐条事务,整轮回滚非原子** — 需批量删除 op(单事务),避免中途失败或并发插入造成半轮回滚。
 - [ ] **G8 `create_memory` 允许空 `keywords`** — 空关键词记忆在只读/关键词检索路径永远匹配不到;应与摘要流程一致要求至少 1 个有效关键词。

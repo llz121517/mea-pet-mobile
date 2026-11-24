@@ -90,7 +90,7 @@
 | # | 条目 | 判据 | 结果 |
 |---|---|---|---|
 | 1 | **版本号锁定** — `versionCode = 15`、`versionName = "1.9.0"` | 引号内字面量是 `tools/build-release.*` 与 `tools/release_meta.py` 的正则锚点，不可改成变量；`versionCode` 相对 1.8.0 已递增（14 → 15） | ✅ 2026-11-24 |
-| 2 | **全量单测通过** — 本版基线 571 条 | `./gradlew :app:testDebugUnitTest --stacktrace` 成功，报告 571 tests / 0 failed | ✅ 2026-11-24，多次 |
+| 2 | **全量单测通过** — 本版基线 574 条 | `./gradlew :app:testDebugUnitTest --stacktrace` 成功，报告 574 tests / 0 failed | ✅ 2026-11-24，多次 |
 | 3 | **debug / release 构建各通过一次** | `assembleDebug` 与 `assembleRelease -PappAbi=v8a` 均成功（每项待办都要能独立编过，bisect safe） | ✅ 2026-11-24 |
 | 4 | **文档链接检查通过** | `node tools/check_doc_links.mjs` 退出码 0 | ✅ 2026-11-24 |
 | 5 | **本文与执行记录登记进文档索引** | `docs/README.md` 可查到本文与 adb 执行记录 | ✅ 2026-11-24，登记在 §1 需求导航 |
@@ -102,7 +102,7 @@
 **已验证明细**
 
 - 第 1 项：`versionCode = 15`、`versionName = "1.9.0"` + 可选短哈希后缀，字面量未被改成变量。
-- 第 2 项：`ALL: tests=571 failures=0 errors=0`。
+- 第 2 项：`ALL: tests=574 failures=0 errors=0`。
 - 第 3 项：两档 BUILD SUCCESSFUL；release 产物 `versionName=1.9.0`、含真实构建时间。
 - 第 4 项：`链接检查通过（28 个 md）`，EXIT=0。
 
@@ -254,12 +254,12 @@
 | `*.kt` 文件总数 | 77（其中 `FakeHttpClientEngine.kt`、`storage/JdbcSQLiteDriver.kt`、`backup/BackupTestFakes.kt` 是测试辅助，不含用例） |
 | 含用例的测试文件 | 74 |
 | `*Test` 测试类 | 76（`MarkdownTableColumnsTest.kt` 一个文件两个类；`backup/BackupImporterTest.kt` 内含 `BackupImporterTest` 与 `BackupCollectorTest`） |
-| **`@Test` 总数** | **571** |
+| **`@Test` 总数** | **574** |
 | 其中数据与备份 | 87（`app/src/test/java/com/meapet/mobile/backup/` 下 10 个文件 / 10 个测试类，含全链路 `BackupRoundTripTest` 与条数对比 `BackupCounterTest`）；另有 `SettingsLocalStateTest` 6 例覆盖导入被本地编辑态覆盖的回归 |
 | `app/src/androidTest` | 3 个文件 / 5 个 `@Test`（instrumented，需真机） |
 | `@Ignore` | 0 |
 
-> 历史数字 **447**（`167e6bd` 时）/ **455**（`c6c223e` 时）已过时，本文与其它文档统一以 **571** 为准（G15 修复新增 9 例）（2026-11-24 已回填到 [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) 与 [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md)）。
+> 历史数字 **447**（`167e6bd` 时）/ **455**（`c6c223e` 时）已过时，本文与其它文档统一以 **574** 为准（G15 修复 +9 例、G5 互斥 +3 例）（2026-11-24 已回填到 [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) 与 [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md)）。
 
 统计命令（PowerShell，仓库根目录）：
 
@@ -348,10 +348,10 @@ node tools/check_doc_links.mjs
 > 以下都是 [`TODO.md`](TODO.md)「2026-11-22 代码审查遗留」与待办 A 的条目，本版**不修**，但需在发布说明或 issue 里有交代。
 
 - [ ] **G1** 清除对话与在途 turn 取消收尾竞态（快照可能缺已展示片段 / 清空后旧片段又落库）
-- [ ] **G2** 撤销「清除对话」不恢复压缩摘要（`clearHistory` 异步清 `MetaCompactionStore`）
+- [x] **G2** ~~撤销「清除对话」不恢复压缩摘要~~ **2026-11-24 已解决大部分**：新增代次机制，压缩期间清除历史会作废结果；**撤销时恢复旧摘要仍未做**（撤销后摘要为空，模型看不到那段摘要）
 - [ ] **G3** 整轮落库后记忆提交失败只回滚 user，可能留下无 user 的 assistant / tool 行
 - [ ] **G4** `ConversationManager` 落盘消费者取消后静默丢数据 / `flush()` 永久挂起
-- [ ] **G5** 手动压缩与自动压缩无互斥，`compactionState` 读改写互相覆盖
+- [x] **G5** ~~手动压缩与自动压缩无互斥~~ **2026-11-24 已修复**：`compactionMutex` 串行化「读 → 调模型 → 写」，自动压缩拿不到锁时跳过并退化为窗口丢弃
 - [ ] **G6** 并发 turn 无守卫（悬浮窗发送不检查 `isTurnActive`；`cancelActiveTurn` 只取消最新 job）
 - [ ] **G7** `removeMessages` 逐条事务、整轮回滚非原子
 - [ ] **G8** `create_memory` 允许空 `keywords`（空关键词记忆在只读 / 关键词检索路径永远匹配不到）
@@ -469,7 +469,7 @@ node tools/check_doc_links.mjs
 | 待办 E「数据与备份真机验收」 | 单测实为 **87 例**（原写 85 例）；主链路已由 adb 自动化覆盖 | ✅ 已更新进度与剩余项 |
 | **压缩摘要与保留窗口断层** | 新发现的行為缺陷（真机反馈），根因与修法已定位 | ✅ 已登记为 **G15**（`TODO.md` 待办 A） |
 | 候选-1 / 待办 0 / `SEPARATE_USER` / TTS native 内存 | 复核后**均仍成立**，未被 1.9 改动影响 | 不动 |
-| 447 / 455 / 550 等单测数字 | 当前为 **571** | ✅ 已在两篇 plan 文档回填 |
+| 447 / 455 / 550 等单测数字 | 当前为 **574** | ✅ 已在两篇 plan 文档回填 |
 | PRD「10 个文件 / 9 个测试类」 | 实为 **10 个文件 / 10 个测试类**（`BackupImporterTest.kt` 含两个类） | ✅ 已改 PRD |
 | PRD「默认文件名对齐参考版」 | 参考版是 `_MeaPet-Android.zip`，本项目是 `_MeaPet-backup.zip`，并非对齐 | ✅ 已改 PRD 与互通审计 |
 | `2026-11-18-sqlite-context-plan.md` 记录「日文数字排入 1.9.0」 | 已实现，该记录已过时 | ✅ `TODO.md` 与本文已按实现更新 |

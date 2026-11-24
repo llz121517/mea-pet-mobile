@@ -9,9 +9,12 @@ import com.meapet.mobile.client.RequestBody
 import com.meapet.mobile.client.test.FakeHttpClientEngine
 import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.settings.ApiConnection
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.Test
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
@@ -215,8 +218,7 @@ class ChatServiceCompactionTest {
     }
 
     /**
-     * 摘要只是「较早内容的压缩」，不该吞掉保留窗口里的原文：重叠区只进摘要请求，
-     * 不改变发给聊天端点的消息集合。
+     * 重叠区不进入聊天请求只影响摘要请求。
      */
     @Test
     fun `重叠区不进入聊天请求只影响摘要请求`() = runTest {
@@ -239,5 +241,158 @@ class ChatServiceCompactionTest {
             chatReqBody.contains("用于判断哪些状态已经过期"),
             "重叠区只用于摘要请求，不该进入聊天请求: $chatReqBody"
         )
+    }
+
+    // ── 压缩互斥（G5）────────────────────────────────────────
+
+    /**
+     * 两个手动压缩并发时**必须串行**：第二个要等第一个完整走完才读状态，
+     * 否则后写的一方会用旧快照覆盖先写的结果，摘要与覆盖点回退。
+     */
+    @Test
+    fun `两个手动压缩并发时串行执行且不丢摘要`() = runTest {
+        val cm = ConversationManager()
+        preload(cm, turns = 14)
+        val store = InMemoryCompactionStore()
+        val gate = CompletableDeferred<Unit>()
+        var summaryCalls = 0
+        val engine = FakeHttpClientEngine { req ->
+            val body = (req.body as RequestBody.Json).content
+            if (body.contains(summaryMarker)) {
+                val n = ++summaryCalls
+                // 第一个摘要请求挂住，让第二个有机会抢进来
+                if (n == 1) gate.await()
+                HttpResponse(
+                    statusCode = 200,
+                    body = """{"choices":[{"message":{"role":"assistant","content":"摘要$n"}}]}"""
+                        .encodeToByteArray(),
+                    contentType = "application/json"
+                )
+            } else {
+                HttpResponse(
+                    statusCode = 200,
+                    body = """{"choices":[{"message":{"role":"assistant","content":"收到喵"}}]}"""
+                        .encodeToByteArray(),
+                    contentType = "application/json"
+                )
+            }
+        }
+        val svc = service(cm, store, engine)
+
+        val first = async(Dispatchers.Default) { svc.compactContext() }
+        // 等第一个进入摘要请求
+        while (summaryCalls == 0) yield()
+        val second = async(Dispatchers.Default) { svc.compactContext() }
+        // 给第二个足够时间去抢锁（若没互斥，它会并发进入并读到旧状态）
+        repeat(20) { yield() }
+        assertEquals(1, summaryCalls, "第二个压缩必须等第一个做完才开始")
+
+        gate.complete(Unit)
+        val r1 = first.await()
+        val r2 = second.await()
+
+        assertTrue(r1.isSuccess, "第一个压缩应成功")
+        // 第二个拿到的是第一个折叠后的新状态：剩余轮数不足时会以「对话还不够长」失败，
+        // 这是正确行为——关键是它**没有**用旧快照把摘要覆盖回去
+        assertTrue(
+            r2.isFailure,
+            "第一个已折到只剩保留轮数，第二个应报『对话还不够长』而不是再折一次"
+        )
+        assertEquals(1, summaryCalls, "第二个不该发出摘要请求")
+        // 关键：摘要仍是第一个写入的那份，没有被旧快照回退
+        val finalState = store.load()
+        assertEquals("摘要1", finalState.summary, "摘要不该被并发写入覆盖")
+    }
+
+    /**
+     * 压缩期间历史被清除：结果必须作废，不能把旧摘要写回刚清空的库（G2 同源）。
+     */
+    @Test
+    fun `压缩期间清除历史则结果作废`() = runTest {
+        val cm = ConversationManager()
+        preload(cm, turns = 12)
+        val store = InMemoryCompactionStore()
+        val gate = CompletableDeferred<Unit>()
+        var entered = false
+        val engine = FakeHttpClientEngine { req ->
+            val body = (req.body as RequestBody.Json).content
+            if (body.contains(summaryMarker)) {
+                entered = true
+                gate.await()
+                HttpResponse(
+                    statusCode = 200,
+                    body = """{"choices":[{"message":{"role":"assistant","content":"旧摘要"}}]}"""
+                        .encodeToByteArray(),
+                    contentType = "application/json"
+                )
+            } else {
+                HttpResponse(
+                    statusCode = 200,
+                    body = """{"choices":[{"message":{"role":"assistant","content":"收到喵"}}]}"""
+                        .encodeToByteArray(),
+                    contentType = "application/json"
+                )
+            }
+        }
+        val svc = service(cm, store, engine)
+
+        val job = async(Dispatchers.Default) { svc.compactContext() }
+        while (!entered) yield()
+        // 摘要请求在途时清除历史
+        svc.clearHistory()
+        gate.complete(Unit)
+        val result = job.await()
+
+        assertTrue(result.isFailure, "历史已变，压缩结果应作废")
+        assertFalse(store.load().hasSummary, "不能把旧摘要写回清空后的库")
+    }
+
+    /**
+     * 自动压缩与手动压缩互斥：手动压缩持锁期间触发的自动压缩**直接跳过**而不是排队，
+     * 否则本轮聊天会被一整次压缩卡住。
+     */
+    @Test
+    fun `手动压缩进行中时自动压缩跳过硬阈值兜底`() = runTest {
+        val cm = ConversationManager()
+        // 内容很短，保证预算充足、不触发自动压缩
+        preload(cm, turns = 14, contentLength = 400)
+        val store = InMemoryCompactionStore()
+        val gate = CompletableDeferred<Unit>()
+        var summaryCalls = 0
+        var autoSkipped = false
+        val engine = FakeHttpClientEngine { req ->
+            val body = (req.body as RequestBody.Json).content
+            if (body.contains(summaryMarker)) {
+                summaryCalls++
+                gate.await()
+                HttpResponse(
+                    statusCode = 200,
+                    body = """{"choices":[{"message":{"role":"assistant","content":"摘要"}}]}"""
+                        .encodeToByteArray(),
+                    contentType = "application/json"
+                )
+            } else {
+                HttpResponse(
+                    statusCode = 200,
+                    body = """{"choices":[{"message":{"role":"assistant","content":"收到喵"}}]}"""
+                        .encodeToByteArray(),
+                    contentType = "application/json"
+                )
+            }
+        }
+        // 预算压到会硬触发自动压缩
+        val svc = service(cm, store, engine, budget = 6000)
+
+        val manual = async(Dispatchers.Default) { svc.compactContext() }
+        while (summaryCalls == 0) yield()
+        // 手动压缩持锁中：这轮发送应跳过自动压缩（不增加摘要请求数），直接窗口丢弃后成功
+        val send = svc.sendMessage("继续聊")
+        assertTrue(send.isSuccess, "拿不到压缩锁时应退化为窗口丢弃，而不是失败")
+        assertEquals(1, summaryCalls, "自动压缩应跳过，不该排队再发一次摘要请求")
+        autoSkipped = true
+
+        gate.complete(Unit)
+        manual.await()
+        assertTrue(autoSkipped)
     }
 }

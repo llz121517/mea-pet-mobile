@@ -26,6 +26,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -175,6 +177,28 @@ class ChatService(
 
     @Volatile
     private var compactionLoaded = false
+
+    /**
+     * 压缩互斥锁：手动压缩与自动压缩（硬触发兜底）共用。
+     *
+     * 「读状态 → 调摘要模型 → 写状态」必须整体串行，否则两处 load-modify-save 会互相
+     * 覆盖：后写的一方用自己那份旧快照覆盖先写的结果，摘要与覆盖点可能回退到更早的位置
+     * （于是同一段历史被重复折叠，或摘要比覆盖点新）。
+     *
+     * 阻塞范围只有压缩本身（摘要那一次 LLM 调用也在锁内），不覆盖普通聊天请求的组装；
+     * 自动压缩拿不到锁时**直接跳过**，退化为窗口内按轮丢弃，不排队等待——否则一次手动
+     * 压缩会让正在进行的聊天请求挂住数秒。
+     */
+    private val compactionMutex = Mutex()
+
+    /**
+     * 压缩状态的「代次」，每次清除历史 / 外部导入重载都会自增。
+     *
+     * 压缩是一次可能持续数秒的 LLM 调用，期间用户可能清除对话（G2）或导入备份。
+     * 调用前后对比代次，代次变了就**丢弃这次结果**，避免把旧摘要写回刚清空的库。
+     */
+    @Volatile
+    private var compactionGeneration = 0L
 
     /** 最近一次「即将发送的上下文」的本地估算 token（UI 提示与调试用）。 */
     @Volatile
@@ -487,26 +511,15 @@ class ChatService(
         if (budget > 0 && estimated > budget * CompactionConfig.HARD_TRIGGER_RATIO) {
             // 自动压缩只做兜底：小窗口直接放弃摘要，只截断
             if (budget > CompactionConfig.SMALL_WINDOW_TOKENS) {
-                val fold = foldCountFor(
-                    usable,
-                    targetTokens = (budget * CompactionConfig.TARGET_RATIO).toInt(),
-                    estimator = estimator
-                )
-                val newSummary = if (fold > 0) compactor?.compact(usable, state.summary, fold) else null
-                if (newSummary != null) {
-                    state = state.copy(
-                        summary = newSummary,
-                        coveredToMessageId = usable[fold - 1].id,
-                        coveredCount = skipOldest + fold,
-                        updatedAt = System.currentTimeMillis()
-                    )
-                    compactionState = state
-                    compactionStore?.save(state)
-                    skipOldest += fold
-                    usable = window.drop(skipOldest)
-                    estimated = overhead + estimator.estimate(usable)
-                    Log.i(TAG, "Auto compaction done (hard trigger), $fold message(s) folded")
-                }
+                // 与手动压缩互斥。拿不到锁（用户正在手动整理）就跳过摘要、直接走窗口丢弃：
+                // 排队等一整次 LLM 压缩会把本轮聊天卡住数秒，而丢弃同样能保证请求发得出去。
+                runAutoCompaction(budget, window)
+                    ?.let { folded ->
+                        state = folded
+                        skipOldest = resolveSkip(window, state)
+                        usable = window.drop(skipOldest)
+                        estimated = overhead + estimator.estimate(usable)
+                    }
             }
             // 压缩失败或仍超预算：只在发给模型的窗口内按轮丢弃（库里一条不删）
             if (estimated > budget) {
@@ -782,42 +795,142 @@ class ChatService(
      * @return 成功时返回本次折叠的消息条数（供 UI 反馈），失败时返回可展示的原因
      */
     suspend fun compactContext(): Result<Int> = withContext(Dispatchers.IO) {
+        if (compactionStore == null) {
+            return@withContext Result.failure(IllegalStateException("当前不支持整理上下文"))
+        }
         try {
-            val store = compactionStore
-                ?: return@withContext Result.failure(IllegalStateException("当前不支持整理上下文"))
-            val state = ensureCompactionLoaded()
-            val window = conversationManager.getMessages().filter { it.role != ChatRole.system }
-            val skip = resolveSkip(window, state)
-            val usable = window.drop(skip)
-            // 手动压缩是用户明确要求「把前面的内容整理掉」：按最大可折量折叠（保留最近
-            // MIN_KEEP_TURNS 轮原文），不做目标比例裁剪——否则大窗口用户点一下只折 2 条，
-            // 等于没整理。目标比例只用于自动兜底压缩。
-            val fold = foldCountFor(usable)
-            if (fold <= 0) {
-                return@withContext Result.failure(
+            // 手动压缩按最大可折量折叠（保留最近 MIN_KEEP_TURNS 轮原文），不做目标比例裁剪——
+            // 否则大窗口用户点一下只折 2 条，等于没整理。目标比例只用于自动兜底压缩。
+            val outcome = mutateCompaction { state, window ->
+                val skip = resolveSkip(window, state)
+                val usable = window.drop(skip)
+                val fold = foldCountFor(usable)
+                if (fold <= 0) {
+                    CompactionOutcome.TooShort
+                } else {
+                    val newSummary = compactor?.compact(usable, state.summary, fold)
+                    if (newSummary == null) {
+                        CompactionOutcome.Failed
+                    } else {
+                        CompactionOutcome.Done(
+                            state = state.copy(
+                                summary = newSummary,
+                                coveredToMessageId = usable[fold - 1].id,
+                                coveredCount = skip + fold,
+                                updatedAt = System.currentTimeMillis()
+                            ),
+                            folded = fold
+                        )
+                    }
+                }
+            }
+            when (outcome) {
+                is CompactionOutcome.Done -> {
+                    refreshContextTokens()
+                    Log.i(TAG, "Manual compaction done, ${outcome.folded} message(s) folded")
+                    Result.success(outcome.folded)
+                }
+                CompactionOutcome.TooShort -> Result.failure(
                     IllegalStateException("对话还不够长，暂时不用整理喵")
                 )
-            }
-            val newSummary = compactor?.compact(usable, state.summary, fold)
-                ?: return@withContext Result.failure(
+                CompactionOutcome.Failed -> Result.failure(
                     IllegalStateException("整理失败了，稍后再试试喵")
                 )
-            val newState = state.copy(
-                summary = newSummary,
-                coveredToMessageId = usable[fold - 1].id,
-                coveredCount = skip + fold,
-                updatedAt = System.currentTimeMillis()
-            )
-            store.save(newState)
-            compactionState = newState
-            refreshContextTokens()
-            Log.i(TAG, "Manual compaction done, $fold message(s) folded")
-            Result.success(fold)
+                CompactionOutcome.Abandoned -> Result.failure(
+                    IllegalStateException("对话在整理过程中变了，请重新整理喵")
+                )
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "Manual compaction failed", e)
             Result.failure(e)
+        }
+    }
+
+    /** 一次压缩尝试的结局。 */
+    private sealed interface CompactionOutcome {
+        data class Done(val state: CompactionState, val folded: Int) : CompactionOutcome
+        data object TooShort : CompactionOutcome
+        data object Failed : CompactionOutcome
+        /** 期间历史被清除或整库被替换，本次结果作废（不能把旧摘要写回新库）。 */
+        data object Abandoned : CompactionOutcome
+    }
+
+    /**
+     * 串行执行一次「读状态 → 调摘要模型 → 写状态」。
+     *
+     * 手动与自动压缩都走这里，保证同一时刻只有一个压缩在跑：两处 load-modify-save 若并行，
+     * 后写的会用自己那份旧快照覆盖先写的结果，摘要与覆盖点回退（G5）。
+     *
+     * 调模型前记录 [compactionGeneration]；若期间 [clearHistory] 或
+     * [reloadAfterExternalImport] 改过代次，直接丢弃结果——否则旧摘要会写回刚清空的库（G2 同源）。
+     *
+     * @param block 在锁内执行，拿到**最新的**状态与当前窗口
+     */
+    private suspend fun mutateCompaction(
+        block: suspend (CompactionState, List<ChatMessage>) -> CompactionOutcome
+    ): CompactionOutcome = compactionMutex.withLock {
+        val generation = compactionGeneration
+        val state = ensureCompactionLoaded()
+        val window = conversationManager.getMessages().filter { it.role != ChatRole.system }
+        val outcome = block(state, window)
+        if (outcome is CompactionOutcome.Done) {
+            if (generation != compactionGeneration) {
+                Log.i(TAG, "Compaction result abandoned: history changed while compacting")
+                return@withLock CompactionOutcome.Abandoned
+            }
+            compactionState = outcome.state
+            compactionStore?.save(outcome.state)
+        }
+        outcome
+    }
+
+    /**
+     * 自动压缩（硬触发兜底）。
+     *
+     * 拿不到锁时**直接返回 null**，由调用方退化为窗口内按轮丢弃：排队等一次手动压缩的
+     * LLM 调用会把本轮聊天卡住数秒，而丢弃同样能让请求发出去。
+     *
+     * @return 压缩后的新状态；跳过或失败时返回 null
+     */
+    private suspend fun runAutoCompaction(
+        budget: Int,
+        window: List<ChatMessage>
+    ): CompactionState? {
+        if (!compactionMutex.tryLock()) {
+            Log.i(TAG, "Auto compaction skipped: another compaction in progress")
+            return null
+        }
+        val generation = compactionGeneration
+        return try {
+            val state = ensureCompactionLoaded()
+            // 锁外的 usable 是加锁前算的，这里按最新状态重算，避免用过期窗口折叠
+            val skip = resolveSkip(window, state)
+            val freshUsable = window.drop(skip)
+            val fold = foldCountFor(
+                freshUsable,
+                targetTokens = (budget * CompactionConfig.TARGET_RATIO).toInt(),
+                estimator = estimator
+            )
+            if (fold <= 0) return null
+            val newSummary = compactor?.compact(freshUsable, state.summary, fold) ?: return null
+            if (generation != compactionGeneration) {
+                Log.i(TAG, "Auto compaction abandoned: history changed while compacting")
+                return null
+            }
+            val newState = state.copy(
+                summary = newSummary,
+                coveredToMessageId = freshUsable[fold - 1].id,
+                coveredCount = skip + fold,
+                updatedAt = System.currentTimeMillis()
+            )
+            compactionState = newState
+            compactionStore?.save(newState)
+            Log.i(TAG, "Auto compaction done (hard trigger), $fold message(s) folded")
+            newState
+        } finally {
+            compactionMutex.unlock()
         }
     }
 
@@ -885,12 +998,18 @@ class ChatService(
     /** 清除历史（同时清除压缩状态：摘要已不对应任何现存历史）。 */
     fun clearHistory() {
         conversationManager.clear()
+        // 代次自增：可能有压缩正拿着旧摘要跑 LLM，完成后必须丢弃结果（G2）
+        compactionGeneration++
         compactionState = CompactionState()
         compactionLoaded = true
         lastContextTokens = 0
         postProcessScope.launch {
-            runCatching { compactionStore?.clear() }
-                .onFailure { Log.w(TAG, "Failed to clear compaction state", it) }
+            // 用锁串行化，防止与在途压缩的 save 交错：否则压缩可能在我们 clear 之后
+            // 才把旧摘要写回去
+            compactionMutex.withLock {
+                runCatching { compactionStore?.clear() }
+                    .onFailure { Log.w(TAG, "Failed to clear compaction state", it) }
+            }
         }
         Log.i(TAG, "Chat history cleared")
     }
@@ -916,9 +1035,14 @@ class ChatService(
      */
     suspend fun reloadAfterExternalImport() {
         conversationManager.reloadWindowFromRepository()
-        val reloaded = runCatching { compactionStore?.load() }.getOrNull() ?: CompactionState()
-        compactionState = reloaded
-        compactionLoaded = true
+        // 与 clearHistory 同理：在途压缩的旧摘要不能写回导入后的新库
+        compactionGeneration++
+        val reloaded = compactionMutex.withLock {
+            val loaded = runCatching { compactionStore?.load() }.getOrNull() ?: CompactionState()
+            compactionState = loaded
+            compactionLoaded = true
+            loaded
+        }
         refreshContextTokens()
         Log.i(TAG, "Reloaded after external import (compaction covered=${reloaded.coveredCount})")
     }
