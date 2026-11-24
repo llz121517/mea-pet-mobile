@@ -61,9 +61,14 @@ when downloading.
   so it is not part of this repository, but when present it is packaged
   into the released APK as `lib/<abi>/libLive2DCubismCoreJNI.so` (the
   published APKs (v1.8.0 and v1.9.0) contain that file for `arm64-v8a`).
-- **Version:** not recorded in the repo — see "Pending confirmation"
-  below. Measured on a device (2026-11-24): **Cubism Core 6.0.1**
-  (`logcat -s Live2d` → `Live2D Cubism Core version: 06.00.0001`).
+- **Version:** **Cubism SDK for Java `5-r.5`** (recorded by the
+  maintainer), which ships **Cubism Core 6.0.1** — confirmed on a device
+  (2026-11-24): `logcat -s Live2d` reports
+  `Live2D Cubism Core version: 06.00.0001 (100663297)` and
+  `Live2D Cubism SDK Core Version 6.0.1`. Note these are two separate
+  version series: `5-r.5` identifies the SDK release, `6.0.1` the Core
+  binary inside it. The SDK-5-era features in use (`mea.motionsync3.json`,
+  the vendored `effect/` package) are consistent with this release.
 - **Notes:** the Core AAR used by this project ships prebuilt JNI
   libraries for `arm64-v8a`, `x86` and `x86_64` only (no `armeabi-v7a`
   binary).
@@ -634,16 +639,17 @@ before redistributing.
    2026-11-24: both AARs (`common-9.9.2`, `asms-1.8.7.2`) contain **no
    license file whatsoever** (only `R.txt`), so the contradiction stands
    and there is no in-artifact evidence favouring either statement.
-6. **Live2D Cubism SDK / Cubism Core version** — confirmed 2026-11-24:
-   `app/libs/Live2DCubismCore.aar` is git-ignored (`app/libs/.gitignore`)
-   and carries **no version string** in its bytecode — the version is read
-   at runtime via JNI (`CubismCoreVersion`, whose class only holds the
-   `%02d.%02d.%04d (%d)` format string). **The version was obtained from a
-   device run instead:** `logcat -s Live2d` reports
-   `Live2D Cubism Core version: 06.00.0001 (100663297)` and
-   `Live2D Cubism SDK Core Version 6.0.1` — i.e. **Cubism Core 6.0.1**.
-   The vendored framework under `app/src/main/java/com/live2d/` still
-   records no release, so its matching SDK release remains unconfirmed.
+6. ~~**Live2D Cubism SDK / Cubism Core version**~~ **Resolved
+   2026-11-24:** the SDK release is **Cubism SDK for Java `5-r.5`**
+   (recorded by the maintainer), which ships **Cubism Core 6.0.1** —
+   verified on a device via `logcat -s Live2d`
+   (`Live2D Cubism Core version: 06.00.0001 (100663297)`,
+   `Live2D Cubism SDK Core Version 6.0.1`). Two distinct version series:
+   `5-r.5` = SDK release, `6.0.1` = Core binary inside it. They are not
+   contradictory; `app/libs/Live2DCubismCore.aar` merely carries no
+   version string because the Core version is read at runtime over JNI
+   (`CubismCoreVersion`). SDK-5-era features in use
+   (`mea.motionsync3.json`, vendored `effect/` package) match `5-r.x`.
 7. **`jlm_special.ttf`** (bundled by JLaTeXMath-Android) — confirmed
    2026-11-24 as genuinely uncovered: the AAR's `fonts/licences/` holds
    only three files (`Knuth_License.txt`, `License_for_dsrom.txt`,

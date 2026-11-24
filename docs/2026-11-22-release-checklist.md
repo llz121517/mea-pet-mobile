@@ -69,7 +69,7 @@
 
 | # | 条目 | 判据 | 结果 |
 |---|---|---|---|
-| 1 | **`NOTICE.md`「Pending confirmation」8 项逐条确认** | 每项都有结论（确认 / 换成可再分发资源 / 从 APK 移除）并回写 `NOTICE.md`，见下方子项 | 🟡 **2 项已解决**（#2 孤儿文件移除、#3 图标登记），6 项取证完成待决策 |
+| 1 | **`NOTICE.md`「Pending confirmation」8 项逐条确认** | 每项都有结论（确认 / 换成可再分发资源 / 从 APK 移除）并回写 `NOTICE.md`，见下方子项 | 🟡 **3 项已解决**（#2 孤儿文件移除、#3 图标登记、#6 版本已查实），5 项取证完成待决策 |
 | 2 | **隐私政策 1.3 与实现一致性复核**（含「备份与导出」小节与「复用聊天 Key」开关） | 政策正文与实际行为一致，逐句核对见下方说明 | 🟡 政策已改，待重核 |
 | 3 | **统计 SDK 构建的隐私重新确认路径** | 发布构建 `UMENG_APP_KEY` 已配置（否则 `umeng.enabled` 为 true 但 AppKey 为空，CI 只打 warning）；升级安装后老用户看到一次政策更新弹窗 | ✅ 2026-11-24 |
 | 4 | **`NOTICE.md` 版本 / 依赖清单与本版一致** | 按 1.9.0 release APK 复核「Bundled in the APK」结论，或明确标注该节仍是 1.8.0 口径 | ✅ 2026-11-24（审计基准已更新为 1.9.0，见下） |
@@ -96,7 +96,7 @@
 - [x] **3. `ic_menu_compact.xml`** — **已解决（2026-11-24）**：与 Iconify API 的 `mdi/arrow-collapse` 路径数据逐字节比对一致，已登记进 `tools/icons.txt`；图标照常进包，许可由上面的 Material Design Icons 条目（Apache-2.0）覆盖。另三个未登记的 `ic_launcher_background`/`ic_slider_thumb`/`ic_slider_track` 非 MDI 图标，不在此列。
 - [ ] **4. JLaTeXMath-Android GPL-2.0+ / classpath exception** — 传递依赖 `ru.noties:jlatexmath-android:0.2.0`（经 `markwon-ext-latex` 引入），**AAR 内不含任何 GPL 许可正文**（只有 `R.txt`），仅含 3 份字体许可（Knuth / dsrom / OFL）。POM 无 `<license>` 节点。whether classpath exception 覆盖本分支仍需维护者/法务确认。
 - [ ] **5. Umeng SDK 许可矛盾** — 实测两个 AAR（`common-9.9.2`、`asms-1.8.7.2`）内**均无任何许可文件**（仅 `R.txt`），与 NOTICE 所记「POM 声明 Apache-2.0 但实为专有条款」一致，矛盾属实。
-- [x] **6. Live2D Cubism SDK / Core 版本** — **已查实（2026-11-24）**：`app/libs/Live2DCubismCore.aar` 被 `app/libs/.gitignore` 忽略，AAR 内无版本串（版本由 `CubismCoreVersion` 经 JNI 运行时读取）。**真机 logcat 实测 `Live2D Cubism Core version: 06.00.0001 (100663297)` / `Live2D Cubism SDK Core Version 6.0.1`，即 Core 6.0.1**，已回写 NOTICE。项目侧 `app/src/main/java/com/live2d/` 的框架源码仍无对应 SDK 发行版记录（非阻塞，不影响使用）。
+- [x] **6. Live2D Cubism SDK / Core 版本** — **已查实（2026-11-24）**：SDK 发行版为 **Cubism SDK for Java `5-r.5`**（维护者提供），内含 **Cubism Core 6.0.1**；真机 logcat 实测 `Live2D Cubism Core version: 06.00.0001 (100663297)` / `Live2D Cubism SDK Core Version 6.0.1`。两套编号不矛盾：`5-r.5` 是 SDK 发行版号，`6.0.1` 是其中 Core 二进制版本。`app/libs/Live2DCubismCore.aar` 本身无版本串（Core 版本经 JNI 运行时读取），故此前查不到。SDK 5 特性 `mea.motionsync3.json` 与 `effect/` 包也在用，与 `5-r.x` 吻合。已回写 NOTICE。
 - [ ] **7. `jlm_special.ttf`** — **确认未获覆盖**：上游 AAR 的 `fonts/licences/` 只有 `Knuth_License.txt`、`License_for_dsrom.txt`、`OFL.txt` 三份；OFL 明确只覆盖 AMS 的 `eufb10`/`eufm10`/`msam10`/`msbm10`，`jlm_special.ttf`（2.2 KB，JLaTeXMath 自有）不在任何一份的范围内。
 - [ ] **8. Mea VITS2 模型 / 语音训练数据权利归属** — 确认 `model.onnx` 等 6 文件**既不在仓库也不在 APK**（实测包内无 `model.onnx`），经 `tts-model-v1.zip` 在仓库外分发；权利归属无文档记录。
 
