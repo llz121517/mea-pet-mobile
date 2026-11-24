@@ -38,6 +38,6 @@ inline fun <T> runCatchingLog(tag: String, block: () -> T): T? = try {
 } catch (e: CancellationException) {
     throw e
 } catch (e: Exception) {
-    Log.w(tag, "Operation failed: ${e.message}", e)
+    e.logWarnSanitized(tag, "Operation failed")
     null
 }

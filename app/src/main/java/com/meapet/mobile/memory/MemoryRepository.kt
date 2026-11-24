@@ -1,6 +1,7 @@
 package com.meapet.mobile.memory
 
 import android.util.Log
+import com.meapet.mobile.core.logErrorSanitized
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
@@ -327,7 +328,7 @@ class MemoryRepository(
             enforceCapacity()
             Log.i(TAG, "Loaded ${restored.size} memories from disk")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load memories from disk, backing up corrupted file", e)
+            e.logErrorSanitized(TAG, "Failed to load memories from disk, backing up corrupted file")
             backupCorruptedFileLocked()
         }
     }
@@ -347,7 +348,7 @@ class MemoryRepository(
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to persist memories", e)
+            e.logErrorSanitized(TAG, "Failed to persist memories")
         }
     }
 

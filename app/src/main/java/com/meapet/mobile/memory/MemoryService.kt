@@ -6,6 +6,7 @@ import com.meapet.mobile.client.model.ApiRequest
 import com.meapet.mobile.client.model.ApiResponse
 import com.meapet.mobile.config.AppConfig
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.core.logWarnSanitized
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -145,7 +146,7 @@ class MemoryService(
         return try {
             json.decodeFromString<SummaryResult>(raw.substring(start, end + 1))
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse summary result", e)
+            e.logWarnSanitized(TAG, "Failed to parse summary result")
             null
         }
     }

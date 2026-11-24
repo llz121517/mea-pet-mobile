@@ -113,7 +113,9 @@ class TtsManager(
     }
 
     private fun speakInternal(text: String, checkEnabled: () -> Boolean, tag: String) {
-        Log.d(TAG, "$tag 进入，content='${text.trim().take(30)}'")
+        // 只打长度，不打正文：隐私政策承诺「运行日志不含对话正文」，
+        // 且「导出日志」会抓全量 logcat 随用户分享外发。
+        Log.d(TAG, "$tag 进入，content ${text.trim().length} 字")
         if (!checkEnabled()) {
             Log.d(TAG, "$tag: 开关关闭，跳过朗读")
             return
@@ -161,7 +163,7 @@ class TtsManager(
                     if (mySeq == speakSeq.get()) _isPlaying.value = false
                     return@launch
                 }
-                Log.d(TAG, "$tag: 开始流式合成 '${normalized.take(20)}' (${normalized.length} 字, speed=$speed)")
+                Log.d(TAG, "$tag: 开始流式合成（${normalized.length} 字, speed=$speed）")
 
                 // 串行化在途合成；拿到锁后复查序号与模型状态：
                 // 序号过期 → 不再浪费一次推理；模型已非 Ready → 目录可能正被替换/删除
@@ -224,7 +226,8 @@ class TtsManager(
                 Log.d(TAG, "$tag: 合成被取消（上一段被打断）")
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "合成失败: $clipped", e)
+                // 不打正文（原样打印会把整段回复文本写进 logcat 并随「导出日志」外发）
+                Log.e(TAG, "合成失败（${clipped.length} 字）", e)
                 if (mySeq == speakSeq.get()) {
                     player.stop()
                     _isPlaying.value = false

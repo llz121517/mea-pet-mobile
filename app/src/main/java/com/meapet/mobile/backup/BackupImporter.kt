@@ -3,6 +3,7 @@ package com.meapet.mobile.backup
 import android.util.Log
 import com.meapet.mobile.chat.compaction.CompactionState
 import com.meapet.mobile.settings.SettingsKeys
+import com.meapet.mobile.core.safeLogMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
@@ -78,7 +79,7 @@ object BackupImporter {
                 // 日志只写异常类型与消息（不含对话正文 / 文件路径 / 密码），便于真机排障。
                 Log.w(
                     TAG,
-                    "导入 ${category.entryName} 失败（${error::class.java.simpleName}）：${error.message}"
+                    "导入 ${category.entryName} 失败（${error::class.java.simpleName}）：${error.safeLogMessage()}"
                 )
                 failed[category] = failureReason(error)
             }

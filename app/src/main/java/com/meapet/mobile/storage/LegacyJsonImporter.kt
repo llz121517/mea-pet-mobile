@@ -5,6 +5,7 @@ import androidx.sqlite.SQLiteConnection
 import com.meapet.mobile.chat.ChatMessage
 import com.meapet.mobile.memory.MemoryItem
 import com.meapet.mobile.memory.MemorySerialization
+import com.meapet.mobile.core.logWarnSanitized
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -82,7 +83,7 @@ class LegacyJsonImporter(
         return try {
             json.decodeFromString<List<ChatMessage>>(file.readText())
         } catch (e: Exception) {
-            Log.w(TAG, "Legacy conversation file unreadable, skipped (file kept)", e)
+            e.logWarnSanitized(TAG, "Legacy conversation file unreadable, skipped (file kept)")
             emptyList()
         }
     }
@@ -92,7 +93,7 @@ class LegacyJsonImporter(
         return try {
             MemorySerialization.decode(file.readText())
         } catch (e: Exception) {
-            Log.w(TAG, "Legacy memory file unreadable, skipped (file kept)", e)
+            e.logWarnSanitized(TAG, "Legacy memory file unreadable, skipped (file kept)")
             emptyList()
         }
     }

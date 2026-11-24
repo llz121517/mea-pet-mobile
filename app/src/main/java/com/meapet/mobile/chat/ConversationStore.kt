@@ -1,6 +1,7 @@
 package com.meapet.mobile.chat
 
 import android.util.Log
+import com.meapet.mobile.core.logErrorSanitized
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -93,7 +94,7 @@ class ConversationStore(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load conversation, backing up corrupted file", e)
+            e.logErrorSanitized(TAG, "Failed to load conversation, backing up corrupted file")
             backupCorruptedFileLocked()
             emptyList()
         }
@@ -166,7 +167,7 @@ class ConversationStore(
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to persist conversation", e)
+            e.logErrorSanitized(TAG, "Failed to persist conversation")
         }
     }
 
