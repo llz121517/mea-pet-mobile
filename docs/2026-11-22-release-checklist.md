@@ -5,7 +5,7 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | **验收中** · 共 83 项：✅ 通过 79 / 🟡 部分完成 1 / ⬜ 未执行 3（分布见 §0.1） |
+| 状态 | **验收中** · 共 83 项：✅ 通过 81 / 🟡 部分完成 1 / ⬜ 未执行 1（分布见 §0.1） |
 | 适用版本 | 1.9.0 · `versionCode = 15` · `versionName = "1.9.0"`（`app/build.gradle.kts`） |
 | 历史 | 2026-11-22 整理（`dev` @ `c6c223e`）；2026-11-24 回填 adb 自动化结果、统一格式；同日 22:40 回填 §2.4 上下文与历史 |
 | 验收设备 | Xiaomi `22041216UC`（MT6895Z，Android 14 / SDK 34，`arm64-v8a,armeabi-v7a`），已 root（Magisk） |
@@ -27,7 +27,7 @@
 |---|---|---|---|---|---|
 | §1.1 | 真机验收（阻塞） | 5 | 0 | 0 | 混合：§2 全通过 |
 | §1.2 | 合规（阻塞） | 4 | 0 | 0 | 人工：上游许可查证 |
-| §1.3 | 构建与发布配置（阻塞） | 6 | 0 | 3 | 命令 + git，可自动化 |
+| §1.3 | 构建与发布配置（阻塞） | 8 | 0 | 1 | 命令 + git，可自动化 |
 | §2.1 | 对话与工具 | 10 | 0 | 0 | 人工：真实端点 |
 | §2.2 | 记忆 | 7 | 0 | 0 | 人工：真实端点 |
 | §2.3 | 联网搜索 | 8 | 0 | 0 | 人工：真实 Key 与额度 |
@@ -37,11 +37,11 @@
 | §2.7 | Live2D 与 32 位降级 | 6 | 0 | 0 | 混合：v8a 观感 + v7a 降级实测 |
 | §2.8 | 设置与隐私 | 8 | 1 | 0 | 混合：备份往返已验 |
 | §5.4 | 发布后核对（不计入合计，发版后执行） | — | — | 4 | 发版后 |
-| **合计** | | **79** | **1** | **3** | |
+| **合计** | | **81** | **1** | **1** | |
 
 ### 0.2 还差什么才能发版
 
-1. **构建与发布（§1.3，3 条未完成）** — 三档 ABI 产物（`dist/` 已清空，需用 `tools/build-release.*` 重出 v7a / v8a / both）、`dev → main` 经 origin PR 合并、工作区干净（本文提交后即满足）。
+1. **dev → main 合并（§1.3 #9）** — 在 origin 开 PR（`dev` → `main`）并通过 PR 合并，再从 `main` 打 `v1.9.0` tag；三档产物与 CHANGELOG 已就绪。
 2. **发布后跟进（不阻塞发版）** — §2.8 备份导入边界用例（版本不符整包拒绝 / SAF 取消 / 大壁纸），维护者决定发布后补测。
 
 > 进度口径：§0.1 的计数只统计**表格行**；§1.2 的 8 条 NOTICE 子项与 §4.3 的遗留项是清单式列表，不计入 83。
@@ -102,8 +102,8 @@
 | 3 | **debug / release 构建各通过一次** | `assembleDebug` 与 `assembleRelease -PappAbi=v8a` 均成功（每项待办都要能独立编过，bisect safe） | ✅ 2026-11-24 |
 | 4 | **文档链接检查通过** | `node tools/check_doc_links.mjs` 退出码 0 | ✅ 2026-11-24 |
 | 5 | **本文与执行记录登记进文档索引** | `docs/README.md` 可查到本文与 adb 执行记录 | ✅ 2026-11-24，登记在 §1 需求导航 |
-| 6 | **工作区干净、改动已提交** | `git status --short` 为空；`gradle.properties` / `local.properties` / `gradlew` 不在暂存区 | ⬜ 本文改写后待提交 |
-| 7 | **三档 ABI 产物齐全且签名一致** | `dist/` 有 `MeaPet-v1.9.0-{v7a,v8a,both}.APK`，签名证书 SHA-256 一致；v7a 体积明显小于 v8a（缺 Cubism Core so） | ⬜ 当前只有 v8a（33.8 MB） |
+| 6 | **工作区干净、改动已提交** | `git status --short` 为空；`gradle.properties` / `local.properties` / `gradlew` 不在暂存区 | ✅ 2026-11-24（`git status --short` 为空；产物来自 `b5969fd`） |
+| 7 | **三档 ABI 产物齐全且签名一致** | `dist/` 有 `MeaPet-v1.9.0-{v7a,v8a,both}.APK`，签名证书 SHA-256 一致；v7a 体积明显小于 v8a（缺 Cubism Core so） | ✅ 2026-11-24（v7a 26.8 / v8a 35.3 / both 54.3 MB，证书 SHA-256 一致） |
 | 8 | **`CHANGELOG.md` 定稿** | `## [1.9.0] - 未发布（dev 分支）` 改为实际发布日；本版全部用户可见改动都在段内；日期与 tag 一致 | ✅ 2026-11-24（`## [1.9.0] - 2026-11-24`） |
 | 9 | **dev → main 合并** | 经 origin PR 合并，`main` 含 `dev` 全部提交，tag 指向 `main` 上该提交（release workflow `--require-main`） | ⬜ `origin/main` 落后 `dev` 78 个提交 |
 
@@ -446,7 +446,7 @@ node tools/check_doc_links.mjs
 
 - **v7a 缺模型的原因**：Live2D Cubism Core 官方 AAR 只提供 `arm64-v8a` / `x86` / `x86_64`，没有 `armeabi-v7a`；v7a 包内不存在 `libLive2DCubismCoreJNI.so`，启动时探测失败即进入降级（纯聊天 + 背景色 / 壁纸、无触摸语音、主界面隐藏「悬浮窗」入口）。见 [`adr/0003-live2d-32bit-fallback.md`](adr/0003-live2d-32bit-fallback.md)。
 - 保留 v7a 是为兼容 Android 8 时代约三成仅 32 位的存量设备；ADR 已记录「后续考虑改 `arm64-v8a` only」的迁移条件。
-- 体积基线：1.9.0 的 v8a **33.8 MB**（`MeaPet-v1.9.0-v8a.APK`）；参考 1.8.0 v8a 33.7 MB、both 51.8 MB。
+- 体积基线：1.9.0 三档为 v7a **26.8 MB** / v8a **35.3 MB** / both **54.3 MB**（1.8.0 参考：v8a 33.7 MB、both 51.8 MB）。
 - v7a 包在 64 位设备侧载时，系统可能仍选 32 位 ABI（`primaryCpuAbi=armeabi-v7a`），此时同样走降级，不会崩溃。
 
 ### 5.4 发布后核对
