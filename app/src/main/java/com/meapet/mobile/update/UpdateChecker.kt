@@ -2,6 +2,7 @@ package com.meapet.mobile.update
 
 import android.util.Log
 import com.meapet.mobile.client.HttpClientEngine
+import com.meapet.mobile.core.AppInfo
 import com.meapet.mobile.core.runCatchingLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -90,10 +91,11 @@ class UpdateChecker(
 
         private val json = Json { ignoreUnknownKeys = true }
 
-        /** 去掉前缀 `v`/`V` 后的语义化版本比较；remote > local 时为 true。 */
+        /** 去掉前缀 `v`/`V` 与自动构建短哈希后缀后的语义化版本比较；remote > local 时为 true。 */
         fun isNewer(remoteVersion: String, localVersion: String): Boolean =
             compareVersions(remoteVersion, localVersion) > 0
 
+        /** 语义化版本比较；`1.9.0-abc123def` 与 `1.9.0` 视为同一版本。 */
         fun compareVersions(a: String, b: String): Int {
             val pa = versionParts(a)
             val pb = versionParts(b)
@@ -107,7 +109,9 @@ class UpdateChecker(
         }
 
         private fun versionParts(version: String): List<Int> =
-            version.trim()
+            // 自动构建的 versionName 带 -<提交短哈希> 后缀，先剥离再按段解析，
+            // 否则以数字开头的哈希（如 1.9.0-1a2b3c4d5）会被当成额外版本段。
+            AppInfo.baseVersion(version)
                 .removePrefix("v")
                 .removePrefix("V")
                 .split('.', '-', '_')

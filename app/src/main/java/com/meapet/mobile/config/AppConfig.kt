@@ -18,7 +18,6 @@ package com.meapet.mobile.config
  * @property maxPersonaFacts 每轮注入 system prompt 的事实/特质条数上限。这两类永不自动
  *   淘汰又全量注入，不封顶的话用久了会无限撑大每次请求（只影响注入，不影响存储与展示）
  * @property minSummaryItems 触发摘要所需的最少短期记忆条数（不足则跳过本次，攒着下次再合）
- * @property memoryOpsEchoTurns 组装请求时，最近多少条助手消息要把记忆协议块贴回正文当格式范例
  * @property enableMemory 是否启用记忆系统
  * @property enableAutoSummary 是否自动摘要对话为长期记忆
  * @property appVersion 应用版本名
@@ -26,7 +25,7 @@ package com.meapet.mobile.config
  */
 data class AppConfig(
     val defaultApiUrl: String = "https://api.deepseek.com",
-    val defaultModel: String = "deepseek-v4-flash",
+    val defaultModel: String = "deepseek-flash",
     val maxHistoryMessages: Int = 35,
     val historyTrimBatch: Int = 8,
     val memorySummaryModel: String? = null,
@@ -34,9 +33,25 @@ data class AppConfig(
     val maxContextMemories: Int = 5,
     val maxPersonaFacts: Int = 30,
     val minSummaryItems: Int = 3,
-    val memoryOpsEchoTurns: Int = 3,
     val enableMemory: Boolean = true,
     val enableAutoSummary: Boolean = true,
+    /**
+     * 是否启用「记忆工具调用」模式（function calling）。
+     *
+     * 开启后模型通过 `search_memory` / `create_memory` / `update_memory` / `delete_memory`
+     * 主动检索与写入记忆；未使用工具时仅保留关键词只读注入。
+     *
+     * 首次工具请求被明确拒绝为不支持工具能力时，ChatService 会自动回退到单次请求；
+     * API 地址、Key 或模型变化后重新尝试。此开关不影响独立的联网工具。
+     */
+    val enableMemoryTools: Boolean = true,
+    /**
+     * 整个 turn（含工具循环的多轮请求）的超时时间（毫秒）。
+     *
+     * 工具循环最坏情况是 [maxRounds] 轮请求叠加；没有总超时的话，移动网络下可能一直转圈，
+     * 用户只能强杀。超时后按发送失败处理：回滚本轮、UI 提示重试。
+     */
+    val turnTimeoutMs: Long = 180_000,
     val appVersion: String = "1.0.0",
     /**
      * TTS 模型包（6 个文件）的下载基础地址，尾部不带文件名；远端以平铺文件名上传

@@ -4,15 +4,16 @@ Android 上的 Live2D AI 桌宠
 
 本项目由 [suan-11/mea-pet-public](https://github.com/suan-11/mea-pet-public) 衍生。
 
-wish coding 项目
+Wish Coding 项目
 
 ---
 
 ## 功能
 
 - **Live2D 模型** — Cubism SDK 渲染，支持触摸交互、视角跟随与分区语音反馈
-- **AI 聊天** — OpenAI 兼容 API（可自建中转），多轮对话、System Prompt、记忆上下文注入；助手回复支持 Markdown / LaTeX 渲染，气泡文字可长按选择复制；聊天记录本地持久化，重启不丢
-- **本地记忆** — 由大模型在对话中自主判断该记什么（事实 / 特质 / 短期），并按设定轮次自动摘要为长期记忆；事实与特质永久保留，可在首页菜单「查看记忆」中查看与删除
+- **AI 聊天** — OpenAI 兼容 API（可自建中转），多轮对话、System Prompt、记忆上下文注入；助手回复支持 Markdown / LaTeX 渲染，气泡文字可长按选择复制；聊天记录本地持久化、分页加载，工具轮次可连续回复、插队发送或停止，发送给模型的上下文可按容量压缩。
+- **本地记忆** — 自动 / 工具模式下由模型使用记忆工具检索与管理记忆，工具写入按轮次暂存处理，删除支持撤销；不支持工具调用的端点会回退到只读关键词注入。只读模式只做关键词注入，关闭模式不注入。启用自动摘要时，仅在工具模式的成功轮次后独立触发。
+- **联网工具** — 可选启用网页搜索与正文读取，默认关闭；支持 DeepSeek、AnySearch 或自动选择，Auto 在服务请求失败或超时时尝试下一家。更多配置与隐私说明见 [联网工具实现参考](docs/archive/design/2026-11-19-web-search-plan.md)。
 - **本地语音合成（TTS）** — 梅尔音色端侧离线朗读，完全不走云端；模型按需下载或从本地 zip 资源包导入，主界面 / 悬浮窗可独立开关，支持语速调节与喇叭快捷静音
 - **背景壁纸** — 主界面聊天背景支持相册选图与模糊调节（仅主界面生效，悬浮窗保持透明）
 - **聊天气泡透明度** — 主页气泡透明度可调（20%–100%）
@@ -94,6 +95,9 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | **模型** | 使用的模型名称（如 `gpt-4o-mini`）；也可点「获取模型列表」从端点拉取后点选 |
 | **Temperature** | 生成温度 (0.0–2.0) |
 | **最大 Token** | 单次响应最大 Token 数 |
+| **上下文窗口（Token）** | 模型一次请求可容纳的输入与输出总量。留空自动探测；手动值优先于探测结果，无法探测时使用兜底值。实际使用约为填写值的 85%，本地推理服务请按实际加载的窗口填写。可点「重新检测」清除手动值并重新探测；下方显示当前生效值与来源（手动 / 探测 / 兜底）。 |
+
+**联网搜索**：默认关闭。联网开关与记忆设置相互独立：只要开启且聊天端点支持 function calling，模型即可使用 `web_search` 搜索公开网页、用 `web_fetch` 读取正文，无论记忆检索方式是自动 / 工具 / 只读 / 关闭，也无论记忆总开关是否打开（记忆关闭时只是不注入记忆）。可选自动 / DeepSeek / AnySearch；可配置独立 API Key，Auto 在服务请求失败或超时时按顺序尝试下一家。DeepSeek Key 留空时，符合条件的官方聊天端点可安全复用聊天 Key；AnySearch Key 留空时使用匿名模式。详细行为见 [联网工具实现参考](docs/archive/design/2026-11-19-web-search-plan.md)。
 
 #### 对话
 
@@ -103,11 +107,14 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 | 选项 | 说明 |
 |------|------|
-| **启用记忆** | 总开关。关闭后不再记录、不注入记忆上下文，对话也不会外发给摘要模型 |
-| **自动摘要** | 是否定期把短期记忆压缩为长期记忆 |
-| **摘要轮次** | 每隔多少轮对话触发一次摘要（3–30，默认 10） |
+| **启用记忆** | 总开关。关闭后不注入或检索记忆；已保存的记忆和对话不会删除。 |
+| **检索方式：自动 / 工具** | 模型按需调用记忆工具；端点不支持工具调用时，两种模式都会退回只读关键词注入。工具写入按轮次暂存处理，删除支持撤销。 |
+| **检索方式：只读** | 内部模式名 `TEXT`（兼容旧配置）。按关键词向发给模型的用户消息副本注入相关记忆，只读，不创建、更新或删除记忆；注入内容不写入会话历史。 |
+| **检索方式：关闭** | 不向模型注入或检索记忆。 |
+| **自动摘要** | 在工具模式成功完成的对话轮次后，按设定间隔独立整理短期记忆为长期记忆；只读模式、关闭模式及端点回退不触发自动摘要。 |
+| **摘要轮次** | 自动摘要的间隔（3–30，默认 10）。 |
 
-> 记忆由大模型在回复时自行判断并创建，会额外占用少量输出 Token。使用指令遵循能力较弱的小模型时，可能出现偶尔不创建记忆的情况——这不影响正常聊天。
+> 事实与特质类记忆会作为稳定的人设参考保留。旧数据迁移时，历史记录中已废弃的记忆操作字段会被忽略；升级不会清空现有记忆或会话。
 
 #### 外观
 
@@ -159,14 +166,16 @@ model.onnx  tokens.txt  lexicon.txt  fsts/phone.fst  fsts/date.fst  fsts/number.
 
 「关于」子页集中了应用信息、更新与隐私入口：
 
-- **应用信息** — 版本号、技术栈等。
+- **应用信息** — 版本号与构建时间（构建时注入）、技术栈等。自动构建的版本号末尾带 9 位提交短哈希（如 `1.9.0-1a2b3c4d5`），便于对照具体提交。
 - **更新** — 启动时静默检测新版本，发现更新才提示（可在子页关闭）；此处也可手动「检查更新」（按钮 + 进度 + 结果文案与发布页链接）。
 - **隐私与数据** — 查看隐私政策全文（再往里一层）；导出日志（含设备 / 版本头信息、native 崩溃 tombstone、logcat），便于反馈问题；友盟统计 SDK 授权管理（可查看授权状态，取消授权后立即退出，确保停止上报）。
 
 ## 发布（GitHub Actions 自动打包与签名）
 
-推 `v<版本>` tag 即自动构建签名并发布 Release，标题形如 **`v1.7.2 / 2026.9.11`**（tag / tag 日期）。
+推 `v<版本>` tag 即自动构建签名并发布 Release，标题形如 **`v<版本> / <tag 日期>`**（如 `v1.9.0 / 2026.11.22`）。
 构建复用 [`tools/build-release.sh`](tools/build-release.sh)，与本地产物同名同规则。
+
+**版本号与构建时间**：`tools/build-release.sh` / `tools/build-release.ps1` 会把当前提交的 9 位短哈希通过 `-PversionSuffix` 传给 gradle，拼到 `versionName` 末尾（形如 `1.9.0-1a2b3c4d5`），便于从安装包反查提交；`dist/` 产物命名保持 `MeaPet-v<基础版本>-<ABI>.APK` 不变。手动构建（Android Studio / `gradlew assembleDebug`）不带该属性，`versionName` 保持 `1.9.0`。构建时间由 `app/build.gradle.kts` 以 epoch 毫秒时间戳注入 `BuildConfig.BUILD_TIME`，在「关于」页版本号下方按设备当前时区展示。
 
 **一次性配置**：Settings → Environments 新建 **`keystore`**，加 secrets：
 
@@ -189,12 +198,12 @@ base64 -w0 release.keystore    # Linux / macOS / Git Bash
 `local.properties` 不入库，CI 以 `local.properties.example` 为模板生成（`umeng.appKey` 由上面的
 secret 注入），改公共配置请直接改模板。
 
-**发布**：`git tag v1.7.3 && git push origin v1.7.3`
+**发布**：`git tag v<版本> && git push origin v<版本>`（如 `git tag v1.9.0`）
 
 - tag 须在 `main` 上、且与 `versionName` 一致，否则不发布；`versionCode` 建议递增（未递增只告警）。
-- 带后缀的 tag（`v1.7.3-beta1`）照常发布，但标为 pre-release：不占 Latest，也不影响「检测更新」。
+- 带后缀的 tag（如 `v1.9.0-beta1`）照常发布，但标为 pre-release：不占 Latest，也不影响「检测更新」。
 - 重跑幂等（已存在的 Release 更新标题/正文并覆盖 APK）。
-- 本地预览正文 / 自检：`python tools/release_meta.py --tag v1.7.3 --notes-file -`、`python tools/test-release-meta.py`
+- 本地预览正文 / 自检：`python tools/release_meta.py --tag v<版本> --notes-file -`、`python tools/test-release-meta.py`
 
 ## 文档
 

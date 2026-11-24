@@ -6,11 +6,8 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -190,7 +187,7 @@ internal fun BackgroundWallpaperSection(
 
     Spacer(Modifier.height(8.dp))
     Text(
-        text = "背景模糊: ${kotlin.math.round(localBlur * 100).toInt()}%",
+        text = "背景虚化强度: ${kotlin.math.round(localBlur * 100).toInt()}%",
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
             alpha = if (state.wallpaperPath.isNotBlank()) 1f else 0.5f
@@ -359,10 +356,8 @@ internal fun AppearanceSection(
     )
 
     // ── 颜色预设选择区（关闭动态颜色时展开） ──
-    AnimatedVisibility(
-        visible = !(state.enableDynamicColor && dynamicColorSupported),
-        enter = expandVertically(),
-        exit = shrinkVertically()
+    SettingsExpandableContent(
+        visible = !(state.enableDynamicColor && dynamicColorSupported)
     ) {
         ColorPresetSelector(
             currentPreset = state.colorPreset,

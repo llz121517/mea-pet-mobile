@@ -18,6 +18,9 @@ umengCommon = "9.9.2"
 umengAsms = "1.8.7.2"
 sherpaOnnx = "v2.0.1"
 markwon = "4.6.2"
+androidxSqlite = "2.7.1"
+sqliteJdbc = "3.49.1.0"
+zip4j = "2.11.5"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -68,6 +71,14 @@ markwon-ext-strikethrough = { group = "io.noties.markwon", name = "ext-strikethr
 markwon-table = { group = "io.noties.markwon", name = "ext-tables", version.ref = "markwon" }
 markwon-linkify = { group = "io.noties.markwon", name = "linkify", version.ref = "markwon" }
 markwon-inline-parser = { group = "io.noties.markwon", name = "inline-parser", version.ref = "markwon" }
+
+# SQLite：生产用 androidx.sqlite 驱动 API（框架实现），不引入 Room/KSP；JVM 单测用 sqlite-jdbc 适配，避免 isReturnDefaultValues 让测试空转
+androidx-sqlite = { group = "androidx.sqlite", name = "sqlite", version.ref = "androidxSqlite" }
+androidx-sqlite-framework = { group = "androidx.sqlite", name = "sqlite-framework", version.ref = "androidxSqlite" }
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteJdbc" }
+
+# zip4j：备份包的 AES-256 加密 zip 读写（Apache-2.0，见 NOTICE.md）
+zip4j = { module = "net.lingala.zip4j:zip4j", version.ref = "zip4j" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -8,7 +8,7 @@ import java.io.File
 /**
  * 旧版下载的 native 库残留清理（1.7.x → 1.8.0 升级路径）。
  *
- * **预计移除版本：1.9.0**
+ * **预计移除版本：1.11.0**
  * **被引用点：`LegacyMigration.STEPS`**
  *
  * 旧版曾把 `libonnxruntime.so` 下载到 `tts_model/lib/<abi>/`（约 20MB）；现 native 库随 sherpa AAR

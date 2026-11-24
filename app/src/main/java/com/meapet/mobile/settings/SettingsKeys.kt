@@ -11,16 +11,44 @@ object SettingsKeys {
     const val MODEL = "model"
     const val TEMPERATURE = "temperature"
     const val MAX_TOKENS = "max_tokens"
+    const val WEB_SEARCH_ENABLED = "web_search_enabled"
+    const val WEB_SEARCH_PROVIDER = "web_search_provider"
+    const val WEB_SEARCH_ANYSEARCH_KEY = "web_search_anysearch_key"
+    const val WEB_SEARCH_DEEPSEEK_KEY = "web_search_deepseek_key"
+
+    /**
+     * 联网搜索是否复用「API 配置」里的聊天 Key 作为 DeepSeek Key（默认开启）。
+     *
+     * 开启时不显示 DeepSeek Key 输入框；关闭后必须单独填写，否则 DeepSeek 服务商不可用。
+     */
+    const val WEB_SEARCH_REUSE_CHAT_KEY = "web_search_reuse_chat_key"
+
+    /** 用户手动填写的上下文窗口（原始容量，token）。无此键 = 自动；有值则优先于探测缓存。 */
+    const val CONTEXT_WINDOW = "context_window"
     const val ENABLE_MEMORY = "enable_memory"
+
+    /**
+     * 记忆检索模式：`AUTO` / `TOOLS` / `TEXT` / `OFF`（见 [com.meapet.mobile.config.MemoryMode]）。
+     * 只影响检索/写入方式，「是否记忆」仍由 [ENABLE_MEMORY] 控制。
+     */
+    const val MEMORY_MODE = "memory_mode"
     const val ENABLE_AUTO_SUMMARY = "enable_auto_summary"
     const val SUMMARY_INTERVAL = "summary_interval"
 
     /**
-     * 距上次摘要已进行的对话轮数。
+     * 旧版遗留：距上次摘要已进行的对话轮数。
      *
-     * 不是用户设置，只是借 DataStore 存一个跨进程存活的计数器——放内存里的话
-     * 每次冷启动归零，默认 10 轮的间隔实际上永远走不满（见 MemoryManager）。
+     * 1.9.0 起该计数改存 SQLite（记忆存储的 `meta` 表），不再是设置项——
+     * 它是记忆运行状态而非用户配置，留在 DataStore 会混进「设置部分导出」。
+     *
+     * **预计移除版本：1.11.0**。当前仅由
+     * [com.meapet.mobile.legacy.steps.LegacyExchangeCountMigration] 读取并删除。
      */
+    @Deprecated(
+        "1.9.0 起计数已迁到 SQLite meta 表，此键仅供 legacy 迁移读取与删除",
+        ReplaceWith("SqliteMemoryStore.META_EXCHANGE_COUNT"),
+        level = DeprecationLevel.WARNING
+    )
     const val EXCHANGE_COUNT = "exchange_count"
     const val SYSTEM_PROMPT = "system_prompt"
     const val THEME_MODE = "theme_mode"  // "system" | "light" | "dark"
@@ -58,10 +86,12 @@ object SettingsKeys {
     /** 合理的默认值。 */
     object Defaults {
         const val API_URL = "https://api.deepseek.com/v1"
-        const val MODEL = "deepseek-v4-flash"
+        const val MODEL = "deepseek-flash"
         const val TEMPERATURE = 0.7
         const val MAX_TOKENS = 4096
         const val ENABLE_MEMORY = true
+        /** 默认自动：优先工具调用，端点不支持时本进程降级只读关键词注入。 */
+        const val MEMORY_MODE = "AUTO"
         const val ENABLE_AUTO_SUMMARY = true
         const val SUMMARY_INTERVAL = 10
         const val SYSTEM_PROMPT =

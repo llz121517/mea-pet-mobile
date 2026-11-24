@@ -15,14 +15,20 @@ enum class MemoryType {
     SHORT_TERM,
     LONG_TERM,
     CORE_TRAIT,
-    FACTUAL
+    FACTUAL;
+
+    /**
+     * 是否为永不自动淘汰的永久类（核心特质 / 事实）。
+     *
+     * 永久类不允许被工具改类型，删除必须显式确认（见 `MemoryToolExecutor`）。
+     */
+    val isPermanent: Boolean get() = this == CORE_TRAIT || this == FACTUAL
 }
 
 /**
  * 记忆条目——记忆系统的最小数据单元。
  *
- * 创建/更新/重要性/关键词均由大模型在对话中决定（见 [MemoryOpsProtocol]），
- * 程序自身不再用长度等规则判断是否该记住什么。
+ * 记忆条目的显式创建、修改由记忆工具负责；这里仅定义存储数据结构。
  *
  * @property id 唯一标识（短 id，见 [newId]）
  * @property content 记忆文本内容（自然语言表述）
@@ -63,8 +69,7 @@ data class MemoryItem(
         /**
          * 生成短 id（如 `mem_a1b2c3d4`）。
          *
-         * 这个 id 要反复出现在每轮 system prompt 里供模型引用（update/delete 的 targetId），
-         * 比完整 UUID 更省 token、模型抄写出错的概率也更低。
+         * 短 id 用于工具返回的记忆条目标识；比完整 UUID 更省传输空间，也更容易准确引用。
          */
         fun newId(): String {
             val suffix = (1..8).map { ID_CHARS.random(Random) }.joinToString("")

@@ -102,20 +102,39 @@ class Live2dDelegate private constructor() {
 
     private val cubismOption = CubismFramework.Option()
 
-    init {
-        cubismOption.logFunction = Live2dPal.PrintLogFunction()
-        cubismOption.loggingLevel = Live2dDefine.CUBISM_LOGGING_LEVEL
-        cubismOption.loadFileFunction = Live2dPal.LoadFileFunction()
+    /**
+     * Cubism SDK 是否已成功启动。
+     *
+     * 32 位 ARM 设备上没有 Live2D 原生核心（见 [Live2dSupport]），此时整个 delegate
+     * 降级为「只做背景色 + 壁纸」：不启动 SDK、不加载模型、不提供触摸语音。
+     * 所有公开方法都先看这个标记，避免任何一处漏判又把 native 调用走到崩溃路径。
+     */
+    private val cubismReady: Boolean
 
-        CubismFramework.cleanUp()
-        CubismFramework.startUp(cubismOption)
-        Log.d(TAG, "CubismFramework started")
+    init {
+        // 探测放在最前：不可用时连 Option 初始化后的 startUp 都不能调（会加载 .so）
+        val available = Live2dSupport.isAvailable
+        if (available) {
+            cubismOption.logFunction = Live2dPal.PrintLogFunction()
+            cubismOption.loggingLevel = Live2dDefine.CUBISM_LOGGING_LEVEL
+            cubismOption.loadFileFunction = Live2dPal.LoadFileFunction()
+
+            CubismFramework.cleanUp()
+            CubismFramework.startUp(cubismOption)
+            Log.d(TAG, "CubismFramework started")
+        } else {
+            Log.w(TAG, "Live2D unavailable on this ABI, running in wallpaper-only mode")
+        }
+        cubismReady = available
     }
 
     fun onStart(activity: Activity) {
         this._activity = activity
         this._appContext = activity.applicationContext
     }
+
+    /** 本设备是否真的能渲染 Live2D 模型（false = 降级为壁纸/纯色背景）。 */
+    val isModelAvailable: Boolean get() = cubismReady
 
     fun onStop() { /* no-op */ }
 
@@ -136,13 +155,15 @@ class Live2dDelegate private constructor() {
     }
 
     fun onDestroy() {
-        view.close()
-        CubismShaderAndroid.getInstance().releaseInvalidShaderProgram()
-        CubismShaderAndroid.deleteInstance()
-        Live2dManager.releaseInstance()
-        CubismFramework.dispose()
+        if (cubismReady) {
+            view.close()
+            CubismShaderAndroid.getInstance().releaseInvalidShaderProgram()
+            CubismShaderAndroid.deleteInstance()
+            Live2dManager.releaseInstance()
+            CubismFramework.dispose()
+            Log.d(TAG, "CubismFramework disposed")
+        }
         instance = null
-        Log.d(TAG, "CubismFramework disposed")
     }
 
     fun onSurfaceCreated() {
@@ -150,6 +171,14 @@ class Live2dDelegate private constructor() {
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+
+        // 壁纸层与 Cubism 无关：降级模式下也要照常重建，否则背景会变成裸清屏色
+        wallpaper.reset()
+
+        if (!cubismReady) {
+            Log.i(TAG, "onSurfaceCreated: Live2D degraded, only wallpaper/clear color active")
+            return
+        }
 
         // 旧 GL 上下文已失效，彻底清理并重建（CSDN 文章指出的关键）
         textureManager.releaseInvalidTextures()
@@ -169,9 +198,6 @@ class Live2dDelegate private constructor() {
         // 强制重新加载模型（重置 modelLoaded，在新 GL 上下文中重绑纹理）
         Live2dManager.getInstance().resetModel()
 
-        // 背景壁纸的旧上下文纹理/program 已失效，重置后下帧按 desiredPath 重载
-        wallpaper.reset()
-
         Log.d(TAG, "onSurfaceCreated complete")
     }
 
@@ -179,6 +205,8 @@ class Live2dDelegate private constructor() {
         GLES20.glViewport(0, 0, width, height)
         windowWidth = width
         windowHeight = height
+
+        if (!cubismReady) return
 
         view.initialize()
         view.initializeSprite()
@@ -188,7 +216,7 @@ class Live2dDelegate private constructor() {
     }
 
     fun run() {
-        if (Live2dRenderState.consumeShaderResetRequest()) {
+        if (cubismReady && Live2dRenderState.consumeShaderResetRequest()) {
             // 悬浮窗的 GL 上下文已销毁，它的 shader 在当前上下文无效。
             // 跳过 releaseInvalidShaderProgram（跨上下文 GL 操作会崩溃），直接重建。
             CubismShaderAndroid.deleteInstance()
@@ -197,7 +225,7 @@ class Live2dDelegate private constructor() {
 
         if (Live2dRenderState.overlayActive.value) return
 
-        Live2dPal.updateTime()
+        if (cubismReady) Live2dPal.updateTime()
 
         GLES20.glClearColor(bgR, bgG, bgB, bgA)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
@@ -205,11 +233,14 @@ class Live2dDelegate private constructor() {
 
         // ── 背景壁纸层：清屏（纯色兜底）之后、Live2D 模型绘制之前 ──
         // 无壁纸时 onFrame 是 no-op，清屏纯色照旧。悬浮窗走独立渲染器，不受影响。
+        // 降级模式下这是唯一还在画的东西。
         try {
             wallpaper.onFrame(windowWidth, windowHeight)
         } catch (e: Exception) {
             Log.e(TAG, "Wallpaper render error: ${e.message}")
         }
+
+        if (!cubismReady) return
 
         try {
             view.render()
@@ -225,6 +256,7 @@ class Live2dDelegate private constructor() {
         mouseX = x; mouseY = y
         touchDownX = x; touchDownY = y; touchDownTime = System.currentTimeMillis()
         isCaptured = true
+        if (!cubismReady) return
         if (windowWidth > 0 && windowHeight > 0) {
             Live2dManager.getInstance().onDrag(
                 ((x / windowWidth) * 2f - 1f).coerceIn(-1f, 1f),
@@ -235,6 +267,7 @@ class Live2dDelegate private constructor() {
 
     fun onTouchMoved(x: Float, y: Float) {
         mouseX = x; mouseY = y
+        if (!cubismReady) return
         if (isCaptured && windowWidth > 0 && windowHeight > 0) {
             Live2dManager.getInstance().onDrag(
                 ((x / windowWidth) * 2f - 1f).coerceIn(-1f, 1f),
@@ -318,6 +351,7 @@ class Live2dDelegate private constructor() {
     fun onTouchEnd(x: Float, y: Float) {
         mouseX = x; mouseY = y
         isCaptured = false
+        if (!cubismReady) return
         Live2dManager.getInstance().onDrag(0.0f, 0.0f)
 
         // 检测轻触 → 分区反馈（仅在聊天页启用，防止设置页穿透）

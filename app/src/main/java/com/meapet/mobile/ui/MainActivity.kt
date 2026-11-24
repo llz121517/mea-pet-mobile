@@ -238,14 +238,20 @@ class MainActivity : ComponentActivity() {
                 MeaPetTheme(themeMode = themeMode, dynamicColor = enableDynamicColor, colorPreset = colorPreset) {
                     if (showPrivacyDialog) {
                         com.meapet.mobile.ui.component.PrivacyDialog(
+                            // 授权状态写盘在 IO 线程，必须写完之后再初始化 SDK / 关闭弹窗；
+                            // scope 在弹窗之上（页面级 rememberCoroutineScope），不会随弹窗关闭而取消。
                             onAgree = {
-                                PrivacyConsentManager.setAgreed(context, true)
-                                (applicationContext as? MeaPetApplication)?.initUmengSdk()
-                                closePrivacyDialog()
+                                scope.launch {
+                                    PrivacyConsentManager.setAgreed(context, true)
+                                    (applicationContext as? MeaPetApplication)?.initUmengSdk()
+                                    closePrivacyDialog()
+                                }
                             },
                             onDisagree = {
-                                PrivacyConsentManager.setAgreed(context, false)
-                                closePrivacyDialog()
+                                scope.launch {
+                                    PrivacyConsentManager.setAgreed(context, false)
+                                    closePrivacyDialog()
+                                }
                             },
                             subtitle = if (privacyIsUpdate) "隐私政策更新" else ""
                         )

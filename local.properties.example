@@ -27,5 +27,6 @@ app.qqGroupUrl=https://qm.qq.com/q/pD9vpN6zKg
 app.umengPolicyUrl=https://www.umeng.com/page/policy
 
 # ── TTS 语音模型 / 日语词典下载地址 ──
-# 语音模型 4 个 onnx 所在目录（GitHub Releases，文件名与远端同名，地址尾部不带文件名）
+# 语音模型包（6 个文件：model.onnx + tokens.txt + lexicon.txt + fsts/{phone,date,number}.fst）所在目录
+# （GitHub Releases，文件名与远端同名，地址尾部不带文件名）
 app.ttsModelBaseUrl=https://github.com/llz121517/mea-pet-mobile/releases/download/tts-resource-pack

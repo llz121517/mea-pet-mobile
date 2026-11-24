@@ -28,9 +28,21 @@ sealed interface ChatEvent {
     /** 重新发送上一条消息（失败后重试）。 */
     data object RetryLastMessage : ChatEvent
 
+    /** 停止当前在途 turn（状态条右侧「停止」）。保留已显示的气泡，不弹错误。 */
+    data object StopTurn : ChatEvent
+
     /** 清除错误。 */
     data object DismissError : ChatEvent
 
     /** 启动静默检测更新提示已展示。 */
     data object DismissUpdateNotice : ChatEvent
+
+    /** 手动压缩上下文（用户点「整理一下」/菜单项）。 */
+    data object CompactContext : ChatEvent
+
+    /** 压缩提醒已展示（同一会话不重复弹）。 */
+    data object DismissCompactHint : ChatEvent
+
+    /** 压缩结果提示已展示。 */
+    data object DismissCompactionNotice : ChatEvent
 }

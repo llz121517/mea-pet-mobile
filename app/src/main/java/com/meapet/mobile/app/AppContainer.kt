@@ -4,18 +4,36 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.util.Log
 import com.meapet.mobile.BuildConfig
+import com.meapet.mobile.backup.BackupService
+import com.meapet.mobile.backup.BackupSources
+import com.meapet.mobile.backup.BackupTarget
+import com.meapet.mobile.backup.DataStoreSettingsSink
+import com.meapet.mobile.backup.SettingsSink
 import com.meapet.mobile.client.KtorHttpClientEngine
 import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.chat.ChatService
+import com.meapet.mobile.chat.tools.ChatToolLoop
+import com.meapet.mobile.chat.tools.ToolRegistry
+import com.meapet.mobile.client.JsonHttpClient
+import com.meapet.mobile.search.WebToolFactory
+import com.meapet.mobile.memory.search.BigramMemorySearcher
+import com.meapet.mobile.memory.tools.MemoryToolExecutor
+import com.meapet.mobile.chat.compaction.ContextCompactor
 import com.meapet.mobile.chat.ConversationManager
 import com.meapet.mobile.chat.ConversationStore
+import com.meapet.mobile.storage.ConversationRepository
+import com.meapet.mobile.storage.MetaCompactionStore
+import com.meapet.mobile.storage.SqliteConversationRepository
+import com.meapet.mobile.storage.SqliteDatabase
+import androidx.sqlite.driver.AndroidSQLiteDriver
 import com.meapet.mobile.config.AppConfig
 import com.meapet.mobile.core.AppInfo
 import com.meapet.mobile.core.LifecycleManager
 import com.meapet.mobile.core.WallpaperStore
 import com.meapet.mobile.legacy.LegacyMigration
 import com.meapet.mobile.memory.MemoryManager
-import com.meapet.mobile.memory.MemoryRepository
+import com.meapet.mobile.memory.MemoryStore
+import com.meapet.mobile.storage.SqliteMemoryStore
 import com.meapet.mobile.memory.MemoryService
 import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.tts.TtsManager
@@ -80,23 +98,38 @@ class AppContainer(
             _apiClient ?: createClient().also { _apiClient = it }
         }
 
-    /** 会话历史持久化存储。 */
+    /** 旧版 JSON 会话存储：仅供 legacy 导入读取，不再写入。 */
     val conversationStore: ConversationStore by lazy {
         ConversationStore(context.filesDir, applicationScope)
     }
 
-    /** 会话历史管理器。 */
+    /** 会话 + 记忆共用的 SQLite 数据库（惰性打开，首次访问时建表/迁移）。 */
+    val database: SqliteDatabase by lazy {
+        val dbFile = context.getDatabasePath("meapet.db")
+        dbFile.parentFile?.mkdirs()
+        SqliteDatabase(AndroidSQLiteDriver(), dbFile.absolutePath)
+    }
+
+    /** 会话仓库：完整历史永久保存，UI 分页读取，与发给模型的窗口解耦。 */
+    val conversationRepository: ConversationRepository by lazy {
+        SqliteConversationRepository(database)
+    }
+
+    /** 会话历史管理器（内存窗口 + 有序落库）。 */
     val conversationManager: ConversationManager by lazy {
         ConversationManager(
             maxSize = config.maxHistoryMessages,
             trimBatch = config.historyTrimBatch,
-            store = conversationStore
+            repository = conversationRepository,
+            persistScope = applicationScope,
+            // 1.9 起启用上下文压缩：窗口追加式增长，不批量裁剪（避免「裁掉但没进摘要」的静默丢失）
+            autoTrim = false
         )
     }
 
     /** 记忆存储器。 */
-    val memoryRepository: MemoryRepository by lazy {
-        MemoryRepository(context.filesDir, maxItems = config.maxMemoryItems)
+    val memoryRepository: MemoryStore by lazy {
+        SqliteMemoryStore(database, maxItems = config.maxMemoryItems)
     }
 
     /** 记忆业务服务。 */
@@ -119,15 +152,104 @@ class AppContainer(
         )
     }
 
+    /** 上下文容量提供者（手动值 > 探测缓存 > 兜底）。 */
+    val contextCapacity: com.meapet.mobile.client.ContextCapacityProvider by lazy {
+        com.meapet.mobile.client.ContextCapacityProvider(
+            settingsManager = settingsManager,
+            clientFactory = { apiClient },
+            scope = applicationScope
+        )
+    }
+
+    /** 上下文压缩状态存储（与会话/记忆同库，`meta` 表一行 JSON）。 */
+    val compactionStore: MetaCompactionStore by lazy {
+        MetaCompactionStore(database)
+    }
+
+    /** 上下文压缩器：用当前模型把较早轮次折叠成滚动摘要。 */
+    private val contextCompactor: ContextCompactor by lazy {
+        ContextCompactor(
+            clientProvider = { apiClient },
+            modelProvider = { settingsManager.getModel() }
+        )
+    }
+
+    /** 记忆工具执行器（仅 enableMemoryTools 开启时创建；工具循环与 turn 提交共用同一实例）。 */
+    private val memoryToolExecutor: MemoryToolExecutor? by lazy {
+        if (!config.enableMemoryTools) {
+            null
+        } else {
+            MemoryToolExecutor(
+                search = BigramMemorySearcher(memoryRepository),
+                store = memoryRepository,
+                commit = { changes -> memoryManager.applyToolChanges(changes) },
+                // 执行与提交时动态门控：只读总开关（config + 用户开关）。
+                // 模式切换走下一轮生效（本轮工具集合已快照），避免「执行停了但摘要还计数」的不一致。
+                isMemoryEnabled = {
+                    config.enableMemory && settingsManager.isMemoryEnabled()
+                }
+            )
+        }
+    }
+
+    private val webHttp: JsonHttpClient by lazy {
+        JsonHttpClient(KtorHttpClientEngine(followRedirects = false))
+    }
+
+    /** 只有记忆工具时复用同一注册表，保留现有请求前缀（tools 数组字节稳定）。 */
+    private val memoryToolLoop: ChatToolLoop? by lazy {
+        val executor = memoryToolExecutor ?: return@lazy null
+        ChatToolLoop({ apiClient }, ToolRegistry(executor.asTools()))
+    }
+
+    /** 按当前设置组装联网工具；服务商与凭据在这一轮内固定。 */
+    private fun createWebTools(): List<com.meapet.mobile.chat.tools.Tool> {
+        val chat = settingsManager.getApiConnection()
+        return WebToolFactory(webHttp).create(
+            selectedId = settingsManager.getWebSearchProvider().id,
+            chatBaseUrl = chat.url,
+            chatApiKey = chat.key,
+            anySearchKey = settingsManager.getWebSearchAnySearchKey(),
+            deepSeekKey = settingsManager.getWebSearchDeepSeekKey(),
+            reuseChatKey = settingsManager.isWebSearchReuseChatKey()
+        )
+    }
+
+    /**
+     * 每轮按实际资格组合工具：记忆与联网互不依赖。
+     *
+     * 资格由 ChatService 按本轮设置算好后传进来，这里只负责拼注册表；
+     * 不缓存在字段里，避免动态设置（关记忆、关联网）被 lazy 捕获成过期值。
+     */
+    private fun createTurnToolLoop(includeMemoryTools: Boolean, includeWebTools: Boolean): ChatToolLoop? {
+        val webTools = if (includeWebTools) createWebTools() else emptyList()
+        val executor = if (includeMemoryTools) memoryToolExecutor else null
+        val tools = buildList {
+            if (executor != null) addAll(executor.asTools())
+            addAll(webTools)
+        }
+        if (tools.isEmpty()) return null
+        // 只开记忆时复用缓存注册表，避免每轮重建（tools 数组内容一致，但少一次分配）
+        if (executor != null && webTools.isEmpty()) return memoryToolLoop
+        return ChatToolLoop({ apiClient }, ToolRegistry(tools))
+    }
+
     /** 聊天服务（核心业务逻辑）。 */
     val chatService: ChatService by lazy {
         ChatService(
             clientProvider = { apiClient },
+            onBeforeSend = { contextCapacity.refreshIfNeeded() },
             conversationManager = conversationManager,
             memoryManager = memoryManager,
             settingsManager = settingsManager,
             postProcessScope = applicationScope,
-            config = config
+            config = config,
+            compactionStore = compactionStore,
+            compactor = contextCompactor,
+            budgetProvider = { contextCapacity.budget() },
+            maxTokensCapProvider = { contextCapacity.effectiveMaxTokens() },
+            toolLoopProvider = ::createTurnToolLoop,
+            memoryTools = memoryToolExecutor
         )
     }
 
@@ -144,6 +266,42 @@ class AppContainer(
     /** 主界面背景壁纸导入与清理（相册 URI → filesDir）。 */
     val wallpaperStore: WallpaperStore by lazy {
         WallpaperStore(context)
+    }
+
+    // ── 数据与备份（1.9）──────────────────────────────
+    // 全部复用上面的既有实例，不在备份模块里新建数据库 / 设置实例。
+
+    /** SAF 薄封装：暂存目录、打开读写流、显示名、进页清扫。 */
+    val backupService: BackupService by lazy {
+        BackupService(context)
+    }
+
+    /** 设置读写抽象：导出读 DataStore 快照，导入按白名单写回。 */
+    val backupSettingsSink: SettingsSink by lazy {
+        DataStoreSettingsSink(settingsManager)
+    }
+
+    /** 导出采集的数据源（设置 / 会话 / 记忆 / 压缩状态 / 壁纸）。 */
+    val backupSources: BackupSources by lazy {
+        BackupSources(
+            settings = backupSettingsSink,
+            conversationRepository = conversationRepository,
+            memoryStore = memoryRepository,
+            compactionStore = compactionStore,
+            filesDir = context.filesDir,
+            appVersion = readAppVersion()
+        )
+    }
+
+    /** 导入落地目标：按类别分别覆盖本机数据。 */
+    val backupTarget: BackupTarget by lazy {
+        BackupTarget(
+            conversationRepository = conversationRepository,
+            memoryStore = memoryRepository,
+            compactionStore = compactionStore,
+            filesDir = context.filesDir,
+            settings = backupSettingsSink
+        )
     }
 
     /** 生命周期管理器。 */
@@ -224,20 +382,32 @@ class AppContainer(
     /** 启动时异步加载持久化的记忆与会话历史（不阻塞主线程）。 */
     fun warmUp() {
         warmUpJob = applicationScope.launch(Dispatchers.IO) {
-            listOf(
-                launch { memoryRepository.loadFromDisk() },
-                launch { conversationManager.restore(conversationStore.load()) },
-                // 版本迁移：启动时异步执行（框架长期保留；当前 TTS step 预计 1.9.0 移除，见 docs/legacy-compat.md）
-                launch { LegacyMigration.run(context, settingsManager, ttsModelManager) },
-                // Live2D 模型文件预读到内存缓存：模型加载在 GL 线程同步执行，
-                // asset 读取是最大耗时（阻塞主线程 onPause 数秒）。预热后 GL 线程
-                // 只做解析 + GL 上传，启动/切前后台不再长时间卡顿。
-                launch {
+            // 0. 等 DataStore 内存快照就绪再做任何依赖设置的事。
+            //    否则冷启动早期构建的 apiClient 会拿到空 API Key（→ 首次请求 401），
+            //    容量探测也会因 401 被负缓存 5 分钟（表现为「读不到上下文窗口」）。
+            settingsManager.awaitLoaded()
+            // 丢弃可能在快照就绪前用空 Key 建好的客户端，保证首次请求就是正确配置
+            reloadClient()
+
+            // 1.9 存储迁移：旧 JSON -> SQLite 必须先于会话/记忆的首次访问同步完成（旧 JSON 文件保留不动）
+            com.meapet.mobile.storage.LegacyJsonImporter(database, context.filesDir).importIfNeeded()
+            // 首次启动：后台探测上下文容量（失败降级兜底）
+            contextCapacity.refreshIfNeeded()
+            // Live2D 模型预读独立后台跑：模型加载在 GL 线程同步执行，asset 读取是最大耗时。
+            // 它不阻塞首屏历史渲染——若并进 warmUpJob，聊天页要等模型预热完才显示内容（闪黑/闪空）。
+            // 32 位 ARM 无 Live2D 原生核心时跳过：预热只是读 assets，但没必要为不存在的模型占内存。
+            if (com.meapet.mobile.live2d.Live2dSupport.isAvailable) {
+                applicationScope.launch(Dispatchers.IO) {
                     runCatching {
-                        com.meapet.mobile.live2d.Live2dManager.getInstance()
-                            .prewarmModel(context)
+                        com.meapet.mobile.live2d.Live2dManager.getInstance().prewarmModel(context)
                     }.onFailure { Log.w(TAG, "Live2D 模型预热失败", it) }
                 }
+            }
+            listOf(
+                launch { memoryRepository.loadFromDisk() },
+                launch { conversationManager.restoreFromRepository() },
+                // 版本迁移：启动时异步执行（框架长期保留；当前 TTS step 预计 1.11.0 移除，见 docs/legacy-compat.md）
+                launch { LegacyMigration.run(context, settingsManager, ttsModelManager, memoryRepository) }
             ).joinAll()
         }
     }
@@ -261,6 +431,8 @@ class AppContainer(
         }
         old?.close()
         Log.i(TAG, "API client invalidated, will be rebuilt on next request")
+        // 保存/切换服务商设置：容量缓存随之失效并后台重新探测
+        contextCapacity.refresh()
     }
 
     /**
@@ -276,6 +448,29 @@ class AppContainer(
     suspend fun resetAll() {
         conversationManager.clear()
         memoryRepository.clear()
+    }
+
+    // ── 数据变更广播（备份导入等「绕过服务的整库替换」） ──
+
+    /**
+     * 数据被外部整批替换的信号（备份导入完成时自增）。
+     *
+     * 各 ViewModel 的消息列表/记忆视图都是自己的副本，平时靠用户操作或
+     * `ON_RESUME` 刷新；设置页里导入完再返回主页并不触发 `ON_RESUME`，
+     * 所以需要一个显式的「数据变了」信号，由持有 UI 状态的层自行 reload。
+     * 用单调递增计数而不是布尔：多次导入后订阅方仍能感知到每次变化。
+     *
+     * 用 `MutableStateFlow` 的委托 getter 暴露（而非 `by lazy` 的 StateFlow 字段）：
+     * 单测里 `container` 是 Mockito mock，lazy 字段的 getter 未被 stub 会返回 null。
+     */
+    private val _dataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    /** 数据修订号；订阅它即可在导入后刷新自己的视图。 */
+    val dataRevision: kotlinx.coroutines.flow.StateFlow<Long> get() = _dataRevision
+
+    /** 通知所有订阅方：底层数据已被整批替换（当前仅备份导入调用）。 */
+    fun notifyDataReplaced() {
+        _dataRevision.value = _dataRevision.value + 1
     }
 
     // ── 内部可变缓存（用于 reload） ──

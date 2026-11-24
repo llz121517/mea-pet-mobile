@@ -2,9 +2,11 @@ package com.meapet.mobile.legacy
 
 import android.content.Context
 import android.util.Log
+import com.meapet.mobile.legacy.steps.LegacyExchangeCountMigration
 import com.meapet.mobile.legacy.steps.LegacyTtsModelCleanup
 import com.meapet.mobile.legacy.steps.LegacyTtsNativeLibCleanup
 import com.meapet.mobile.legacy.steps.LegacyTtsSwitchReset
+import com.meapet.mobile.memory.MemoryStore
 import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.tts.model.TtsModelManager
 import kotlinx.coroutines.Dispatchers
@@ -31,11 +33,17 @@ internal object LegacyMigration {
         LegacyTtsModelCleanup(),
         LegacyTtsNativeLibCleanup(),
         LegacyTtsSwitchReset(),
+        LegacyExchangeCountMigration(),
     )
 
-    suspend fun run(context: Context, settingsManager: SettingsManager, ttsModelManager: TtsModelManager) {
+    suspend fun run(
+        context: Context,
+        settingsManager: SettingsManager,
+        ttsModelManager: TtsModelManager,
+        memoryStore: MemoryStore
+    ) {
         withContext(Dispatchers.IO) {
-            val ctx = LegacyMigrationContext(ttsModelManager.modelDir(), settingsManager)
+            val ctx = LegacyMigrationContext(ttsModelManager.modelDir(), settingsManager, memoryStore)
             for (step in STEPS) {
                 runCatching { step.migrate(ctx) }
                     .onFailure { Log.w(TAG, "旧版迁移步骤失败：${step.id}", it) }

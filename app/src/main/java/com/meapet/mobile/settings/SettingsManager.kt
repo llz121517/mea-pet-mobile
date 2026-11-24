@@ -2,6 +2,7 @@ package com.meapet.mobile.settings
 
 import android.content.Context
 import android.util.Log
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
@@ -9,6 +10,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.meapet.mobile.config.WebSearchProviderId
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +19,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+
+internal class ApiConnection(val url: String, val key: String)
 
 /**
  * 应用设置管理器。
@@ -34,15 +38,18 @@ import kotlinx.coroutines.launch
  *
  * @param context Application Context
  */
-class SettingsManager(context: Context) {
-
-    private val dataStore = context.appDataStore
+class SettingsManager internal constructor(
+    private val dataStore: DataStore<Preferences>,
+    cacheScope: CoroutineScope
+) {
+    constructor(context: Context) : this(
+        context.appDataStore,
+        CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    )
 
     /** 设置项内存快照（跟随 DataStore 变更；null = 尚未完成首次加载）。 */
     @Volatile
     private var cachedPrefs: Preferences? = null
-
-    private val cacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** 首次快照就绪信号；预热失败或流结束时同样完成，避免等待方永久挂起。 */
     private val loadedSignal = CompletableDeferred<Unit>()
@@ -68,10 +75,17 @@ class SettingsManager(context: Context) {
 
     private val KEY_API_KEY = stringPreferencesKey(SettingsKeys.API_KEY)
     private val KEY_API_URL = stringPreferencesKey(SettingsKeys.API_URL)
+    private val KEY_WEB_SEARCH_ENABLED = booleanPreferencesKey(SettingsKeys.WEB_SEARCH_ENABLED)
+    private val KEY_WEB_SEARCH_PROVIDER = stringPreferencesKey(SettingsKeys.WEB_SEARCH_PROVIDER)
+    private val KEY_WEB_SEARCH_ANYSEARCH_KEY = stringPreferencesKey(SettingsKeys.WEB_SEARCH_ANYSEARCH_KEY)
+    private val KEY_WEB_SEARCH_DEEPSEEK_KEY = stringPreferencesKey(SettingsKeys.WEB_SEARCH_DEEPSEEK_KEY)
+    private val KEY_WEB_SEARCH_REUSE_CHAT_KEY = booleanPreferencesKey(SettingsKeys.WEB_SEARCH_REUSE_CHAT_KEY)
     private val KEY_MODEL = stringPreferencesKey(SettingsKeys.MODEL)
     private val KEY_TEMPERATURE = doublePreferencesKey(SettingsKeys.TEMPERATURE)
     private val KEY_MAX_TOKENS = intPreferencesKey(SettingsKeys.MAX_TOKENS)
+    private val KEY_CONTEXT_WINDOW = intPreferencesKey(SettingsKeys.CONTEXT_WINDOW)
     private val KEY_ENABLE_MEMORY = booleanPreferencesKey(SettingsKeys.ENABLE_MEMORY)
+    private val KEY_MEMORY_MODE = stringPreferencesKey(SettingsKeys.MEMORY_MODE)
     private val KEY_ENABLE_AUTO_SUMMARY = booleanPreferencesKey(SettingsKeys.ENABLE_AUTO_SUMMARY)
     private val KEY_SUMMARY_INTERVAL = intPreferencesKey(SettingsKeys.SUMMARY_INTERVAL)
     private val KEY_EXCHANGE_COUNT = intPreferencesKey(SettingsKeys.EXCHANGE_COUNT)
@@ -101,6 +115,31 @@ class SettingsManager(context: Context) {
         prefs[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL
     }
 
+    /** 联网搜索开关流（默认关闭）。 */
+    val webSearchEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_WEB_SEARCH_ENABLED] ?: false
+    }
+
+    /** 联网搜索服务商流（默认自动）。 */
+    val webSearchProviderFlow: Flow<WebSearchProviderId> = dataStore.data.map { prefs ->
+        WebSearchProviderId.parse(prefs[KEY_WEB_SEARCH_PROVIDER])
+    }
+
+    /** 独立 DeepSeek Key；空值表示未单独填写。 */
+    val webSearchDeepSeekKeyFlow: Flow<String> = dataStore.data.map { prefs ->
+        prefs[KEY_WEB_SEARCH_DEEPSEEK_KEY].orEmpty()
+    }
+
+    /** 联网搜索是否复用聊天 Key（默认开启）。 */
+    val webSearchReuseChatKeyFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_WEB_SEARCH_REUSE_CHAT_KEY] ?: true
+    }
+
+    /** AnySearch key flow，空值表示匿名档。 */
+    val webSearchAnySearchKeyFlow: Flow<String> = dataStore.data.map { prefs ->
+        prefs[KEY_WEB_SEARCH_ANYSEARCH_KEY].orEmpty()
+    }
+
     /** 模型流。 */
     val modelFlow: Flow<String> = dataStore.data.map { prefs ->
         prefs[KEY_MODEL] ?: SettingsKeys.Defaults.MODEL
@@ -116,9 +155,17 @@ class SettingsManager(context: Context) {
         prefs[KEY_MAX_TOKENS] ?: SettingsKeys.Defaults.MAX_TOKENS
     }
 
+    /** 手动上下文窗口流（null = 自动）。 */
+    val contextWindowFlow: Flow<Int?> = dataStore.data.map { prefs -> prefs[KEY_CONTEXT_WINDOW] }
+
     /** 记忆开关流。 */
     val enableMemoryFlow: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[KEY_ENABLE_MEMORY] ?: SettingsKeys.Defaults.ENABLE_MEMORY
+    }
+
+    /** 记忆检索模式流（见 [com.meapet.mobile.config.MemoryMode]）。 */
+    val memoryModeFlow: Flow<com.meapet.mobile.config.MemoryMode> = dataStore.data.map { prefs ->
+        com.meapet.mobile.config.MemoryMode.parse(prefs[KEY_MEMORY_MODE])
     }
 
     /** 自动摘要开关流。 */
@@ -215,11 +262,55 @@ class SettingsManager(context: Context) {
 
     fun getApiKey(): String = currentPrefs()[KEY_API_KEY] ?: ""
     fun getApiUrl(): String = currentPrefs()[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL
+
+    /**
+     * 备份导出：读取 DataStore 原始快照（只读）。
+     *
+     * 导出只包含用户实际写过的键，因此需要原始快照而不是逐项 getter（避免把默认值物化）。
+     * **仅供备份模块使用**；业务代码请用上方的类型化 getter。
+     */
+    fun rawSnapshot(): Preferences = currentPrefs()
+
+    /**
+     * 备份导入：在一个 DataStore 事务里批量修改设置，并同步内存快照。
+     *
+     * 传进来的编辑器只能触碰备份白名单内的键（由调用方 [com.meapet.mobile.backup.SettingsWhitelist]
+     * 保证），避免导入把运行时状态键一起覆盖。**仅供备份模块使用**。
+     */
+    suspend fun editRaw(transform: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
+        cachedPrefs = dataStore.edit { prefs -> transform(prefs) }
+    }
+
+    /** Read endpoint and credential from one preferences snapshot. */
+    internal fun getApiConnection(): ApiConnection {
+        val prefs = currentPrefs()
+        return ApiConnection(
+            url = prefs[KEY_API_URL] ?: SettingsKeys.Defaults.API_URL,
+            key = prefs[KEY_API_KEY].orEmpty()
+        )
+    }
+
+    fun getWebSearchEnabled(): Boolean = currentPrefs()[KEY_WEB_SEARCH_ENABLED] ?: false
+    fun getWebSearchProvider(): WebSearchProviderId =
+        WebSearchProviderId.parse(currentPrefs()[KEY_WEB_SEARCH_PROVIDER])
+    fun getWebSearchAnySearchKey(): String = currentPrefs()[KEY_WEB_SEARCH_ANYSEARCH_KEY].orEmpty()
+    fun getWebSearchDeepSeekKey(): String = currentPrefs()[KEY_WEB_SEARCH_DEEPSEEK_KEY].orEmpty()
+
+    /** 联网搜索是否复用「API 配置」里的聊天 Key（默认开启）。 */
+    fun isWebSearchReuseChatKey(): Boolean =
+        currentPrefs()[KEY_WEB_SEARCH_REUSE_CHAT_KEY] ?: true
+
     fun getModel(): String = currentPrefs()[KEY_MODEL] ?: SettingsKeys.Defaults.MODEL
     fun getTemperature(): Double = currentPrefs()[KEY_TEMPERATURE] ?: SettingsKeys.Defaults.TEMPERATURE
     fun getMaxTokens(): Int = currentPrefs()[KEY_MAX_TOKENS] ?: SettingsKeys.Defaults.MAX_TOKENS
+    /** 手动上下文窗口（原始容量 token）；null = 自动。 */
+    fun getContextWindow(): Int? = currentPrefs()[KEY_CONTEXT_WINDOW]
     fun getSystemPrompt(): String = currentPrefs()[KEY_SYSTEM_PROMPT] ?: SettingsKeys.Defaults.SYSTEM_PROMPT
     fun isMemoryEnabled(): Boolean = currentPrefs()[KEY_ENABLE_MEMORY] ?: SettingsKeys.Defaults.ENABLE_MEMORY
+
+    /** 记忆检索模式（同步 getter，读内存快照）。 */
+    fun getMemoryMode(): com.meapet.mobile.config.MemoryMode =
+        com.meapet.mobile.config.MemoryMode.parse(currentPrefs()[KEY_MEMORY_MODE])
     fun isAutoSummaryEnabled(): Boolean = currentPrefs()[KEY_ENABLE_AUTO_SUMMARY] ?: SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY
     fun getSummaryInterval(): Int = currentPrefs()[KEY_SUMMARY_INTERVAL] ?: SettingsKeys.Defaults.SUMMARY_INTERVAL
 
@@ -232,8 +323,23 @@ class SettingsManager(context: Context) {
     /** 颜色预设 ID（"default" | "ocean" | ...）。 */
     fun getColorPreset(): String = currentPrefs()[KEY_COLOR_PRESET] ?: SettingsKeys.Defaults.COLOR_PRESET
 
-    /** 距上次摘要已进行的对话轮数（跨进程存活，见 [SettingsKeys.EXCHANGE_COUNT]）。 */
-    fun getExchangeCount(): Int = currentPrefs()[KEY_EXCHANGE_COUNT] ?: 0
+    /**
+     * 仅 1.9 存储迁移使用：读取旧版存在 DataStore 的对话轮数计数。
+     *
+     * 该计数已迁到 SQLite（记忆存储的 meta 表），见
+     * [com.meapet.mobile.legacy.steps.LegacyExchangeCountMigration]。
+     * 返回 null 表示旧值不存在或已被迁走。
+     */
+    fun getLegacyExchangeCount(): Int? = currentPrefs()[KEY_EXCHANGE_COUNT]
+
+    /**
+     * 仅 1.9 存储迁移使用：删除旧版存在 DataStore 的计数字段。
+     *
+     * 迁移完成后调用，保证设置里不再残留这项运行状态（「设置部分导出」不会再带上它）。
+     */
+    suspend fun clearLegacyExchangeCount() {
+        cachedPrefs = dataStore.edit { prefs -> prefs.remove(KEY_EXCHANGE_COUNT) }
+    }
 
     /** 主界面语音开关。 */
     fun isTtsMainEnabled(): Boolean = currentPrefs()[KEY_TTS_MAIN_ENABLED] ?: SettingsKeys.Defaults.TTS_MAIN_ENABLED
@@ -277,6 +383,34 @@ class SettingsManager(context: Context) {
         Log.d(TAG, "API URL updated: $url")
     }
 
+    suspend fun setWebSearchEnabled(enabled: Boolean) {
+        cachedPrefs = dataStore.edit { it[KEY_WEB_SEARCH_ENABLED] = enabled }
+    }
+
+    suspend fun setWebSearchProvider(provider: WebSearchProviderId) {
+        cachedPrefs = dataStore.edit { it[KEY_WEB_SEARCH_PROVIDER] = provider.id }
+    }
+
+    suspend fun setWebSearchDeepSeekKey(key: String) {
+        val trimmed = key.trim()
+        cachedPrefs = dataStore.edit { prefs ->
+            if (trimmed.isEmpty()) prefs.remove(KEY_WEB_SEARCH_DEEPSEEK_KEY)
+            else prefs[KEY_WEB_SEARCH_DEEPSEEK_KEY] = trimmed
+        }
+    }
+
+    suspend fun setWebSearchReuseChatKey(enabled: Boolean) {
+        cachedPrefs = dataStore.edit { it[KEY_WEB_SEARCH_REUSE_CHAT_KEY] = enabled }
+    }
+
+    suspend fun setWebSearchAnySearchKey(key: String) {
+        val trimmed = key.trim()
+        cachedPrefs = dataStore.edit { prefs ->
+            if (trimmed.isEmpty()) prefs.remove(KEY_WEB_SEARCH_ANYSEARCH_KEY)
+            else prefs[KEY_WEB_SEARCH_ANYSEARCH_KEY] = trimmed
+        }
+    }
+
     suspend fun setModel(model: String) {
         cachedPrefs = dataStore.edit { prefs -> prefs[KEY_MODEL] = model }
     }
@@ -289,8 +423,19 @@ class SettingsManager(context: Context) {
         cachedPrefs = dataStore.edit { prefs -> prefs[KEY_MAX_TOKENS] = tokens }
     }
 
+    /** 写入手动上下文窗口；传 null 清除，回到自动。 */
+    suspend fun setContextWindow(tokens: Int?) {
+        cachedPrefs = dataStore.edit { prefs ->
+            if (tokens == null) prefs.remove(KEY_CONTEXT_WINDOW) else prefs[KEY_CONTEXT_WINDOW] = tokens
+        }
+    }
+
     suspend fun setEnableMemory(enabled: Boolean) {
         cachedPrefs = dataStore.edit { prefs -> prefs[KEY_ENABLE_MEMORY] = enabled }
+    }
+
+    suspend fun setMemoryMode(mode: com.meapet.mobile.config.MemoryMode) {
+        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_MEMORY_MODE] = mode.name }
     }
 
     suspend fun setEnableAutoSummary(enabled: Boolean) {
@@ -299,10 +444,6 @@ class SettingsManager(context: Context) {
 
     suspend fun setSummaryInterval(interval: Int) {
         cachedPrefs = dataStore.edit { prefs -> prefs[KEY_SUMMARY_INTERVAL] = interval }
-    }
-
-    suspend fun setExchangeCount(count: Int) {
-        cachedPrefs = dataStore.edit { prefs -> prefs[KEY_EXCHANGE_COUNT] = count }
     }
 
     suspend fun setSystemPrompt(prompt: String) {

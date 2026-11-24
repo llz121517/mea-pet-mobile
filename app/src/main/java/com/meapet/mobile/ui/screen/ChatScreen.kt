@@ -2,6 +2,9 @@ package com.meapet.mobile.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -19,11 +22,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -41,11 +46,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -56,16 +66,29 @@ import com.meapet.mobile.app.MeaPetApplication
 import com.meapet.mobile.viewmodel.ChatEvent
 import com.meapet.mobile.chat.ChatUiState
 import com.meapet.mobile.chat.MemoryDialogUi
+import com.meapet.mobile.chat.TurnPhase
 import com.meapet.mobile.memory.MemoryType
+import com.meapet.mobile.live2d.Live2dSupport
 import com.meapet.mobile.settings.SettingsKeys
 import com.meapet.mobile.ui.component.AppSnackbarHost
 import com.meapet.mobile.ui.component.ChatBubble
 import com.meapet.mobile.ui.component.ChatInputBar
 import com.meapet.mobile.ui.component.ErrorBubble
+import com.meapet.mobile.ui.component.MeaBusyBar
 import com.meapet.mobile.ui.component.OverlayMenu
 import com.meapet.mobile.ui.component.UndoSnackbarEffect
 import com.meapet.mobile.ui.screen.settings.SettingsScreen
 import com.meapet.mobile.viewmodel.ChatViewModel
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import kotlinx.coroutines.flow.distinctUntilChanged
+
+/** 列表底部留白相对底部栏高度额外留出的间隙。 */
+private val BOTTOM_BAR_GAP = 4.dp
+
+/** 底部栏尚未测量到时的兜底留白（输入胶囊约 96dp + 间隙）。 */
+private val FALLBACK_BOTTOM_INSET = 100.dp
 
 /** 内部页面导航。 */
 private enum class Page { CHAT, SETTINGS }
@@ -153,7 +176,9 @@ private fun ChatPage(
     onOpenSettings: () -> Unit
 ) {
     val state by chatViewModel.state.collectAsState()
-    val listState = rememberLazyListState()
+    // 会话代际变化（清空/撤销恢复）时重建滚动状态：LazyListState 里存着旧列表的
+    // 可见下标，原地从 300 多条切到 0 条会让 LazyLayout 回收 item 时触发内部 NPE
+    val listState = remember(state.conversationEpoch) { LazyListState() }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // 破坏性操作是「立即执行 + 可撤销」：执行结果与撤销快照都在
@@ -175,11 +200,36 @@ private fun ChatPage(
 
     // 新消息或错误卡片出现时自动滚动到底部。
     // 错误卡片是列表末尾的额外 item，所以它出现时也要滚一次，否则用户看不到重试按钮。
-    LaunchedEffect(state.messages.size, state.error) {
+    // 自动滚动到底部。
+    // - 启动首屏：等 initialLoadDone 后**无动画**定位到底部（scrollToItem）。
+    //   否则会先滚到 35 条内存窗口的底部，随后首屏 50 条在头部插入 15 条旧消息，
+    //   LazyColumn 按 key 锚定原位置 → 停留在半途，并露出滚动动画。
+    // - 首屏定位完成前列表保持透明（contentReady=false）：避免先闪一下空态/顶部内容。
+    // - 之后：新消息或错误卡片出现才带动画滚动。
+    // 触发键仍是「最后一条消息 id」而非条数：向上懒加载会在头部插消息，条数变化不能把用户拽回底部。
+    var initialScrollApplied by remember(state.conversationEpoch) { mutableStateOf(false) }
+    LaunchedEffect(state.initialLoadDone, state.messages.lastOrNull()?.id, state.error) {
+        if (!state.initialLoadDone) return@LaunchedEffect
         val lastIndex = state.messages.size - 1 + if (state.error != null) 1 else 0
-        if (lastIndex >= 0) {
+        if (lastIndex < 0) {
+            initialScrollApplied = true
+            return@LaunchedEffect
+        }
+        if (!initialScrollApplied) {
+            listState.scrollToItem(lastIndex)
+            initialScrollApplied = true
+        } else {
             listState.animateScrollToItem(lastIndex)
         }
+    }
+
+    // 懒加载：滚动到接近顶部时向上加载更早的一页（ViewModel 内部防重入、判断是否还有更多）
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { index ->
+                if (index <= 3) chatViewModel.loadOlderMessages()
+            }
     }
 
     // 启动静默更新提示：有新版本时底部轻提示，可点「查看」打开 GitHub Release
@@ -203,14 +253,70 @@ private fun ChatPage(
         chatViewModel.onEvent(ChatEvent.DismissUpdateNotice)
     }
 
+    // 上下文过长提醒：越过阈值后只弹一次（ViewModel 保证），动作直接触发整理。
+    // 文案刻意口语化，与主界面「开始和 Mea 对话吧」保持同一种语气。
+    LaunchedEffect(state.compactHint) {
+        if (!state.compactHint) return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = "我们聊了好久啦，要不要让 Mea 把前面的内容整理一下喵？",
+            actionLabel = "整理一下",
+            duration = SnackbarDuration.Long,
+            withDismissAction = true
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            chatViewModel.onEvent(ChatEvent.CompactContext)
+        }
+        chatViewModel.onEvent(ChatEvent.DismissCompactHint)
+    }
+
+    // 压缩进行中：贴在输入栏上方的「Mea 还在…」状态条（不是 Snackbar），见 MeaBusyBar
+
+    // 压缩完成/失败：一次性反馈（含折叠条数或失败原因）
+    LaunchedEffect(state.compactionNotice) {
+        val notice = state.compactionNotice ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(
+            message = notice,
+            actionLabel = "知道了",
+            duration = SnackbarDuration.Long,
+            withDismissAction = true
+        )
+        chatViewModel.onEvent(ChatEvent.DismissCompactionNotice)
+    }
+
+    // 消息列表底部留白跟随底部栏实际高度：状态条出现时自动把它让出来，
+    // 避免列表和「Mea 还在说…」打架。首帧尚未测量到时用兜底值。
+    var bottomBarHeight by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
+    val bottomInset by animateDpAsState(
+        targetValue = if (bottomBarHeight > 0.dp) bottomBarHeight + BOTTOM_BAR_GAP
+                      else FALLBACK_BOTTOM_INSET,
+        animationSpec = tween(durationMillis = 180),
+        label = "messageListBottomInset"
+    )
+
+    // 留白变化时把列表内容同步平移同样的距离：状态条顶上来后会盖住最后一条，
+    // 单纯加 padding 不会移动已显示的内容（滚动锚点不变），必须自己补这一段位移。
+    // 只做等量平移，不滚到底——用户可能正在上面读历史，不能把视野强行拽回底部。
+    var previousInset by remember { mutableStateOf(bottomInset) }
+    LaunchedEffect(bottomInset) {
+        val delta = bottomInset - previousInset
+        previousInset = bottomInset
+        // scrollBy 正值 = 内容上移；列表还没内容时不动，避免空态被顶
+        if (delta.value != 0f && listState.layoutInfo.totalItemsCount > 0) {
+            listState.scrollBy(with(density) { delta.toPx() })
+        }
+    }
+
     // 整页躲开软键盘：输入栏、撤销条、消息列表都随键盘收窄（窗口不再替我们
     // resize/pan，见 MainActivity 的 edge-to-edge 说明）
     Box(modifier = Modifier.fillMaxSize().imePadding()) {
-        // ── Layer 1: 消息列表 ──
+        // ── Layer 1: 消息列表（越界效果走系统默认拉伸）──
         MessageList(
             state = state,
             listState = listState,
             bubbleAlpha = bubbleAlpha,
+            bottomInset = bottomInset,
+            contentReady = initialScrollApplied || (state.initialLoadDone && state.messages.isEmpty()),
             onDismissError = { chatViewModel.onEvent(ChatEvent.DismissError) },
             onRetry = { chatViewModel.onEvent(ChatEvent.RetryLastMessage) }
         )
@@ -218,6 +324,7 @@ private fun ChatPage(
         // ── Layer 2: 顶部菜单 ──
         OverlayMenu(
             onToggleOverlay = onToggleOverlay,
+            showOverlayEntry = Live2dSupport.isAvailable,
             onClearConversation = {
                 // 立即清空，随后由撤销条给一次反悔机会（见 UndoSnackbarEffect）
                 chatViewModel.onEvent(ChatEvent.ClearConversation)
@@ -226,17 +333,55 @@ private fun ChatPage(
                 chatViewModel.onEvent(ChatEvent.ShowMemories)
             },
             onSettings = onOpenSettings,
+            showCompactContext = state.canCompactContext || state.isCompacting,
+            isCompacting = state.isCompacting,
+            onCompactContext = { chatViewModel.onEvent(ChatEvent.CompactContext) },
             modifier = Modifier.align(Alignment.TopEnd)
         )
 
-        // ── Layer 3: 底部输入栏 ──
-        ChatInputBar(
-            inputText = state.inputText,
-            onInputChange = { chatViewModel.onEvent(ChatEvent.UpdateInput(it)) },
-            onSend = { chatViewModel.onEvent(ChatEvent.SendMessage(state.inputText)) },
-            isLoading = state.isLoading,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
+        // ── Layer 3: 底部输入栏（turn 状态条 / 压缩中状态条）──
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .onSizeChanged { size ->
+                    bottomBarHeight = with(density) { size.height.toDp() }
+                }
+        ) {
+            // 「Mea 还在…」只在**出现第一条回复后**才出现：等待首条期间输入栏发送键转圈即可，
+            // 不再提前弹状态条（还没看到任何输出就显示「还在说」既不准确也让人以为卡住）。
+            // 渐入/渐出避免出现、消失时跳变。
+            AnimatedVisibility(
+                visible = state.turnPhase == TurnPhase.REPLYING,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                MeaBusyBar(
+                    text = "Mea 还在说…",
+                    actionLabel = "停止",
+                    alpha = bubbleAlpha,
+                    onAction = { chatViewModel.onEvent(ChatEvent.StopTurn) }
+                )
+            }
+            // 压缩状态条与 turn 不叠加：turn 进行中时让位给 turn 状态条
+            AnimatedVisibility(
+                visible = state.turnPhase == TurnPhase.IDLE && state.isCompacting,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                MeaBusyBar(text = "Mea 还在整理前面的内容…", alpha = bubbleAlpha)
+            }
+            // 等待首条回复期间保持原禁用/转圈表现；已出第一条气泡后恢复输入，发送即插队
+            val waitingFirstReply = state.turnPhase == TurnPhase.WAITING_FIRST_REPLY
+            ChatInputBar(
+                inputText = state.inputText,
+                onInputChange = { chatViewModel.onEvent(ChatEvent.UpdateInput(it)) },
+                onSend = { chatViewModel.onEvent(ChatEvent.SendMessage(state.inputText)) },
+                isLoading = waitingFirstReply,
+                enabled = !waitingFirstReply,
+                alpha = bubbleAlpha,
+                modifier = Modifier
+            )
+        }
 
         // ── Layer 4: Snackbar（提示 + 破坏性操作的二次确认） ──
         // 动作文案跟随主题 primary，见 AppSnackbarHost
@@ -270,25 +415,37 @@ private fun MessageList(
     state: ChatUiState,
     listState: LazyListState,
     bubbleAlpha: Float,
+    /** 底部内容留白：跟随输入栏（含状态条）实测高度，保证最后一条不被遮住 */
+    bottomInset: Dp,
+    /** 首屏定位是否已完成；未完成时列表透明，避免闪一下空态或顶部内容 */
+    contentReady: Boolean,
     onDismissError: () -> Unit,
     onRetry: () -> Unit
 ) {
     // 兜底去重：消息列表出现重复 id 一定是上游 bug，但 LazyColumn 撞到重复 key 是
     // 直接抛 IllegalArgumentException 崩掉整个应用（不是渲染错乱），代价过高，
     // 所以在唯一的消费点加一道保险。真正的修复始终在产生 state 的地方。
-    val uniqueMessages = remember(state.messages) { state.messages.distinctBy { it.id } }
+    // 同时兜底过滤 UI 不可见消息（tool / 纯 tool_calls 的空 assistant）：读取历史与
+    // ViewModel 合并处都已经过滤过，这里再挡一层，避免任何一条漏进来就渲染成空气泡/崩溃。
+    val uniqueMessages = remember(state.messages) {
+        state.messages.filter { it.isVisibleInUi }.distinctBy { it.id }
+    }
 
     LazyColumn(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(bottom = 88.dp)
-            .padding(horizontal = 4.dp, vertical = 8.dp),
-        contentPadding = PaddingValues(vertical = 8.dp),
+            .padding(horizontal = 4.dp)
+            .alpha(if (contentReady) 1f else 0f),
+        // 视口铺满整屏（消息可以从悬浮输入栏后面滚过去），底部留白改用内容内边距：
+        // 具体高度由底部栏实测值给出（见 ChatPage），状态条出现时会自动变高。
+        contentPadding = PaddingValues(top = 16.dp, bottom = bottomInset),
         verticalArrangement = Arrangement.Bottom
     ) {
-        if (state.messages.isEmpty()) {
-            item {
+        if (state.initialLoadDone && uniqueMessages.isEmpty()) {
+            // 显式 key：与消息 item 的 key 空间区分开，避免空态/思考中等固定 item
+            // 在 LazyLayout 回收时与某个消息 key 撞车
+            item(key = "empty-state") {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -304,15 +461,23 @@ private fun MessageList(
         }
 
         // 兜底去重见函数开头 uniqueMessages
-        items(
+        itemsIndexed(
             items = uniqueMessages,
-            key = { it.id }
-        ) { message ->
+            key = { _, message -> message.id }
+        ) { index, message ->
+            // 按天轻时间分隔条：相邻消息跨自然日时插一条（纯 UI 派生，不入库）
+            val previousTs = if (index > 0) uniqueMessages[index - 1].timestamp else null
+            dayDividerLabel(previousTs, message.timestamp)?.let { DividerLabel(it) }
             ChatBubble(message = message, alpha = bubbleAlpha)
+            // 压缩分隔条：已折叠进摘要的内容与仍逐字发送的内容之间
+            if (message.id == state.compactedUpToMessageId) {
+                DividerLabel("早些时候")
+            }
         }
 
-        if (state.isLoading) {
-            item {
+        // 等待首条回复时显示「Mea 正在思考...」；出第一条气泡后由输入栏上方的状态条表达进度
+        if (state.turnPhase == TurnPhase.WAITING_FIRST_REPLY) {
+            item(key = "thinking") {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -469,8 +634,61 @@ private fun MemoryDialog(
     }
 }
 
-/** 记忆类型的中文标签。 */
-private fun memoryTypeLabel(type: MemoryType): String = when (type) {
+/**
+ * 分隔条：`──── 今天 ────` 样式的淡色短横线 + 居中文案。
+ *
+ * 横线用固定短宽度（不铺满整行），视觉更轻，不会把消息列表切得太重。
+ */
+@Composable
+private fun DividerLabel(text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val lineColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        HorizontalDivider(modifier = Modifier.width(DIVIDER_LINE_WIDTH), color = lineColor)
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            modifier = Modifier.padding(horizontal = 10.dp)
+        )
+        HorizontalDivider(modifier = Modifier.width(DIVIDER_LINE_WIDTH), color = lineColor)
+    }
+}
+
+/** 分隔条两侧横线的固定长度（短横线，避免铺满整行）。 */
+private val DIVIDER_LINE_WIDTH = 50.dp
+
+/**
+ * 按天分隔条文案：相邻两条消息跨自然日（设备本地时区）时返回文案，同一天返回 null。
+ *
+ * @param previousTs 上一条可见消息时间戳；null（列表首条）时总是给出当天文案
+ * @param currentTs 当前消息时间戳
+ */
+private fun dayDividerLabel(
+    previousTs: Long?,
+    currentTs: Long,
+    zone: ZoneId = ZoneId.systemDefault()
+): String? {
+    val current = Instant.ofEpochMilli(currentTs).atZone(zone).toLocalDate()
+    if (previousTs != null) {
+        val previous = Instant.ofEpochMilli(previousTs).atZone(zone).toLocalDate()
+        if (previous == current) return null
+    }
+    val today = LocalDate.now(zone)
+    return when {
+        current == today -> "今天"
+        current == today.minusDays(1) -> "昨天"
+        current.year == today.year -> "${current.monthValue}月${current.dayOfMonth}日"
+        else -> "${current.year}年${current.monthValue}月${current.dayOfMonth}日"
+    }
+}
+
+/** 记忆类型的中文标签。 */private fun memoryTypeLabel(type: MemoryType): String = when (type) {
     MemoryType.SHORT_TERM -> "短期"
     MemoryType.LONG_TERM -> "长期"
     MemoryType.CORE_TRAIT -> "特质"

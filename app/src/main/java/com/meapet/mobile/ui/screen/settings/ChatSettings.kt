@@ -1,6 +1,8 @@
 package com.meapet.mobile.ui.screen.settings
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -12,7 +14,9 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
+import com.meapet.mobile.config.MemoryMode
 import com.meapet.mobile.settings.SettingsKeys
 import com.meapet.mobile.viewmodel.SettingsUiState
 import com.meapet.mobile.viewmodel.SettingsViewModel
@@ -37,7 +41,7 @@ internal fun SystemPromptSection(
     Column {
         OutlinedTextField(
             value = local.systemPrompt,
-            onValueChange = { local.systemPrompt = it },
+            onValueChange = { local.updateSystemPrompt(it) },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(120.dp)
@@ -54,7 +58,7 @@ internal fun SystemPromptSection(
         OutlinedButton(
             onClick = {
                 val previous = local.systemPrompt
-                local.systemPrompt = SettingsKeys.Defaults.SYSTEM_PROMPT
+                local.updateSystemPrompt(SettingsKeys.Defaults.SYSTEM_PROMPT)
                 viewModel.resetSystemPrompt(previous)
             },
             // 已是默认值就置灰：没有可重置的内容（与背景壁纸的「恢复默认」一致）
@@ -87,9 +91,43 @@ internal fun MemorySection(
         darkTheme = darkTheme,
         onCheckedChange = { viewModel.updateEnableMemory(it) }
     )
+
+    // 记忆检索方式：只影响「模型怎么找到记忆」，与是否记忆无关
+    SettingsExpandableContent(visible = state.enableMemory) {
+        Column {
+            Spacer(Modifier.height(8.dp))
+            ParamLabelWithHelp(
+                label = "记忆检索方式",
+                helpTitle = "记忆检索方式",
+                helpText = "自动/工具：让模型按需要调用记忆工具，端点不支持时降级为只读关键词注入。" +
+                    "只读：保留关键词命中，将相关记忆追加到本轮发送消息；不会通过回复创建、修改或删除记忆。\n\n" +
+                    "关闭：停止记忆注入和检索，不会删除已保存的记忆或对话历史。" +
+                    "此选项与上方的记忆总开关不同，也不影响联网工具是否可用。"
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MemoryMode.entries.forEach { mode ->
+                    FilterChipLike(
+                        label = memoryModeLabel(mode),
+                        selected = state.memoryMode == mode,
+                        enabled = true,
+                        onClick = { viewModel.updateMemoryMode(mode) }
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = memoryModeHint(state.memoryMode),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+    }
     SettingsSwitchRow(
         label = "自动摘要",
-        description = "定期总结对话为长期记忆",
+        description = "仅工具模式：定期整理短期记忆为长期记忆",
         checked = state.enableAutoSummary,
         darkTheme = darkTheme,
         onCheckedChange = { viewModel.updateEnableAutoSummary(it) }
@@ -97,13 +135,16 @@ internal fun MemorySection(
 
     Spacer(Modifier.height(8.dp))
 
-    Text(
-        text = "摘要轮次: 每 ${local.summaryInterval.toInt()} 轮对话总结一次",
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-            alpha = if (state.enableAutoSummary) 1f else 0.5f
+    Column(Modifier.alpha(if (state.enableAutoSummary) 1f else 0.5f)) {
+        ParamLabelWithHelp(
+            label = "摘要轮次: 每 ${local.summaryInterval.toInt()} 轮对话总结一次",
+            helpTitle = "自动摘要间隔",
+            helpText = "控制自动整理长期记忆的对话间隔。数值越小，整理越频繁，" +
+                "也可能带来更多模型请求和费用。\n\n" +
+                "自动摘要与上下文压缩是两件事：前者整理记忆，后者缩短发送给模型的历史。" +
+                "仅成功的工具模式对话计数；只读、关闭和降级轮次不触发摘要。关闭自动摘要后，这个间隔不生效。"
         )
-    )
+    }
     Slider(
         value = local.summaryInterval,
         onValueChange = { local.summaryInterval = it },
@@ -118,4 +159,20 @@ internal fun MemorySection(
             inactiveTrackColor = sliderTrackColor(darkTheme)
         )
     )
+}
+
+/** 记忆检索方式的短标签（四个选项同一行，保持简短）。 */
+private fun memoryModeLabel(mode: MemoryMode): String = when (mode) {
+    MemoryMode.AUTO -> "自动"
+    MemoryMode.TOOLS -> "工具"
+    MemoryMode.TEXT -> "只读"
+    MemoryMode.OFF -> "关闭"
+}
+
+/** 记忆检索方式的一句话说明。 */
+private fun memoryModeHint(mode: MemoryMode): String = when (mode) {
+    MemoryMode.AUTO -> "自动：优先让模型调用记忆工具，端点不支持时回退只读关键词注入"
+    MemoryMode.TOOLS -> "工具：模型主动检索/写入记忆（需要端点支持 function calling）"
+    MemoryMode.TEXT -> "只读：关键词命中的已有记忆追加到本轮消息，不创建、修改或删除记忆"
+    MemoryMode.OFF -> "关闭：本轮不使用或写入记忆，已保存的内容保留"
 }

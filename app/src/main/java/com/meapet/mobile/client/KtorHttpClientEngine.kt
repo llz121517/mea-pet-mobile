@@ -19,10 +19,11 @@ import io.ktor.http.contentType
  *
  * 该实现与 [OpenAiCompatibleClient] 完全解耦，可替换为 OkHttp、Apache 或测试 Fake。
  */
-class KtorHttpClientEngine : HttpClientEngine {
+class KtorHttpClientEngine(private val followRedirects: Boolean = true) : HttpClientEngine {
 
     private val client = HttpClient(CIO) {
         expectSuccess = false
+        followRedirects = this@KtorHttpClientEngine.followRedirects
         install(HttpTimeout) {
             // LLM 非流式长回复场景：整体与 socket 超时放宽到 5 分钟，连接仍 30 秒快速失败
             requestTimeoutMillis = 300_000

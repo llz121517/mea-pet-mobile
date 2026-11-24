@@ -1,6 +1,8 @@
 package com.meapet.mobile.ui.screen.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,6 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.res.painterResource
+import com.meapet.mobile.R
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meapet.mobile.viewmodel.SettingsUiState
@@ -63,7 +69,7 @@ internal fun ApiConfigSection(
 
     OutlinedTextField(
         value = local.apiKey,
-        onValueChange = { local.apiKey = it },
+        onValueChange = { local.updateApiKey(it) },
         label = { Text("API Key") },
         placeholder = { Text("sk-...") },
         modifier = Modifier
@@ -93,7 +99,7 @@ internal fun ApiConfigSection(
 
     OutlinedTextField(
         value = local.apiUrl,
-        onValueChange = { local.apiUrl = it },
+        onValueChange = { local.updateApiUrl(it) },
         label = { Text("API 地址") },
         modifier = Modifier
             .fillMaxWidth()
@@ -102,7 +108,6 @@ internal fun ApiConfigSection(
         placeholder = { Text("https://api.deepseek.com/v1") }
     )
 }
-
 /** 模型参数：模型名 + 拉取列表 + Temperature / MaxToken 滑杆。 */
 @Composable
 internal fun ModelParamsSection(
@@ -115,13 +120,13 @@ internal fun ModelParamsSection(
 
     OutlinedTextField(
         value = local.model,
-        onValueChange = { local.model = it },
+        onValueChange = { local.updateModel(it) },
         label = { Text("模型") },
         modifier = Modifier
             .fillMaxWidth()
             .saveOnFocusChange { viewModel.saveModel(local.model) },
         singleLine = true,
-        placeholder = { Text("deepseek-v4-flash") }
+        placeholder = { Text("deepseek-flash") }
     )
 
     Spacer(Modifier.height(8.dp))
@@ -184,7 +189,7 @@ internal fun ModelParamsSection(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                local.model = modelId
+                                local.updateModel(modelId)
                                 viewModel.selectModel(modelId)
                             }
                             .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -219,6 +224,67 @@ internal fun ModelParamsSection(
 
     Spacer(Modifier.height(8.dp))
 
+    OutlinedTextField(
+        value = local.contextWindow,
+        onValueChange = { v -> local.updateContextWindow(v.filter { it.isDigit() }.take(8)) },
+        label = {
+            ParamLabelWithHelp(
+                label = "上下文窗口",
+                helpTitle = "上下文窗口",
+                helpText = "模型一次请求可容纳的输入与输出总量。" +
+                    "留空时自动探测；无法探测时使用兜底值。手动填写会优先于探测结果。\n\n" +
+                    "应用按容量预留余量，实际使用约为其 85%。本地推理服务请填写实际加载的窗口，" +
+                    "不要直接照抄模型标称上限。点击重新检测会清除手动值并再次探测。"
+            )
+        },
+        placeholder = { Text("单位 Token ，留空 = 自动") },
+        modifier = Modifier
+            .fillMaxWidth()
+            .saveOnFocusChange { viewModel.saveContextWindow(local.contextWindow) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        trailingIcon = {
+            if (local.contextWindow.isNotEmpty()) {
+                IconButton(onClick = {
+                    local.updateContextWindow("")
+                    viewModel.saveContextWindow("")
+                }) {
+                    Icon(Icons.Filled.Close, contentDescription = "重置为自动")
+                }
+            }
+        },
+        supportingText = {
+            val src = when (state.capacitySource) {
+                com.meapet.mobile.client.CapacitySource.MANUAL -> "手动"
+                com.meapet.mobile.client.CapacitySource.PROBED -> "探测"
+                com.meapet.mobile.client.CapacitySource.FALLBACK -> "兜底"
+            }
+            Text("当前生效 ${state.effectiveCapacity}（$src）；实际使用约为其 85%。本地推理服务请按实际加载的窗口填写")
+        }
+    )
+
+    Spacer(Modifier.height(4.dp))
+
+    // 重新检测：清除手动值并强制重新探测（探测失败会回退兜底，不报错）
+    TextButton(
+        onClick = {
+            local.updateContextWindow("")
+            viewModel.redetectContextWindow()
+        },
+        modifier = Modifier.saveOnFocusChange { }
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_refresh),
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.width(6.dp))
+        Text("重新检测", style = MaterialTheme.typography.labelMedium)
+    }
+
+    Spacer(Modifier.height(8.dp))
+
     ParamLabelWithHelp(
         label = "Temperature: ${"%.2f".format(local.temperature)}",
         helpTitle = "Temperature（随机度）",
@@ -242,10 +308,13 @@ internal fun ModelParamsSection(
 
     Spacer(Modifier.height(8.dp))
 
-    Text(
-        text = "最大 Token: ${local.maxTokens.toInt()}",
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
+    ParamLabelWithHelp(
+        label = "最大 Token: ${local.maxTokens.toInt()}",
+        helpTitle = "最大输出 Token",
+        helpText = "控制单次回复允许的最大输出长度，不是模型能回看的对话长度。" +
+            "Token 是模型计量文本的单位，不等同于字数。\n\n" +
+            "实际发送的上限还会被上下文容量的约 25% 限制，避免输出挤占输入空间。" +
+            "调大允许更长回复，也可能增加等待时间和费用；不保证模型一定写满。"
     )
     Slider(
         value = local.maxTokens,
@@ -257,5 +326,129 @@ internal fun ModelParamsSection(
         steps = MAX_TOKENS_STEPS,
         modifier = Modifier.fillMaxWidth(),
         colors = SliderDefaults.colors(inactiveTrackColor = sliderTrackColor(darkTheme))
+    )
+}
+
+
+@Composable
+internal fun WebSearchSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel,
+    local: SettingsLocalState,
+    darkTheme: Boolean
+) {
+    SectionTitle("联网搜索")
+    SettingsSwitchRow(
+        label = "启用联网搜索",
+        description = "允许模型在对话中搜索网页、读取网页正文",
+        checked = state.webSearchEnabled,
+        darkTheme = darkTheme,
+        onCheckedChange = viewModel::updateWebSearchEnabled
+    )
+
+    SettingsExpandableContent(visible = state.webSearchEnabled) {
+        Column {
+            ParamLabelWithHelp(
+                label = "服务商",
+                helpTitle = "联网搜索与服务商",
+                helpText = "自动：优先匹配聊天接口的服务商，否则依次选择有 Key 的 DeepSeek、支持匿名的 AnySearch。" +
+                    "自动模式调用失败时会尝试下一家；手动指定时不切换。参数错误和用户取消不会触发切换。\n\n" +
+                    "DeepSeek：默认复用「API 配置」中的聊天 Key——但仅当聊天地址是官方 DeepSeek HTTPS 地址时生效，" +
+                    "避免把其它服务商的 Key 发给 DeepSeek。关掉「复用」开关后需要在下方单独填写 DeepSeek Key，" +
+                    "未填写则该服务商不可用。\n\n" +
+                    "AnySearch 留空使用匿名档，有 Key 时使用该 Key。\n\n" +
+                    "查询词和网页地址会发送给实际使用的服务商，自动切换也可能将同一请求发送给下一家。" +
+                    "服务可能有额度、限速或收费。联网工具与记忆设置相互独立，" +
+                    "只需聊天端点支持 function calling；设置修改从下一轮对话生效。"
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                com.meapet.mobile.config.WebSearchProviderId.entries.forEach { provider ->
+                    FilterChipLike(
+                        label = when (provider) {
+                            com.meapet.mobile.config.WebSearchProviderId.AUTO -> "自动"
+                            com.meapet.mobile.config.WebSearchProviderId.DEEPSEEK -> "DeepSeek"
+                            com.meapet.mobile.config.WebSearchProviderId.ANYSEARCH -> "AnySearch"
+                        },
+                        selected = state.webSearchProvider == provider,
+                        enabled = true,
+                        onClick = { viewModel.updateWebSearchProvider(provider) }
+                    )
+                }
+            }
+
+            if (state.webSearchProvider != com.meapet.mobile.config.WebSearchProviderId.ANYSEARCH) {
+                Spacer(Modifier.height(8.dp))
+                // 复用聊天 Key 是默认路径：只有用户主动关掉，才要求单独填写 DeepSeek Key。
+                // 这样「把 API 配置里别家的 Key 发给 DeepSeek」必须由用户明确同意。
+                SettingsSwitchRow(
+                    label = "复用「API 配置」中的 Key",
+                    description = if (state.webSearchReuseChatKey) {
+                        "DeepSeek 服务商使用聊天端点同一把 Key；仅在聊天地址为官方 DeepSeek 时生效"
+                    } else {
+                        "已关闭：需在下方单独填写 DeepSeek Key，未填写时该服务商不可用"
+                    },
+                    checked = state.webSearchReuseChatKey,
+                    darkTheme = darkTheme,
+                    onCheckedChange = viewModel::updateWebSearchReuseChatKey
+                )
+                if (!state.webSearchReuseChatKey) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = local.webSearchDeepSeekKey,
+                        onValueChange = { local.updateDeepSeekKey(it) },
+                        label = { Text("DeepSeek API Key") },
+                        placeholder = { Text("必填，仅用于联网搜索的 DeepSeek 服务商") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .saveOnFocusChange { viewModel.saveWebSearchDeepSeekKey(local.webSearchDeepSeekKey) },
+                        singleLine = true,
+                        visualTransformation = if (local.webSearchDeepSeekKeyVisible)
+                            VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            TextButton(onClick = {
+                                local.webSearchDeepSeekKeyVisible = !local.webSearchDeepSeekKeyVisible
+                            }) {
+                                Text(if (local.webSearchDeepSeekKeyVisible) "隐藏" else "显示")
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                    )
+                }
+            }
+
+            if (state.webSearchProvider != com.meapet.mobile.config.WebSearchProviderId.DEEPSEEK) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = local.webSearchAnySearchKey,
+                    onValueChange = { local.updateAnySearchKey(it) },
+                    label = { Text("AnySearch API Key（可选）") },
+                    placeholder = { Text("留空使用匿名档") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .saveOnFocusChange { viewModel.saveWebSearchAnySearchKey(local.webSearchAnySearchKey) },
+                    singleLine = true,
+                    visualTransformation = if (local.webSearchAnySearchKeyVisible)
+                        VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        TextButton(onClick = {
+                            local.webSearchAnySearchKeyVisible = !local.webSearchAnySearchKeyVisible
+                        }) {
+                            Text(if (local.webSearchAnySearchKeyVisible) "隐藏" else "显示")
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+            }
+        }
+    }
+
+    Spacer(Modifier.height(8.dp))
+    Text(
+        text = "联网与记忆相互独立；联网会发送查询或网址，可能产生费用。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
     )
 }

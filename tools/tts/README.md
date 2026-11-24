@@ -1,6 +1,6 @@
 # tools/tts · TTS G2P / 词表生成管线
 
-把 Mea TTS（sherpa-onnx + 自有 VITS2 模型）在「模型之外」用到的全部资产，从一次性 spike
+把 Mea TTS（sherpa-onnx + 自有 VITS 模型）在「模型之外」用到的全部资产，从一次性 spike
 脚本收编成**可在新 clone 上重跑**的管线：
 
 > 新 clone + 联网下载 + 下面几条命令 = 可重新生成全部 G2P 资产（tokens / lexicon /

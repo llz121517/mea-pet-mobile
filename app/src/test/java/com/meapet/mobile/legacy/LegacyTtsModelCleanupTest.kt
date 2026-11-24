@@ -1,6 +1,7 @@
 package com.meapet.mobile.legacy
 
 import com.meapet.mobile.legacy.steps.LegacyTtsModelCleanup
+import com.meapet.mobile.memory.MemoryStore
 import com.meapet.mobile.settings.SettingsManager
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertFalse
@@ -17,9 +18,10 @@ class LegacyTtsModelCleanupTest {
     val tmp = TemporaryFolder()
 
     private val settingsManager: SettingsManager = mock()
+    private val memoryStore: MemoryStore = mock()
     private val step = LegacyTtsModelCleanup()
 
-    private fun context(dir: File) = LegacyMigrationContext(dir, settingsManager)
+    private fun context(dir: File) = LegacyMigrationContext(dir, settingsManager, memoryStore)
 
     @Test
     fun `旧版四模块模型会被整目录清理并置命中标记`() = runBlocking {

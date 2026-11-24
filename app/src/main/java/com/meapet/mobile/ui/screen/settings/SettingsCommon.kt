@@ -1,6 +1,9 @@
 package com.meapet.mobile.ui.screen.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -130,7 +133,8 @@ internal fun ParamLabelWithHelp(
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f, fill = false)
         )
         TooltipBox(
             positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
@@ -161,6 +165,18 @@ internal fun ParamLabelWithHelp(
                 )
             }
         }
+    }
+}
+
+/** 设置子项统一沿垂直方向展开、收起；与动态取色的预设区保持同一动画。 */
+@Composable
+internal fun SettingsExpandableContent(visible: Boolean, content: @Composable () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically(),
+        exit = shrinkVertically()
+    ) {
+        content()
     }
 }
 

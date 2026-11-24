@@ -1,6 +1,6 @@
 # model.onnx 从哪里来（**不在 G2P 管线内**）
 
-`model.onnx` 是 Mea 音色的 VITS2 权重图，**不是本管线生成的**，也无法从本仓库的数据重建：
+`model.onnx` 是 Mea 音色的 **VITS** 模型（早期文档误写为 VITS2，2026-11-24 依模型 metadata `model_type=vits` 更正），**不是本管线生成的**，也无法从本仓库的数据重建：
 它需要训练侧的 checkpoint `G_latest.pth`（约 39.7M 参数），而该文件既不在仓库里、也不适合入库
 （体积 + 训练语料/授权约束）。G2P 管线只负责「模型之外」的全部资产，模型通过 `--model` 传入。
 
@@ -18,7 +18,7 @@
 
 ## 生成路径（一次性离线步骤，需要自备 checkpoint）
 
-1. **自备 checkpoint**：训练产出的 `G_latest.pth`（VITS2，Mea 音色，22,050 Hz，中文语料微调）。
+1. **自备 checkpoint**：训练产出的 `G_latest.pth`（VITS，Mea 音色，22,050 Hz，中文语料微调）。
 2. **严格加载 + 整图导出**：用训练侧的 `vits_core/models_infer.py` 严格加载参数（`strict=True`），
    按 `enc_p → dp → flow → dec` 拆成 4 个 ONNX 子图，其中 enc_p/dp 为 fp32、flow/dec 为 fp16，
    但对外声明 fp32 I/O。

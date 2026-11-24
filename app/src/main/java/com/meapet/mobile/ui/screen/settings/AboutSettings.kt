@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +41,11 @@ import com.meapet.mobile.core.AppInfo
 import com.meapet.mobile.ui.component.LinkItem
 import com.meapet.mobile.viewmodel.SettingsUiState
 import com.meapet.mobile.viewmodel.SettingsViewModel
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════
 //  关于：应用信息、版本更新、隐私政策与数据授权
@@ -47,6 +53,23 @@ import com.meapet.mobile.viewmodel.SettingsViewModel
 
 /** 关于卡片中的 Live2D 模型来源链接。 */
 private const val LIVE2D_MODEL_SOURCE_URL = "https://www.bilibili.com/video/BV1AoX7BXEaN"
+
+/** 构建时间展示格式（只到分钟，避免秒级抖动带来的无意义信息）。 */
+private const val BUILD_TIME_DISPLAY_PATTERN = "yyyy-MM-dd HH:mm"
+
+/**
+ * 把 `BuildConfig.BUILD_TIME`（构建时的 epoch 毫秒）按设备当前时区展示。
+ *
+ * 构建时只注入时间戳，不固定时区 / 不预先格式化；展示格式与语言跟随设备系统。
+ * 返回 null 表示本构建没有构建时间信息（debug 固定注入 0，见 `app/build.gradle.kts`），
+ * 调用方据此隐藏整行——debug 包不需要这行信息，也不该显示 1970 年的时间。
+ */
+private fun formatBuildTime(epochMillis: Long): String? {
+    if (epochMillis <= 0L) return null
+    return Instant.ofEpochMilli(epochMillis)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern(BUILD_TIME_DISPLAY_PATTERN, Locale.getDefault()))
+}
 
 /**
  * 应用信息：名称/简介/版本、致谢、外部链接与技术栈。
@@ -59,6 +82,7 @@ internal fun AppInfoSection() {
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
     val appVersion = remember(context) { AppInfo.readVersion(context) }
+    val buildTime = remember { formatBuildTime(BuildConfig.BUILD_TIME) }
     val linkStyle = MaterialTheme.typography.bodySmall
 
     SectionTitle("应用信息")
@@ -76,13 +100,22 @@ internal fun AppInfoSection() {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+    // 构建时间只在 release 注入（debug 固定 0）；为 0 表示本次构建没有该信息，直接省略这行
+    if (buildTime != null) {
+        Spacer(Modifier.height(2.dp))
+        Text(
+            "构建时间 $buildTime",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 
     Spacer(Modifier.height(10.dp))
     HorizontalDivider()
     Spacer(Modifier.height(10.dp))
 
     Text(
-        "又是逢初度，霜轻叶落时。\n11·1 | 十月初六",
+        "我见青山多妩媚，料青山见我应如是。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -91,11 +124,10 @@ internal fun AppInfoSection() {
     Spacer(Modifier.height(3.dp))
     LinkItem("GitHub 仓库", AppInfo.gitRepoUrl, uriHandler, linkStyle)
     Spacer(Modifier.height(3.dp))
-    LinkItem("交流 QQ 群", AppInfo.qqGroupUrl, uriHandler, linkStyle)
 
     Spacer(Modifier.height(6.dp))
     Text(
-        "技术栈：Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Markwon  ·  Coroutines  ·  GLSurfaceView  ·  sherpa-onnx  ·  Kotlin 2.2 / AGP 9.3 / minSdk 26",
+        "技术栈：Live2D Cubism  ·  Jetpack Compose  ·  Ktor  ·  Markwon  ·  Coroutines  ·  GLSurfaceView  ·  sherpa-onnx",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = ALPHA_MUTED_TEXT),
         modifier = Modifier.padding(bottom = 8.dp)
@@ -153,7 +185,7 @@ internal fun UpdateSection(
     Spacer(Modifier.height(8.dp))
 }
 
-/** 隐私与数据：查看隐私政策 + 友盟采集授权管理。 */
+/** 隐私与数据：数据流向摘要 + 查看隐私政策 + 友盟采集授权管理。 */
 @Composable
 internal fun PrivacySection(
     state: SettingsUiState,
@@ -164,6 +196,17 @@ internal fun PrivacySection(
     // 响应式读取授权状态（由 SettingsViewModel 订阅 PrivacyConsentManager.agreedFlow 维护）
     val umengAgreed = state.privacyAgreed
     var showRevokeDialog by remember { mutableStateOf(false) }
+    // 撤销授权要先等写盘完成再退出进程；scope 属于本 Section，确认对话框关闭不会取消它
+    val scope = rememberCoroutineScope()
+
+    // 数据流向摘要：完整说明在隐私政策全文里，这里给只看设置页的用户一个入口级提示
+    Text(
+        text = "MeaPet 不运营服务器：会话、记忆与 API Key 只保存在本机；" +
+            "对话内容会发送到你自行配置的 API 地址，开启联网搜索后查询词与网页地址会发送给 DeepSeek 或 AnySearch。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(8.dp))
 
     // 查看隐私协议
     Surface(
@@ -255,7 +298,7 @@ internal fun PrivacySection(
             if (!BuildConfig.UMENG_ENABLED) {
                 // 无统计 SDK 构建：无采集、无授权可管，仅提示构建状态
                 Text(
-                    text = "该构建未包含统计 SDK，不会采集任何数据",
+                    text = "该构建未包含统计 SDK，不会采集统计数据",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = ALPHA_MUTED_TEXT),
                     modifier = Modifier.padding(top = 4.dp)
@@ -297,9 +340,17 @@ internal fun PrivacySection(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.revokePrivacyConsent()
+                    // 先落盘（suspend 写 IO）再 kill：顺序反了会导致重启后仍读到已授权。
+                    // finally 保证即使协程被取消（如恰好转屏/销毁）也一定在写盘之后退出，
+                    // 不让已撤权的会话继续上报。
                     showRevokeDialog = false
-                    onExitApp()
+                    scope.launch {
+                        try {
+                            viewModel.revokePrivacyConsent()
+                        } finally {
+                            onExitApp()
+                        }
+                    }
                 }) {
                     Text("确认取消并退出")
                 }

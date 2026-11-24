@@ -95,6 +95,36 @@ private class UndoSnackbarVisuals(
 }
 
 /**
+ * 带 ✕ 的普通提示 visuals。
+ *
+ * M3 的 `Snackbar(snackbarData = …)` 会按 [withDismissAction] 自己渲染关闭叉，
+ * 这里只是一个显式开关，避免调用方各自记 `SnackbarVisuals` 的实现细节。
+ */
+private class DismissableSnackbarVisuals(
+    override val message: String,
+    override val withDismissAction: Boolean = true,
+    override val duration: SnackbarDuration = SnackbarDuration.Short,
+) : SnackbarVisuals {
+    // 没有主动作：这类提示只是告知，点 ✕ 或等它自己消失即可
+    override val actionLabel: String? = null
+}
+
+/**
+ * 弹一条**可手动关闭**的提示（右侧带 ✕）。
+ *
+ * 用于回执这类「看完就想让它消失」的消息：默认 [SnackbarDuration.Short] 自动消失，
+ * 用户也可以按 ✕ 立即关掉。撤销条仍走 [UndoSnackbarEffect]（那条不给 ✕，见其说明）。
+ *
+ * @return 用户点击 ✕ / 超时都会返回 [SnackbarResult.Dismissed]
+ */
+suspend fun SnackbarHostState.showDismissableSnackbar(
+    message: String,
+    duration: SnackbarDuration = SnackbarDuration.Short,
+): SnackbarResult = showSnackbar(
+    DismissableSnackbarVisuals(message = message, duration = duration)
+)
+
+/**
  * 统一外观的 Snackbar 宿主。
  *
  * - 普通提示：用 M3 默认 Snackbar，但动作色统一跟随主题 primary
@@ -126,6 +156,8 @@ fun AppSnackbarHost(
                 snackbarData = data,
                 actionColor = actionColor,
                 actionContentColor = actionColor,
+                // ✕ 与主动作同色，避免 M3 默认的 inverse 色在深色主题下跳出来
+                dismissActionContentColor = actionColor,
             )
         }
     }

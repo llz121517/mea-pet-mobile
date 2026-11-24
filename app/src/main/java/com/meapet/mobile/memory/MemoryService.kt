@@ -5,8 +5,8 @@ import com.meapet.mobile.client.OpenAiCompatibleClient
 import com.meapet.mobile.client.model.ApiRequest
 import com.meapet.mobile.client.model.ApiResponse
 import com.meapet.mobile.config.AppConfig
-import com.meapet.mobile.memory.MemoryOpsProtocol.MemoryOp
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.core.logWarnSanitized
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,11 +17,9 @@ import kotlinx.serialization.json.Json
  * 记忆业务服务。
  *
  * ## 职责
- * - 应用大模型在回复中声明的记忆操作（[applyOps]，来自 [MemoryOpsProtocol]）；
  * - 定期把短期记忆摘要压缩为一条长期记忆（[summarizeShortTermMemories]）。
  *
- * 记忆该不该创建、什么类型、多重要，全部由大模型自己判断——本类不再做
- * 基于长度/关键词的启发式提取，只负责校验、落库与摘要编排。
+ * 本服务保留独立的短期记忆摘要流程，不解析对话回复或执行记忆写操作。
  *
  * ## 依赖关系
  * - [MemoryRepository] — 数据存储（必需）；
@@ -39,7 +37,7 @@ import kotlinx.serialization.json.Json
  * @param config 应用配置
  */
 class MemoryService(
-    private val repository: MemoryRepository,
+    private val repository: MemoryStore,
     private val summarizationClient: () -> OpenAiCompatibleClient?,
     private val settingsManager: SettingsManager,
     private val config: AppConfig = AppConfig.DEFAULT
@@ -56,69 +54,6 @@ class MemoryService(
     )
 
     private val json = Json { ignoreUnknownKeys = true }
-
-    /**
-     * 应用模型本轮声明的记忆操作（创建/更新/删除）。
-     *
-     * 单条操作解析失败（如校验不通过）只记日志跳过，不影响其余操作；
-     * 所有变更收集完后交给 [MemoryRepository.applyChanges] **整批只落盘一次**，
-     * 避免逐条 save/delete 把整库全量重写 N 次（写放大）。
-     */
-    suspend fun applyOps(ops: List<MemoryOp>) {
-        if (ops.isEmpty()) return
-        val upserts = mutableListOf<MemoryItem>()
-        val deletes = mutableListOf<String>()
-        var resolved = 0
-        for (op in ops) {
-            try {
-                when (op) {
-                    is MemoryOp.Create -> upserts.add(
-                        MemoryItem(
-                            id = MemoryItem.newId(),
-                            content = op.content,
-                            type = op.type,
-                            importance = op.importance.coerceIn(0f, 1f),
-                            keywords = op.keywords.take(8)
-                        )
-                    ).also { Log.i(TAG, "Create ${op.type} memory queued") }
-                    is MemoryOp.Update -> {
-                        val existing = repository.findById(op.targetId)
-                        if (existing == null) {
-                            // targetId 过期或模型幻觉——退化为新建，避免更新意图被静默丢弃
-                            Log.w(TAG, "Update target ${op.targetId} not found, falling back to create")
-                            upserts.add(
-                                MemoryItem(
-                                    id = MemoryItem.newId(),
-                                    content = op.content,
-                                    type = op.type,
-                                    importance = op.importance.coerceIn(0f, 1f),
-                                    keywords = op.keywords.take(8)
-                                )
-                            )
-                        } else {
-                            upserts.add(
-                                existing.copy(
-                                    content = op.content,
-                                    type = op.type,
-                                    importance = op.importance.coerceIn(0f, 1f),
-                                    keywords = op.keywords.take(8)
-                                )
-                            )
-                        }
-                    }
-                    is MemoryOp.Delete -> deletes.add(op.targetId)
-                }
-                resolved++
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // 只记操作类型，不输出 $op（其 content 为记忆内容，属用户隐私，禁止进日志）
-                Log.w(TAG, "Failed to resolve memory op: ${op::class.simpleName}", e)
-            }
-        }
-        repository.applyChanges(upserts, deletes)
-        Log.i(TAG, "Applied $resolved/${ops.size} memory ops (${upserts.size} upsert, ${deletes.size} delete)")
-    }
 
     /**
      * 把当前所有短期记忆摘要压缩为一条长期记忆。
@@ -211,7 +146,7 @@ class MemoryService(
         return try {
             json.decodeFromString<SummaryResult>(raw.substring(start, end + 1))
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse summary result", e)
+            e.logWarnSanitized(TAG, "Failed to parse summary result")
             null
         }
     }

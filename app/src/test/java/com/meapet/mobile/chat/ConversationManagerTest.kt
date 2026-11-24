@@ -8,23 +8,9 @@ import kotlin.test.assertTrue
 /**
  * ConversationManager 组装 API 请求的单元测试。
  *
- * 重点是记忆协议块的回贴：历史里存的是剥离过块的可见正文，直接发出去，
- * 模型看到的就是「我过去每轮都没输出这个块」，会照着自己漏掉。
+ * 覆盖稳定前缀、请求尾部只读信息、窗口裁剪与工具历史的发送副本清洗。
  */
 class ConversationManagerTest {
-
-    private fun block(json: String) = "```memory-ops\n$json\n```"
-
-    private fun managerWith(vararg turns: Pair<String, String?>): ConversationManager {
-        val mgr = ConversationManager()
-        turns.forEachIndexed { i, (reply, ops) ->
-            mgr.addMessage(ChatMessage(role = ChatRole.user, content = "问题$i"))
-            mgr.addMessage(
-                ChatMessage(role = ChatRole.assistant, content = reply, memoryOpsBlock = ops)
-            )
-        }
-        return mgr
-    }
 
     // ── 消息分层（静态前缀 + 尾部易变块）────────────────
 
@@ -35,17 +21,17 @@ class ConversationManagerTest {
 
         val sent = mgr.buildApiMessages(
             systemPrompt = "你是梅尔",
-            stableContext = "【记忆协议】…",
-            tailContext = "【当前时间】现在"
+            stableContext = "【只读记忆】…",
+            tailFragments = listOf("【当前时间】现在")
         )
 
-        assertEquals(3, sent.size)
+        assertEquals(2, sent.size)
         assertEquals(ChatRole.system, sent[0].role)
-        assertEquals("你是梅尔\n\n【记忆协议】…", sent[0].content)
+        assertEquals("你是梅尔\n\n【只读记忆】…", sent[0].content)
         assertEquals(ChatRole.user, sent[1].role)
         // 每轮都变的内容必须排在历史之后，否则它之后的一切都无法命中 prefix cache
-        assertEquals(ChatRole.system, sent[2].role)
-        assertEquals("【当前时间】现在", sent[2].content)
+        assertEquals(1, sent.count { it.role == ChatRole.system })
+        assertEquals("你好\n\n$TAIL_LABEL\n【当前时间】现在", sent[1].content)
     }
 
     @Test
@@ -53,7 +39,7 @@ class ConversationManagerTest {
         val mgr = ConversationManager()
         mgr.addMessage(ChatMessage(role = ChatRole.user, content = "你好"))
 
-        val sent = mgr.buildApiMessages(systemPrompt = "你是梅尔", tailContext = "  ")
+        val sent = mgr.buildApiMessages(systemPrompt = "你是梅尔", tailFragments = listOf("  "))
 
         assertEquals(2, sent.size)
         assertEquals(ChatRole.user, sent.last().role)
@@ -87,81 +73,96 @@ class ConversationManagerTest {
         assertEquals(prefixAfterTrim, mgr.getMessages().take(prefixAfterTrim.size).map { it.content })
     }
 
-    @Test
-    fun memoryOpsBlockIsAppendedBackToRecentAssistantTurns() {
-        val mgr = managerWith("回复A" to block("[]"), "回复B" to block("""[{"op":"create"}]"""))
+    // ── 工具历史窗口 ──────────────────────────────────
 
-        val sent = mgr.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 5)
-        val assistants = sent.filter { it.role == ChatRole.assistant }
-
-        assertEquals("回复A\n\n${block("[]")}", assistants[0].content)
-        assertEquals("回复B\n\n${block("""[{"op":"create"}]""")}", assistants[1].content)
+    /** 一个完整的工具 turn：user → assistant(tool_calls) → tool → assistant(最终)。 */
+    private fun toolTurn(turnId: String = "turn-1"): List<ChatMessage> {
+        val raw = """{"role":"assistant","content":"","tool_calls":[""" +
+            """{"id":"call_1","type":"function","function":{"name":"search_memory","arguments":"{}"}}]}"""
+        return listOf(
+            ChatMessage(role = ChatRole.user, content = "问", turnId = turnId),
+            ChatMessage(
+                role = ChatRole.assistant, content = "", turnId = turnId,
+                rawAssistantJson = raw
+            ),
+            ChatMessage(
+                role = ChatRole.tool, content = """{"ok":true}""", turnId = turnId,
+                toolCallId = "call_1", toolName = "search_memory"
+            ),
+            ChatMessage(
+                role = ChatRole.assistant, content = "答", turnId = turnId,
+                rawAssistantJson = """{"role":"assistant","content":"答"}"""
+            )
+        )
     }
 
     @Test
-    fun echoIsLimitedToMostRecentTurns() {
-        val mgr = managerWith(
-            "最旧" to block("[1]"),
-            "中间" to block("[2]"),
-            "最新" to block("[3]")
+    fun includeToolHistoryKeepsToolMessagesAndRawJson() {
+        val mgr = ConversationManager()
+        mgr.addMessages(toolTurn())
+
+        val sent = mgr.buildApiMessages(systemPrompt = "p", includeToolHistory = true)
+
+        assertEquals(
+            listOf(ChatRole.system, ChatRole.user, ChatRole.assistant, ChatRole.tool, ChatRole.assistant),
+            sent.map { it.role }
+        )
+        assertTrue(sent[2].rawAssistantJson!!.contains("tool_calls"))
+        assertEquals("call_1", sent[3].toolCallId)
+    }
+
+    @Test
+    fun excludeToolHistoryFiltersToolMessagesAndRawJson() {
+        val mgr = ConversationManager()
+        mgr.addMessages(toolTurn())
+
+        val sent = mgr.buildApiMessages(systemPrompt = "p", includeToolHistory = false)
+
+        // 纯 tool_calls 的空 assistant 与 tool 消息都被丢弃，只留正文
+        assertEquals(listOf(ChatRole.system, ChatRole.user, ChatRole.assistant), sent.map { it.role })
+        assertEquals("答", sent[2].content)
+        assertEquals(null, sent[2].rawAssistantJson, "文本协议不能带 assistant 原始 JSON")
+    }
+
+    @Test
+    fun orphanToolMessageAtWindowStartIsDropped() {
+        val mgr = ConversationManager()
+        val raw = """{"role":"assistant","content":"","tool_calls":[""" +
+            """{"id":"call_1","type":"function","function":{"name":"search_memory","arguments":"{}"}}]}"""
+        // 窗口被裁到 turn 中间：开头是一条找不到声明的 tool 消息
+        mgr.addMessages(
+            listOf(
+                ChatMessage(role = ChatRole.tool, content = "{}", toolCallId = "call_orphan"),
+                ChatMessage(
+                    role = ChatRole.assistant, content = "",
+                    rawAssistantJson = raw
+                ),
+                ChatMessage(role = ChatRole.tool, content = """{"ok":true}""", toolCallId = "call_1"),
+                ChatMessage(role = ChatRole.user, content = "继续")
+            )
         )
 
-        val assistants = mgr.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 2)
-            .filter { it.role == ChatRole.assistant }
+        val sent = mgr.buildApiMessages(systemPrompt = "p", includeToolHistory = true)
 
-        assertEquals("最旧", assistants[0].content, "超出回贴条数的旧消息应保持原样")
-        assertTrue(assistants[1].content.endsWith(block("[2]")))
-        assertTrue(assistants[2].content.endsWith(block("[3]")))
+        // 孤立 tool 被清洗掉；有声明且 id 匹配的 tool 保留
+        assertEquals(listOf(ChatRole.system, ChatRole.assistant, ChatRole.tool, ChatRole.user), sent.map { it.role })
+        assertEquals("call_1", sent[2].toolCallId)
     }
 
     @Test
-    fun echoDisabledLeavesHistoryUntouched() {
-        val mgr = managerWith("回复A" to block("[]"))
+    fun toolMessageWhoseDeclarationIsMissingIsDropped() {
+        val mgr = ConversationManager()
+        mgr.addMessages(
+            listOf(
+                ChatMessage(role = ChatRole.user, content = "问"),
+                ChatMessage(role = ChatRole.tool, content = "{}", toolCallId = "call_x"),
+                ChatMessage(role = ChatRole.user, content = "再问")
+            )
+        )
 
-        val assistant = mgr.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 0)
-            .first { it.role == ChatRole.assistant }
+        val sent = mgr.buildApiMessages(systemPrompt = "p", includeToolHistory = true)
 
-        assertEquals("回复A", assistant.content)
-    }
-
-    @Test
-    fun echoDoesNotMutateStoredHistory() {
-        val mgr = managerWith("回复A" to block("[]"))
-
-        mgr.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 5)
-
-        val stored = mgr.getMessages().first { it.role == ChatRole.assistant }
-        assertEquals("回复A", stored.content, "回贴只作用于发出去的副本，不能污染会话历史")
-        assertFalse(mgr.getMessages().any { it.content.contains("```") })
-    }
-
-    @Test
-    fun turnsWithoutBlockAreLeftAloneAndDoNotConsumeQuota() {
-        // 中间那轮模型漏了块：不该凭空补，也不该占掉回贴名额
-        val mgr = managerWith("有块1" to block("[1]"), "漏了" to null, "有块2" to block("[2]"))
-
-        val assistants = mgr.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 2)
-            .filter { it.role == ChatRole.assistant }
-
-        assertTrue(assistants[0].content.endsWith(block("[1]")))
-        assertEquals("漏了", assistants[1].content)
-        assertTrue(assistants[2].content.endsWith(block("[2]")))
-    }
-
-    @Test
-    fun noSyntheticSeedWhenHistoryHasNoRealBlocks() {
-        // 冷启动 / 前几轮全漏：不再注入合成 few-shot，只回贴真实块
-        val cold = ConversationManager()
-        cold.addMessage(ChatMessage(role = ChatRole.user, content = "你好"))
-        val coldSent = cold.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 3)
-        assertEquals(2, coldSent.size)
-        assertEquals("你好", coldSent[1].content)
-        assertFalse(coldSent.any { it.content.contains("```") })
-
-        val leaked = managerWith("漏了1" to null, "漏了2" to null)
-        val assistants = leaked.buildApiMessages(systemPrompt = "p", memoryOpsEchoTurns = 3)
-            .filter { it.role == ChatRole.assistant }
-        assertEquals(listOf("漏了1", "漏了2"), assistants.map { it.content })
+        assertEquals(listOf(ChatRole.system, ChatRole.user, ChatRole.user), sent.map { it.role })
     }
 
     // ── 撤销：整体替换历史 ────────────────────────────

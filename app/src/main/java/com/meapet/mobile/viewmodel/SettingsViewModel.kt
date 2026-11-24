@@ -14,6 +14,7 @@ import com.meapet.mobile.core.undoWindowMs
 import com.meapet.mobile.app.MeaPetApplication
 import com.meapet.mobile.settings.SettingsKeys
 import com.meapet.mobile.settings.SettingsManager
+import com.meapet.mobile.config.WebSearchProviderId
 import com.meapet.mobile.tts.model.TtsModelManager
 import com.meapet.mobile.tts.model.TtsModelState
 import com.meapet.mobile.update.UpdateCheckResult
@@ -48,8 +49,14 @@ data class SettingsUiState(
     val model: String = SettingsKeys.Defaults.MODEL,
     val temperature: Double = SettingsKeys.Defaults.TEMPERATURE,
     val maxTokens: Int = SettingsKeys.Defaults.MAX_TOKENS,
+    val webSearchEnabled: Boolean = false,
+    val webSearchProvider: WebSearchProviderId = WebSearchProviderId.AUTO,
+    /** 是否复用「API 配置」的聊天 Key 作为 DeepSeek Key（默认开；关闭后才显示独立 Key 输入框）。 */
+    val webSearchReuseChatKey: Boolean = true,
     val systemPrompt: String = SettingsKeys.Defaults.SYSTEM_PROMPT,
     val enableMemory: Boolean = SettingsKeys.Defaults.ENABLE_MEMORY,
+    /** 记忆检索模式（AUTO/TOOLS/TEXT/OFF）。 */
+    val memoryMode: com.meapet.mobile.config.MemoryMode = com.meapet.mobile.config.MemoryMode.DEFAULT,
     val enableAutoSummary: Boolean = SettingsKeys.Defaults.ENABLE_AUTO_SUMMARY,
     val summaryInterval: Int = SettingsKeys.Defaults.SUMMARY_INTERVAL,
     val themeMode: String = SettingsKeys.Defaults.THEME_MODE,
@@ -60,6 +67,11 @@ data class SettingsUiState(
     val availableModels: List<String> = emptyList(),
     val isLoadingModels: Boolean = false,
     val modelsError: String? = null,
+    /** 手动上下文窗口（null = 自动）。 */
+    val contextWindow: Int? = null,
+    /** 当前生效的原始容量与来源。 */
+    val effectiveCapacity: Int = 0,
+    val capacitySource: com.meapet.mobile.client.CapacitySource = com.meapet.mobile.client.CapacitySource.FALLBACK,
     // ── TTS 语音 ──
     val ttsMainEnabled: Boolean = SettingsKeys.Defaults.TTS_MAIN_ENABLED,
     val ttsOverlayEnabled: Boolean = SettingsKeys.Defaults.TTS_OVERLAY_ENABLED,
@@ -148,8 +160,12 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
             model = settingsManager.getModel(),
             temperature = settingsManager.getTemperature(),
             maxTokens = settingsManager.getMaxTokens(),
+            webSearchEnabled = settingsManager.getWebSearchEnabled(),
+            webSearchProvider = settingsManager.getWebSearchProvider(),
+            webSearchReuseChatKey = settingsManager.isWebSearchReuseChatKey(),
             systemPrompt = settingsManager.getSystemPrompt(),
             enableMemory = settingsManager.isMemoryEnabled(),
+            memoryMode = settingsManager.getMemoryMode(),
             enableAutoSummary = settingsManager.isAutoSummaryEnabled(),
             summaryInterval = settingsManager.getSummaryInterval(),
             privacyAgreed = isPrivacyAgreed(),
@@ -174,8 +190,14 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
         subscribe(settingsManager.modelFlow) { s, m -> s.copy(model = m) }
         subscribe(settingsManager.temperatureFlow) { s, t -> s.copy(temperature = t) }
         subscribe(settingsManager.maxTokensFlow) { s, t -> s.copy(maxTokens = t) }
+        subscribe(settingsManager.webSearchEnabledFlow) { s, enabled -> s.copy(webSearchEnabled = enabled) }
+        subscribe(settingsManager.webSearchProviderFlow) { s, provider -> s.copy(webSearchProvider = provider) }
+        subscribe(settingsManager.webSearchReuseChatKeyFlow) { s, reuse ->
+            s.copy(webSearchReuseChatKey = reuse)
+        }
         subscribe(settingsManager.systemPromptFlow) { s, p -> s.copy(systemPrompt = p) }
         subscribe(settingsManager.enableMemoryFlow) { s, e -> s.copy(enableMemory = e) }
+        subscribe(settingsManager.memoryModeFlow) { s, m -> s.copy(memoryMode = m) }
         subscribe(settingsManager.enableAutoSummaryFlow) { s, e -> s.copy(enableAutoSummary = e) }
         subscribe(settingsManager.summaryIntervalFlow) { s, i -> s.copy(summaryInterval = i) }
         subscribe(settingsManager.themeModeFlow) { s, m -> s.copy(themeMode = m) }
@@ -205,6 +227,7 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
 
         // 从 PackageManager 读取版本号（统一实现见 core.AppInfo）
         _state.update { it.copy(appVersion = readAppVersion()) }
+        runCatching { refreshCapacityState() }
     }
 
     /**
@@ -255,6 +278,40 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             if (model == settingsManager.getModel()) return@launch
             settingsManager.setModel(model)
+            container.contextCapacity.refresh()
+            refreshCapacityState()
+        }
+    }
+
+    /** 保存手动上下文窗口；空串或非法值 = 清除，回到自动。 */
+    fun saveContextWindow(text: String) {
+        viewModelScope.launch {
+            val v = text.trim().toIntOrNull()?.takeIf { it >= 1024 }
+            if (v == settingsManager.getContextWindow()) return@launch
+            settingsManager.setContextWindow(v)
+            if (v == null) container.contextCapacity.refresh()
+            refreshCapacityState()
+        }
+    }
+
+    /** 重新检测：清除手动值并强制探测。 */
+    fun redetectContextWindow() {
+        viewModelScope.launch {
+            settingsManager.setContextWindow(null)
+            container.contextCapacity.refresh()
+            kotlinx.coroutines.delay(1500)
+            refreshCapacityState()
+        }
+    }
+
+    private fun refreshCapacityState() {
+        val c = container.contextCapacity.current()
+        _state.update {
+            it.copy(
+                contextWindow = settingsManager.getContextWindow(),
+                effectiveCapacity = c.tokens,
+                capacitySource = c.source
+            )
         }
     }
 
@@ -301,8 +358,39 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch { settingsManager.setMaxTokens(tokens) }
     }
 
+    val webSearchAnySearchKeyFlow get() = settingsManager.webSearchAnySearchKeyFlow
+
+    /** Raw AnySearch key for the local masked editor; never logged or included in UI state. */
+    fun currentWebSearchAnySearchKey(): String = settingsManager.getWebSearchAnySearchKey()
+    fun currentWebSearchDeepSeekKey(): String = settingsManager.getWebSearchDeepSeekKey()
+
+    fun updateWebSearchEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsManager.setWebSearchEnabled(enabled) }
+    }
+
+    fun updateWebSearchProvider(provider: WebSearchProviderId) {
+        viewModelScope.launch { settingsManager.setWebSearchProvider(provider) }
+    }
+
+    fun updateWebSearchReuseChatKey(enabled: Boolean) {
+        viewModelScope.launch { settingsManager.setWebSearchReuseChatKey(enabled) }
+    }
+
+    fun saveWebSearchDeepSeekKey(key: String) {
+        viewModelScope.launch { settingsManager.setWebSearchDeepSeekKey(key) }
+    }
+
+    fun saveWebSearchAnySearchKey(key: String) {
+        viewModelScope.launch { settingsManager.setWebSearchAnySearchKey(key) }
+    }
+
     fun updateEnableMemory(enabled: Boolean) {
         viewModelScope.launch { settingsManager.setEnableMemory(enabled) }
+    }
+
+    /** 更新记忆检索模式（AUTO/TOOLS/TEXT/OFF），下一轮发送立即生效。 */
+    fun updateMemoryMode(mode: com.meapet.mobile.config.MemoryMode) {
+        viewModelScope.launch { settingsManager.setMemoryMode(mode) }
     }
 
     fun updateEnableAutoSummary(enabled: Boolean) {
@@ -580,7 +668,9 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
             val result = withContext(Dispatchers.IO) {
                 val client = OpenAiCompatibleClient(apiKey = apiKey, baseUrl = apiUrl)
                 try {
-                    Result.success(ApiResponse.modelIds(client.listModels()))
+                    val body = client.listModels()
+                    container.contextCapacity.onModelsBody(body)
+                    Result.success(ApiResponse.modelIds(body))
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -661,8 +751,13 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
     // ── 隐私合规 ──────────────────────────────────────
     // 授权状态已并入 [SettingsUiState.privacyAgreed]（init 订阅 agreedFlow 响应式维护）
 
-    /** 撤销友盟数据采集授权（同步落盘停止上报；App 随界面流程退出）。 */
-    fun revokePrivacyConsent() {
+    /**
+     * 撤销友盟数据采集授权。
+     *
+     * 挂起写盘（IO 线程）完成才返回：调用方必须在返回后再 killProcess，
+     * 否则进程先被杀、授权状态可能没落盘（见 AboutSettings 的确认退出按钮）。
+     */
+    suspend fun revokePrivacyConsent() {
         PrivacyConsentManager.setAgreed(getApplication(), false)
     }
 

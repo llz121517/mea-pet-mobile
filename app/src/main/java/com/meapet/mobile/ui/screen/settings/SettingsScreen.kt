@@ -69,6 +69,7 @@ private enum class SettingsPage(val title: String) {
     CHAT("对话"),
     APPEARANCE("外观"),
     VOICE("语音"),
+    DATA("数据与备份"),
     ABOUT("关于"),
     POLICY("隐私政策"),
 }
@@ -105,7 +106,7 @@ fun SettingsScreen(
 
     // 本地编辑状态（进入设置时取一次已存值，失焦/离开设置时才写回）。
     // 提到根页持有，这样在子页之间来回切不会丢掉正在编辑的内容。
-    val local = rememberSettingsLocalState(state)
+    val local = rememberSettingsLocalState(state, settingsViewModel)
 
     // ── 可撤销操作的撤销条 ──
     // 快照与到期定时器都在 SettingsViewModel 里：转屏、切子页都不影响窗口，
@@ -116,7 +117,7 @@ fun SettingsScreen(
         onUndo = { undo ->
             settingsViewModel.undoPending()
             // 文本框是本地编辑态、不跟随 DataStore 流，撤销后要手动同步回原值
-            if (undo is SettingsUndo.ResetPrompt) local.systemPrompt = undo.previousPrompt
+            if (undo is SettingsUndo.ResetPrompt) local.updateSystemPrompt(undo.previousPrompt)
         }
     )
 
@@ -125,9 +126,15 @@ fun SettingsScreen(
         onDispose { local.persist(settingsViewModel) }
     }
 
-    // 从列表点选模型时，同步本地输入框
-    LaunchedEffect(state.model) {
-        if (local.model != state.model) local.model = state.model
+    // 外部写入（典型是「数据与备份」里的导入）后，把未编辑的字段同步到界面。
+    // 用户正在改的字段有脏标记保护，不会被覆盖；未编辑字段若不同步，离开页面时的
+    // 兜底保存会把本地旧副本写回，等于把刚导入的设置冲掉（API Key 就是这样丢的）。
+    LaunchedEffect(state.apiKey, state.apiUrl, state.model, state.systemPrompt, state.contextWindow) {
+        local.syncFrom(
+            state = state,
+            anySearchKey = settingsViewModel.currentWebSearchAnySearchKey(),
+            deepSeekKey = settingsViewModel.currentWebSearchDeepSeekKey(),
+        )
     }
 
     // 离开关于页时清掉手动检测更新的结果文案，避免下次进入还残留着上次的回执
@@ -204,6 +211,7 @@ fun SettingsScreen(
                         SettingsCard {
                             ModelParamsSection(state, settingsViewModel, local, darkTheme)
                         }
+                        SettingsCard { WebSearchSection(state, settingsViewModel, local, darkTheme) }
                     }
 
                     SettingsPage.CHAT -> {
@@ -231,6 +239,11 @@ fun SettingsScreen(
                         SettingsCard { TtsSection(state, settingsViewModel, darkTheme) }
                     }
 
+                    // 数据与备份：导出 / 导入两个可折叠块，回执走页面级 Snackbar
+                    SettingsPage.DATA -> {
+                        SettingsCard { DataSettings(snackbarHostState = snackbarHostState) }
+                    }
+
                     SettingsPage.ABOUT -> {
                         SettingsCard { AppInfoSection() }
                         SettingsCard { UpdateSection(state, settingsViewModel, darkTheme) }
@@ -255,7 +268,7 @@ fun SettingsScreen(
     }
 }
 
-/** 入口列表：五个功能域，每项显示当前状态摘要。 */
+/** 入口列表：六个功能域，每项显示当前状态摘要。 */
 @Composable
 private fun RootPage(
     state: SettingsUiState,
@@ -265,7 +278,8 @@ private fun RootPage(
         SettingsEntry(
             page = SettingsPage.PROVIDER,
             iconRes = R.drawable.ic_settings_provider,
-            summary = state.model.ifBlank { "未设置模型" }
+            summary = state.model.ifBlank { "未设置模型" } +
+                if (state.webSearchEnabled) " · 联网已开启" else " · 联网已关闭"
         ),
         SettingsEntry(
             page = SettingsPage.CHAT,
@@ -282,6 +296,11 @@ private fun RootPage(
             iconRes = R.drawable.ic_settings_voice,
             summary = if (state.ttsMainEnabled || state.ttsOverlayEnabled) "发声已开启"
                       else "发声已关闭"
+        ),
+        SettingsEntry(
+            page = SettingsPage.DATA,
+            iconRes = R.drawable.ic_settings_backup,
+            summary = "导出与导入设置、对话、记忆"
         ),
         SettingsEntry(
             page = SettingsPage.ABOUT,
