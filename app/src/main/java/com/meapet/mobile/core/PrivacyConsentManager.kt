@@ -3,13 +3,12 @@ package com.meapet.mobile.core
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
-import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.edit
-import com.meapet.mobile.settings.appDataStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.withContext
 
 /**
  * 隐私授权管理器。
@@ -22,18 +21,16 @@ import kotlinx.coroutines.withTimeout
  * 是否需要弹窗由隐私政策版本号（DataStore `privacy_version_shown`）决定，
  * 见 SettingsManager / MainActivity；此处只负责授权状态本身的读写。
  *
- * 使用 SharedPreferences 做同步读写，保证 [isAgreed] 可在 Application.onCreate 中同步判断。
+ * **唯一存储源是 SharedPreferences**（`privacy_consent` 文件）：[isAgreed] 可在
+ * `Application.onCreate` 中同步判断，[agreedFlow] 也由同一份数据派生，不再另写
+ * DataStore——双存储存在两份状态不一致的隐患（旧实现曾在主线程用 runBlocking 写
+ * DataStore，超时/失败后两份数据就分叉了）。
  */
 object PrivacyConsentManager {
 
     private const val TAG = "PrivacyConsentManager"
     private const val PREFS_NAME = "privacy_consent"
     private const val KEY_AGREED = "umeng_privacy_agreed"
-
-    /** DataStore 同步写入的超时上限（毫秒）：授权弹窗点击路径，给磁盘繁忙留余量但防无限阻塞。 */
-    private const val DATASTORE_WRITE_TIMEOUT_MS = 2000L
-
-    private val KEY_DS_AGREED = booleanPreferencesKey("umeng_privacy_agreed")
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -42,29 +39,57 @@ object PrivacyConsentManager {
     fun isAgreed(context: Context): Boolean =
         prefs(context).getBoolean(KEY_AGREED, false)
 
-    /** 授权状态 Flow（响应式订阅）。 */
-    fun agreedFlow(context: Context): Flow<Boolean> =
-        context.appDataStore.data.map { it[KEY_DS_AGREED] ?: false }
-
-    /** 标记用户已做出选择并记录授权状态。 */
-    @Suppress("ApplySharedPref")
-    fun setAgreed(context: Context, agreed: Boolean) {
-        // 用同步 commit() 保证写盘完成后再返回：取消授权后会立刻 killProcess，
-        // apply() 的异步落盘可能来不及，导致重启后仍读到旧的授权状态。
-        prefs(context).edit()
-            .putBoolean(KEY_AGREED, agreed)
-            .commit()
-        // 同步写入 DataStore 供 Flow 订阅。此调用发生在用户点击授权弹窗按钮时
-        // （非冷启动热路径），加超时上限避免异常情况下无限阻塞主线程；
-        // 授权状态以上面的 SharedPreferences 为准，DataStore 超时写失败不影响授权判断。
-        try {
-            runBlocking {
-                withTimeout(DATASTORE_WRITE_TIMEOUT_MS) {
-                    context.appDataStore.edit { it[KEY_DS_AGREED] = agreed }
-                }
+    /**
+     * 授权状态 Flow（响应式订阅）。
+     *
+     * 由 [isAgreed] 的同一份 SharedPreferences 派生：注册监听后先发当前值，
+     * 之后每次 `umeng_privacy_agreed` 变化再发一次；订阅取消时注销监听。
+     */
+    fun agreedFlow(context: Context): Flow<Boolean> = booleanPreferenceFlow(
+        read = { isAgreed(context) },
+        register = { onChange ->
+            val prefs = prefs(context)
+            // SharedPreferences 以弱引用持有监听器：listener 由本闭包/awaitClose 强引用，
+            // 保证订阅期间不被 GC 回收。
+            val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (key == KEY_AGREED) onChange()
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "DataStore 写入授权状态超时/失败（已忽略，以 SharedPreferences 为准）", e)
+            prefs.registerOnSharedPreferenceChangeListener(listener)
+            AutoCloseable { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+        }
+    )
+
+    /**
+     * 标记用户已做出选择并记录授权状态。
+     *
+     * 写盘在 [Dispatchers.IO] 上同步 `commit()`：取消授权后调用方会立即 killProcess，
+     * `apply()` 的异步落盘可能来不及，导致重启后仍读到旧的授权状态；因此本函数要等
+     * 写盘完成才返回，调用方必须在本函数返回后再退出进程（见 AboutSettings）。
+     */
+    @Suppress("ApplySharedPref")
+    suspend fun setAgreed(context: Context, agreed: Boolean) {
+        val committed = withContext(Dispatchers.IO) {
+            prefs(context).edit()
+                .putBoolean(KEY_AGREED, agreed)
+                .commit()
+        }
+        if (!committed) {
+            Log.w(TAG, "授权状态写盘失败（agreed=$agreed），重启后可能仍为旧值")
         }
     }
 }
+
+/**
+ * 把「读取当前值 + 注册变化回调」桥接成 Flow 的纯逻辑（不依赖 Android，可 JVM 单测）。
+ *
+ * 先注册监听再读初值：若两步之间发生变化，读到的已是最新值，随后 [distinctUntilChanged]
+ * 会丢弃重复项，不会漏事件。订阅取消时调用 [AutoCloseable.close] 注销监听。
+ */
+internal fun booleanPreferenceFlow(
+    read: () -> Boolean,
+    register: (onChange: () -> Unit) -> AutoCloseable
+): Flow<Boolean> = callbackFlow {
+    val registration = register { trySend(read()) }
+    trySend(read())
+    awaitClose { registration.close() }
+}.distinctUntilChanged()

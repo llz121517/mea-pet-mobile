@@ -751,8 +751,13 @@ open class SettingsViewModel(application: Application) : AndroidViewModel(applic
     // ── 隐私合规 ──────────────────────────────────────
     // 授权状态已并入 [SettingsUiState.privacyAgreed]（init 订阅 agreedFlow 响应式维护）
 
-    /** 撤销友盟数据采集授权（同步落盘停止上报；App 随界面流程退出）。 */
-    fun revokePrivacyConsent() {
+    /**
+     * 撤销友盟数据采集授权。
+     *
+     * 挂起写盘（IO 线程）完成才返回：调用方必须在返回后再 killProcess，
+     * 否则进程先被杀、授权状态可能没落盘（见 AboutSettings 的确认退出按钮）。
+     */
+    suspend fun revokePrivacyConsent() {
         PrivacyConsentManager.setAgreed(getApplication(), false)
     }
 

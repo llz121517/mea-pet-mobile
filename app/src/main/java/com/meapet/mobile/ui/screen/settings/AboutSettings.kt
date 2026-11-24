@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +45,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════
 //  关于：应用信息、版本更新、隐私政策与数据授权
@@ -194,6 +196,8 @@ internal fun PrivacySection(
     // 响应式读取授权状态（由 SettingsViewModel 订阅 PrivacyConsentManager.agreedFlow 维护）
     val umengAgreed = state.privacyAgreed
     var showRevokeDialog by remember { mutableStateOf(false) }
+    // 撤销授权要先等写盘完成再退出进程；scope 属于本 Section，确认对话框关闭不会取消它
+    val scope = rememberCoroutineScope()
 
     // 数据流向摘要：完整说明在隐私政策全文里，这里给只看设置页的用户一个入口级提示
     Text(
@@ -336,9 +340,17 @@ internal fun PrivacySection(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.revokePrivacyConsent()
+                    // 先落盘（suspend 写 IO）再 kill：顺序反了会导致重启后仍读到已授权。
+                    // finally 保证即使协程被取消（如恰好转屏/销毁）也一定在写盘之后退出，
+                    // 不让已撤权的会话继续上报。
                     showRevokeDialog = false
-                    onExitApp()
+                    scope.launch {
+                        try {
+                            viewModel.revokePrivacyConsent()
+                        } finally {
+                            onExitApp()
+                        }
+                    }
                 }) {
                     Text("确认取消并退出")
                 }
