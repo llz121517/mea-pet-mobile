@@ -158,3 +158,56 @@ adb logcat -d -s LegacyJsonImporter
 # 暂存目录应为空
 adb shell su -c "ls -l /data/data/com.meapet.mobile/cache/backup/"
 ```
+
+---
+
+## 8. 第二轮：§2.4 上下文与历史（2026-11-24 22:00~22:40）
+
+> 第一轮按「A/B/C/D 分拣」执行；§2.4 当时整节未执行，本轮用**注入历史 + 真实端点**补齐。注入前先备份原库到 `tmp/backup/<时间戳>/`（`meapet.db` + `-wal` + `-shm` + `prefs.pb`，不入库），结束时已还原。
+
+**注入方法**（三步，避免 SQLite 写坏）：
+
+1. `adb shell am force-stop com.meapet.mobile`；
+2. root `cp` 出 `databases/meapet.db` 与 `-wal`（带 WAL 才能读到未 checkpoint 的新消息），本地用 `sqlite3` 改写后 `PRAGMA wal_checkpoint(TRUNCATE)`；
+3. push 回 `/data/local/tmp/` 再 `su -c cp` 覆盖，删掉设备上的 `-wal` / `-shm` / `-journal`，`chown u0_a398:u0_a398`、`chmod 600`、`restorecon`（SELinux Enforcing，缺 `restorecon` 会读不到库）。
+
+**注入的三份数据**
+
+| 数据集 | 规模 | 用途 |
+|---|---|---|
+| ① 长历史 | 380 行 / **330 条可见**；25 轮工具轮次（每轮带 `role=tool` + 空 assistant）、跨 2025-12-31 / 11-19 / 11-21 / 11-23 / 11-24 | 首屏定位、向上懒加载、按天分隔条 |
+| ② 大上下文 | 16 条 / **69,223 token**（3 条 2 万+ 字长消息 + 13 条短消息） | 压缩提醒（65536）、菜单入口、手动压缩 |
+| ③ 自动压缩 | ② 上追加 20 条 / 10,780 token，共 36 条 / 约 1.3 万 token | 90% 硬触发、失败退化、小窗口截断 |
+
+**结论**（详细判据与证据见检查单 §2.4「已验证明细」）
+
+- 冷启动直接贴底（`#第330条`），一路滑到 `#第1条`，跨年分隔条 `2025年12月31日` 正常；330 条 / 7 页无卡死、无跳动。
+- 6.9 万 token 冷启动弹一次「我们聊了好久啦…」；点「整理一下」折叠 8 条，`meta.context_compaction.coveredToMessageId = m08`。
+- 自动压缩三分支全部实测：成功 `Auto compaction done (hard trigger), 24 message(s) folded`（覆盖点前移到 `m32`）；失败（TLS `connection closed`）退化为 `Hard window trim: dropped 26 message(s)` 且库内不删；小窗口跳过摘要直接截断。
+- 清除 + 撤销恢复 46 条历史与 358 字摘要（G2 的撤销恢复已由 `4fe481e` 补齐）；Home 后杀进程重开，最新一轮仍在库。
+
+**口径提醒（本轮踩到）**：有效预算 = `容量 × 0.85 − max_tokens`，下限为容量的 25%（`ContextCapacity.kt` 的 `effectiveBudget`），默认 `max_tokens = 4096`。所以把**手动窗口**填 8000 时预算只有 2704，仍落在「< 6000 跳过 LLM 摘要」分支；要让 §2.4 的 90% 判据走 LLM 摘要，容量需 ≥ 约 1.2 万（本轮用 20000）。
+
+**复现命令**
+
+```powershell
+# 读出（含 WAL）并本地改写
+adb shell su -c "cp /data/data/com.meapet.mobile/databases/meapet.db /data/local/tmp/x.db"
+adb shell su -c "cp /data/data/com.meapet.mobile/databases/meapet.db-wal /data/local/tmp/x.db-wal"
+adb shell su -c "chmod 644 /data/local/tmp/x.db /data/local/tmp/x.db-wal"
+adb pull /data/local/tmp/x.db tmp/x.db; adb pull /data/local/tmp/x.db-wal tmp/x.db-wal
+python tmp/gen_history.py          # 数据集①（或 gen_compact.py / append_for_auto.py）
+
+# 写回
+adb shell am force-stop com.meapet.mobile
+adb push tmp/x.db /data/local/tmp/inj.db
+adb shell su -c "cp /data/local/tmp/inj.db /data/data/com.meapet.mobile/databases/meapet.db"
+adb shell su -c "rm -f /data/data/com.meapet.mobile/databases/meapet.db-wal /data/data/com.meapet.mobile/databases/meapet.db-shm"
+adb shell su -c "chown u0_a398:u0_a398 /data/data/com.meapet.mobile/databases/meapet.db"
+adb shell su -c "restorecon /data/data/com.meapet.mobile/databases/meapet.db"
+
+# 压缩相关日志
+adb logcat -d | Select-String "Compacting|Auto compaction|Manual compaction|Hard window trim"
+# 压缩状态（摘要 + 覆盖点）
+sqlite3 tmp/x.db "select json_extract(value,'$.coveredToMessageId'), json_extract(value,'$.coveredCount') from meta where key='context_compaction'"
+```
