@@ -733,8 +733,9 @@ original work.
 **All rights to the character 梅尔·艾什礼佩克 (Mare Ashley-Pecker), its
 likeness and its voice belong to Cabbage Soft.** Consequently the
 following shipped/generated assets are **not** covered by this
-repository's MIT license, and **no license is granted** to reuse,
-redistribute or train on them:
+repository's MIT license. **This project grants no license for them** —
+the rights are held by Cabbage Soft, so whether they may be reused,
+redistributed or trained on is for the rights holder to decide:
 
 | Asset | Where it lives | Produced with |
 |---|---|---|
@@ -742,6 +743,7 @@ redistribute or train on them:
 | TTS model weights | `tts-model-v1.zip` on the `tts-resource-pack` release (not in the repo or APK) | VITS |
 | Live2D model assets | `app/src/main/assets/live2d/mea_live2d/**` (in the APK) | community work (Bilibili) |
 
-The full statement, including the permitted / prohibited uses and the
-takedown contact, is published as a release asset and kept in the repo at
-[`docs/FAN-WORK-NOTICE.md`](docs/FAN-WORK-NOTICE.md).
+The full statement — including what this project asks users not to do,
+the note that it is a provenance notice rather than a license grant, and
+the takedown contact — is published as a release asset and kept in the
+repo at [`docs/FAN-WORK-NOTICE.md`](docs/FAN-WORK-NOTICE.md).
