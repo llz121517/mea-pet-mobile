@@ -399,21 +399,31 @@ class FloatingLive2dService : Service() {
         val container = (applicationContext as? MeaPetApplication)?.container ?: return
         inputWindow?.setSending(true)
         serviceScope.launch {
-            // sendMessage 内部已 withContext(IO)，返回后回到 Main 直接更新 UI
-            val result = container.chatService.sendMessage(text)
-            inputWindow?.setSending(false)
-            result.fold(
-                onSuccess = { (_, assistant) ->
-                    inputWindow?.clearText()
-                    bubbleWindow?.addBubble(assistant.content)
-                    // 悬浮窗语音（模型就绪且开关开启时才真正发声，否则静默跳过）
-                    container.ttsManager.speak(assistant, com.meapet.mobile.tts.TtsManager.Source.OVERLAY)
-                },
-                onFailure = { e ->
-                    Log.w(TAG, "Overlay send failed: ${e.message}")
-                    bubbleWindow?.addBubble("发送失败：${e.message ?: "未知错误"}")
-                }
-            )
+            try {
+                // sendMessage 内部已 withContext(IO)，返回后回到 Main 直接更新 UI
+                val result = container.chatService.sendMessage(text)
+                result.fold(
+                    onSuccess = { (_, assistant) ->
+                        inputWindow?.clearText()
+                        bubbleWindow?.addBubble(assistant.content)
+                        // 悬浮窗语音（模型就绪且开关开启时才真正发声，否则静默跳过）
+                        container.ttsManager.speak(assistant, com.meapet.mobile.tts.TtsManager.Source.OVERLAY)
+                    },
+                    onFailure = { e ->
+                        Log.w(TAG, "Overlay send failed: ${e.message}")
+                        bubbleWindow?.addBubble("发送失败：${e.message ?: "未知错误"}")
+                    }
+                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // 主界面插队 / 清除对话会取消共享 ChatService 的在途 turn（G6），悬浮窗
+                // 这一条随之取消：不是发送失败，不回「发送失败」气泡，但必须退出发送中状态
+                Log.i(TAG, "Overlay send cancelled: ${e.message}")
+                throw e
+            } finally {
+                // 取消是异步的：无论成功、失败还是被取消，都要恢复输入框，否则会一直
+                // 卡在「发送中」禁用态
+                inputWindow?.setSending(false)
+            }
         }
     }
 }

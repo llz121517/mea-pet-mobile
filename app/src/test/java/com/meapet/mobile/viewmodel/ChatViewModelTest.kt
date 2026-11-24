@@ -100,6 +100,8 @@ class ChatViewModelTest {
         wheneverBlocking { chatService.snapshotForClear() }.thenAnswer {
             ChatService.ClearSnapshot(chatService.getHistory(), CompactionState())
         }
+        // 清除对话会先取消并等待在途 turn 收尾（G1）：mock 上默认即时返回
+        wheneverBlocking { chatService.cancelActiveTurnAndJoin() }.thenReturn(Unit)
         // 压缩状态与上下文估算：ViewModel 在发送成功后会刷新，mock 需显式给默认值（否则拆箱 NPE）
         wheneverBlocking { chatService.refreshContextTokens() }.thenReturn(0)
         wheneverBlocking { chatService.compaction() }.thenReturn(CompactionState())
@@ -716,6 +718,108 @@ class ChatViewModelTest {
                 vm.state.value.messages.map { it.content }
             )
             assertEquals(com.meapet.mobile.chat.TurnPhase.IDLE, vm.state.value.turnPhase)
+        } finally {
+            Dispatchers.setMain(dispatcher)
+        }
+    }
+
+    /**
+     * G1：清除对话必须等旧 turn **真正收尾**后再取快照 / 清库。
+     *
+     * 旧 turn 被取消后还要提交已展示的片段；只 cancel 不 join 时 `snapshotForClear()`
+     * 可能早于这次提交（撤销快照缺片段），`clearHistory()` 之后旧片段还可能再落库。
+     * 用真实 [ChatService] + 脚本化引擎复现：工具轮已吐出一段正文，第二轮请求卡住时清除。
+     */
+    @Test
+    fun `清除对话会等在途 turn 取消收尾完成后再取快照`() = kotlinx.coroutines.runBlocking {
+        Dispatchers.setMain(Dispatchers.Default)
+        try {
+            val secondStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val calls = java.util.concurrent.atomic.AtomicInteger()
+            val engine = com.meapet.mobile.client.test.FakeHttpClientEngine {
+                if (calls.getAndIncrement() == 0) {
+                    toolFragmentResponse("先查一下")
+                } else {
+                    // 第二轮请求卡住：此刻 turn 仍在途，片段已展示但尚未提交进历史
+                    secondStarted.complete(Unit)
+                    gate.await()
+                    text("最终回复")
+                }
+            }
+            val realSettings = mock<SettingsManager>().also {
+                whenever(it.getApiConnection()).thenReturn(ApiConnection("https://example.org/v1", "fixture-key"))
+                whenever(it.isMemoryEnabled()).thenReturn(true)
+                whenever(it.getSystemPrompt()).thenReturn("你是梅尔")
+                whenever(it.getModel()).thenReturn("m")
+                whenever(it.getTemperature()).thenReturn(0.7)
+                whenever(it.getMaxTokens()).thenReturn(1024)
+                whenever(it.getMemoryMode()).thenReturn(com.meapet.mobile.config.MemoryMode.AUTO)
+            }
+            val executor = com.meapet.mobile.memory.tools.MemoryToolExecutor(
+                search = object : com.meapet.mobile.memory.search.MemorySearch {
+                    override suspend fun search(query: com.meapet.mobile.memory.search.MemoryQuery) =
+                        emptyList<MemoryItem>()
+                }
+            )
+            val cm = ConversationManager()
+            val realService = ChatService(
+                clientProvider = {
+                    com.meapet.mobile.client.OpenAiCompatibleClient("k", "https://x/v1", engine)
+                },
+                conversationManager = cm,
+                memoryManager = null,
+                settingsManager = realSettings,
+                postProcessScope = kotlinx.coroutines.CoroutineScope(Dispatchers.Default),
+                config = com.meapet.mobile.config.AppConfig.DEFAULT,
+                toolLoopProvider = { _, _ ->
+                    com.meapet.mobile.chat.tools.ChatToolLoop(
+                        clientProvider = {
+                            com.meapet.mobile.client.OpenAiCompatibleClient("k", "https://x/v1", engine)
+                        },
+                        registry = com.meapet.mobile.chat.tools.ToolRegistry(executor.asTools())
+                    )
+                },
+                memoryTools = executor
+            )
+            Mockito.doReturn(realService).`when`(container).chatService
+
+            val vm = ChatViewModel(application)
+            vm.onEvent(ChatEvent.SendMessage("帮我查"))
+            kotlinx.coroutines.withTimeout(5_000) {
+                while (vm.state.value.messages.none { it.content == "先查一下" }) {
+                    kotlinx.coroutines.delay(10)
+                }
+            }
+            kotlinx.coroutines.withTimeout(5_000) { secondStarted.await() }
+
+            vm.onEvent(ChatEvent.ClearConversation)
+            kotlinx.coroutines.withTimeout(5_000) {
+                while (vm.state.value.pendingUndo == null || vm.state.value.messages.isNotEmpty()) {
+                    kotlinx.coroutines.delay(10)
+                }
+            }
+
+            val undo = vm.state.value.pendingUndo
+            assertTrue("清除后应留下撤销快照，实际: $undo", undo is ChatUndo.ClearConversation)
+            val snapshotContents = (undo as ChatUndo.ClearConversation).snapshot.map { it.content }
+            assertEquals(
+                "撤销快照应包含被取消轮已展示的片段: $snapshotContents",
+                listOf("帮我查", "先查一下"),
+                snapshotContents
+            )
+            assertTrue(
+                "清库后不应残留旧轮消息: " + cm.getMessages().map { it.content },
+                cm.getMessages().isEmpty()
+            )
+            assertFalse("清除后不应仍在途", realService.isTurnActive)
+
+            // 再等一小会儿：确认没有迟到的收尾在清库之后把旧片段写回
+            kotlinx.coroutines.delay(100)
+            assertTrue(
+                "清库后旧轮不得再写回历史: " + cm.getMessages().map { it.content },
+                cm.getMessages().isEmpty()
+            )
         } finally {
             Dispatchers.setMain(dispatcher)
         }

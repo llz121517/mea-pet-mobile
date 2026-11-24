@@ -17,10 +17,12 @@ import com.meapet.mobile.config.MemoryMode
 import com.meapet.mobile.memory.MemoryManager
 import com.meapet.mobile.settings.SettingsManager
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -204,11 +206,35 @@ class ChatService(
     @Volatile
     private var lastContextTokens = 0
 
-    /** 是否有在途 turn（主界面与悬浮窗共用同一 ChatService，必须进程级可见）。 */
-    private val turnActive = AtomicBoolean(false)
+    /**
+     * 在途 turn 的唯一句柄（主界面与悬浮窗共用同一 ChatService，必须进程级可见）。
+     *
+     * ## 为什么只允许一个（G6）
+     * 一轮 turn 是「读历史 → 请求 → 写历史/记忆」的读-改-写：两个 turn 并行时，
+     * 后结束的一轮会把自己出发时的旧历史 / 旧记忆写回去，覆盖另一轮刚提交的片段。
+     * 所以并发守卫放在 ChatService（唯一写入口），而不是各 UI 调用方。
+     *
+     * ## 为什么需要 [finished]
+     * [Job.cancel] 是**异步**的：它返回时旧轮的取消分支还没跑完（还要提交已展示片段、
+     * 回滚孤儿 user、丢弃工具暂存）。插队发送必须等旧轮彻底收尾才能开始新一轮；
+     * 清除对话也必须等它收尾后再取撤销快照（G1），否则两条路径会交错写历史。
+     */
+    private class InFlightTurn(val job: Job) {
+        /** 取消分支与 finally 都执行完时完成；等待方据此确认旧轮不再写历史。 */
+        val finished = CompletableDeferred<Unit>()
+    }
 
-    /** 在途 turn 的协程 Job（[cancelActiveTurn] 的取消句柄）。 */
-    private val activeTurnJob = AtomicReference<Job?>(null)
+    private val inFlightTurn = AtomicReference<InFlightTurn?>(null)
+
+    /**
+     * 标记「当前协程属于某个 turn」。
+     *
+     * turn 内部的工具 / 回调若再次调用 [sendMessage]，抢槽位时会等待「自己」结束而
+     * 死锁；这类重入没有业务含义，直接在入口拒绝。
+     */
+    private class TurnContext : AbstractCoroutineContextElement(TurnContext) {
+        companion object Key : CoroutineContext.Key<TurnContext>
+    }
 
     /** 解析 rawAssistantJson 用（忽略未知字段，思考模式字段不丢）。 */
     private val json = Json { ignoreUnknownKeys = true }
@@ -218,16 +244,66 @@ class ChatService(
      *
      * 插队发送 / 状态条「停止」都据此判断；悬浮窗等其他 UI 与主界面共享同一个实例。
      */
-    val isTurnActive: Boolean get() = turnActive.get()
+    val isTurnActive: Boolean get() = inFlightTurn.get() != null
 
     /**
      * 取消当前在途 turn（用户点「停止」或插队发送时由调用方触发）。
      *
      * 取消会走 [sendMessage] 的取消分支：已展示的正文片段按「已完成部分」提交，
      * 未完成的 tool_calls 与写类暂存丢弃。无在途 turn 时为 no-op。
+     *
+     * 本方法只**发出**取消请求，不等待收尾。需要在收尾之后继续做事的调用方
+     * （清除对话、插队发送）必须用 [cancelActiveTurnAndJoin]，否则会与旧轮的落库交错（G1）。
      */
     fun cancelActiveTurn() {
-        activeTurnJob.get()?.cancel()
+        inFlightTurn.get()?.job?.cancel()
+    }
+
+    /**
+     * 取消在途 turn 并挂起等待它**真正结束**（取消分支已提交可见片段 / 回滚孤儿 user）。
+     *
+     * 清除对话必须在取撤销快照前调用：只 cancel 不 join 时，旧轮的收尾可能晚于
+     * [snapshotForClear]（快照缺已展示片段），甚至晚于 [clearHistory]（旧片段又写回历史）。
+     * 等待期间若有新 turn 抢到槽位（如悬浮窗恰好又发了一条），也一并取消——清除是
+     * 破坏性操作，语义上必须保证「清除之后没有旧内容再落库」。
+     */
+    suspend fun cancelActiveTurnAndJoin() {
+        val self = coroutineContext[Job]
+        while (true) {
+            val turn = inFlightTurn.get() ?: return
+            // 自己取消自己再等自己结束会永远等下去；调用方本就在收尾路径上，直接返回
+            if (turn.job === self) return
+            Log.i(TAG, "Cancelling in-flight turn and waiting for its cleanup")
+            turn.job.cancel()
+            turn.finished.await()
+        }
+    }
+
+    /**
+     * 抢占唯一的 turn 槽位；已有在途 turn 时按主界面「插队」语义处理。
+     *
+     * 新消息不排队、不报错：取消旧 turn 后**等它真正收尾**（[InFlightTurn.finished]），
+     * 再让新 turn 开始。只 cancel 不 await 的话，旧轮的取消分支（提交已展示片段 /
+     * 回滚孤儿 user）会和新一轮并发写历史。
+     *
+     * @return 抢到的槽位；同一协程内重入（`current.job === selfJob`）时返回 null
+     */
+    private suspend fun claimTurnSlot(selfJob: Job): InFlightTurn? {
+        while (true) {
+            val current = inFlightTurn.get()
+            if (current == null) {
+                val claimed = InFlightTurn(selfJob)
+                if (inFlightTurn.compareAndSet(null, claimed)) return claimed
+                continue
+            }
+            if (current.job === selfJob) {
+                Log.w(TAG, "Reentrant sendMessage rejected: a turn is already running in this coroutine")
+                return null
+            }
+            Log.i(TAG, "Interjecting: cancelling in-flight turn before starting a new one")
+            current.job.cancel()
+            current.finished.await()
+        }
     }
 
     /**
@@ -284,10 +360,22 @@ class ChatService(
         val webToolEligible = settingsManager.getWebSearchEnabled()
         val wantsTools = !toolsUnsupported && (memoryToolEligible || webToolEligible)
 
-        turnActive.set(true)
-        activeTurnJob.set(coroutineContext[Job])
+        // ── 并发守卫（G6）──
+        // 主界面与悬浮窗共用本实例：任何入口都先抢占唯一的 turn 槽位。语义与主界面
+        // 的「插队」一致——新消息不排队、不报错，而是取消在途 turn、等它收尾完成后
+        // 照常发送；这样同一时刻最多一个 turn 读写历史 / 记忆。
+        val selfJob = coroutineContext[Job]
+            ?: return Result.failure(IllegalStateException("sendMessage 必须在协程中调用"))
+        if (coroutineContext[TurnContext] != null) {
+            // 同一 turn 内部（工具 / 回调）重入：等自己收尾会死锁，直接拒绝
+            Log.w(TAG, "Reentrant sendMessage rejected: already inside a turn")
+            return Result.failure(IllegalStateException("当前回复还在生成中，请稍后再发"))
+        }
+        val turn = claimTurnSlot(selfJob) ?: return Result.failure(
+            IllegalStateException("当前 turn 尚未结束，请稍后再发")
+        )
         try {
-            return withContext(Dispatchers.IO) {
+            return withContext(Dispatchers.IO + TurnContext()) {
                 try {
                     // 整个 turn（多轮工具请求 + tools 不支持降级 + 空回复兜底）共用一个总超时：
                     // 移动网络下工具循环最坏是 maxRounds 次请求叠加，没有总超时用户只能强杀
@@ -407,8 +495,10 @@ class ChatService(
                 }
             }
         } finally {
-            activeTurnJob.set(null)
-            turnActive.set(false)
+            // 先释放槽位再完成 finished：等待方看到 finished 时槽位一定已空，
+            // 可以立刻抢占，不必再空转一圈
+            inFlightTurn.compareAndSet(turn, null)
+            turn.finished.complete(Unit)
         }
     }
 

@@ -79,6 +79,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** 在途发送任务；清空会话时取消，避免回复回写到已清空的会话。 */
     private var sendJob: Job? = null
 
+    /**
+     * 发送 / 清除的「代次」：每次新发送、重试或清除对话都会自增。
+     *
+     * 取消是异步的：被顶替的旧协程随后才跑到取消分支。此时不能用 `sendJob` 判断
+     * 「我是否仍是当前任务」——协程可能在字段赋值之前就已启动。旧协程只在代次未变
+     * 时把 turnPhase 收回 IDLE；被新任务顶替 / 清除时，状态归新操作所有。
+     */
+    private var sendGeneration = 0L
+
     /** 撤销窗口的到期定时器（窗口内撤销会取消它）。 */
     private var undoTimer: Job? = null
 
@@ -373,6 +382,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (content.isBlank()) return
         // 新的对话已经产生：清除前的快照不再代表当前会话，撤销会把新消息一起抹掉
         discardPendingUndo()
+        // 新一代发送：旧协程即使在取消分支里迟到，也不能再改本轮状态
+        val generation = ++sendGeneration
 
         val userMessage = ChatMessage(role = ChatRole.user, content = content)
         val fragmentIds = Collections.synchronizedList(mutableListOf<String>())
@@ -412,6 +423,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update { cur ->
                         cur.copy(messages = cur.messages.filterNot { it.id == userMessage.id })
                     }
+                }
+                // 取消也可能来自外部入口（悬浮窗插队 / 清除对话）：本代发送若仍是当前
+                // 代次，说明没有新 turn 接手，必须把「正在生成」状态收回 IDLE；
+                // 已被新发送 / 重试 / 清除顶替时，状态归新操作所有，不能重置。
+                if (sendGeneration == generation) {
+                    _state.update { it.copy(turnPhase = TurnPhase.IDLE) }
                 }
                 throw e
             }
@@ -504,6 +521,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         discardPendingUndo()
 
         val fragmentIds = Collections.synchronizedList(mutableListOf<String>())
+        // 新一代发送：旧协程即使在取消分支里迟到，也不能再改本轮状态
+        val generation = ++sendGeneration
 
         // 整轮重来：先移除该 user 及其之后的所有消息（旧轮的 assistant/片段/tool 残影），
         // 再把该 user 作为新一轮的乐观消息留在末尾；成功后新片段与最终回复自然接在它后面
@@ -530,6 +549,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         cur.copy(messages = cur.messages.filterNot { it.id == lastUserMsg.id })
                     }
                 }
+                // 与 sendMessage 同理：外部入口取消时把状态收回 IDLE，被新任务顶替时不动
+                if (sendGeneration == generation) {
+                    _state.update { it.copy(turnPhase = TurnPhase.IDLE) }
+                }
                 throw e
             }
             result.fold(
@@ -548,44 +571,52 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun clearConversation() {
-        // 取消在途发送，否则回复到达后会把消息回写进已清空的会话
-        sendJob?.cancel()
+        // 先取下本地发送任务并停止接收它的收尾：取消是异步的，旧 turn 收到取消后还要
+        // 提交已展示片段 / 回滚孤儿 user（G1）。必须等它真正结束再取快照、清库，
+        // 否则快照可能缺片段（撤销后上下文不完整），或清空后旧片段又被写回历史。
+        val inFlight = sendJob
         sendJob = null
-        // 主界面与悬浮窗共用 ChatService：本地 sendJob 为空时也要停掉共享的在途 turn
-        chatService.cancelActiveTurn()
+        // 清除也是一代新操作：旧协程的取消分支不得再把状态改回非 IDLE
+        sendGeneration++
         viewModelScope.launch {
-        // 快照必须在清空之前取：撤销窗口内这是唯一的回滚依据。
-        // 取仓库里的完整历史（不是内存窗口），否则撤销会丢掉窗口之前的消息；
-        // 压缩状态一并取，否则撤销后那段被压缩过的内容对模型永久不可见
-        val clearSnapshot = chatService.snapshotForClear()
-        val snapshot = clearSnapshot.messages
-        chatService.clearHistory()
-        // 清除后摘要已不对应任何现存历史：提醒与入口一并复位，下次再长到阈值才重新提醒
-        compactHintShown = false
-        _state.update {
-            // 只清对话相关字段，保留 updateNotice / memoryDialog 等无关状态
-            it.copy(
-                messages = emptyList(),
-                turnPhase = TurnPhase.IDLE,
-                error = null,
-                inputText = "",
-                compactHint = false,
-                canCompactContext = false,
-                compactedUpToMessageId = null,
-                // 让 UI 丢掉旧列表的滚动/子组合状态（见 ChatUiState.conversationEpoch）
-                conversationEpoch = it.conversationEpoch + 1
-            )
-        }
-        if (snapshot.isNotEmpty()) {
-            beginUndo(
-                ChatUndo.ClearConversation(
-                    id = nextUndoId(),
-                    deadlineMs = nextUndoDeadline(),
-                    snapshot = snapshot,
-                    compaction = clearSnapshot.compaction
+            // 本 ViewModel 发出的那一轮：cancelAndJoin（不是 cancel）保证它的收尾已跑完
+            inFlight?.cancelAndJoin()
+            // 悬浮窗等其它入口的 turn 不在 sendJob 里：由 ChatService 取消并挂起等待到
+            // 结束。这里刻意不用非挂起的 cancelActiveTurn()——那只是发出取消请求，
+            // 收尾可能晚于下面的快照甚至晚于 clearHistory()。
+            chatService.cancelActiveTurnAndJoin()
+            // 快照必须在清空之前取：撤销窗口内这是唯一的回滚依据。
+            // 取仓库里的完整历史（不是内存窗口），否则撤销会丢掉窗口之前的消息；
+            // 压缩状态一并取，否则撤销后那段被压缩过的内容对模型永久不可见
+            val clearSnapshot = chatService.snapshotForClear()
+            val snapshot = clearSnapshot.messages
+            chatService.clearHistory()
+            // 清除后摘要已不对应任何现存历史：提醒与入口一并复位，下次再长到阈值才重新提醒
+            compactHintShown = false
+            _state.update {
+                // 只清对话相关字段，保留 updateNotice / memoryDialog 等无关状态
+                it.copy(
+                    messages = emptyList(),
+                    turnPhase = TurnPhase.IDLE,
+                    error = null,
+                    inputText = "",
+                    compactHint = false,
+                    canCompactContext = false,
+                    compactedUpToMessageId = null,
+                    // 让 UI 丢掉旧列表的滚动/子组合状态（见 ChatUiState.conversationEpoch）
+                    conversationEpoch = it.conversationEpoch + 1
                 )
-            )
-        }
+            }
+            if (snapshot.isNotEmpty()) {
+                beginUndo(
+                    ChatUndo.ClearConversation(
+                        id = nextUndoId(),
+                        deadlineMs = nextUndoDeadline(),
+                        snapshot = snapshot,
+                        compaction = clearSnapshot.compaction
+                    )
+                )
+            }
         }
     }
 
