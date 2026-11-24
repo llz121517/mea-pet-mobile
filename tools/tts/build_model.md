@@ -1,6 +1,6 @@
 # model.onnx 从哪里来（**不在 G2P 管线内**）
 
-`model.onnx` 是 Mea 音色的 **VITS** 模型（模型 = VITS，微调框架 = [VITS-fast](https://github.com/Plachtaa/VITS-fast-fine-tuning)；早期文档误写为 VITS2，2026-11-24 依模型 metadata `model_type=vits` 更正），**不是本管线生成的**，也无法从本仓库的数据重建：
+`model.onnx` 是 Mea 音色的 **VITS** 模型（早期文档误写为 VITS2，2026-11-24 依模型 metadata `model_type=vits` 更正），**不是本管线生成的**，也无法从本仓库的数据重建：
 它需要训练侧的 checkpoint `G_latest.pth`（约 39.7M 参数），而该文件既不在仓库里、也不适合入库
 （体积 + 训练语料/授权约束）。G2P 管线只负责「模型之外」的全部资产，模型通过 `--model` 传入。
 

@@ -35,7 +35,7 @@
 |---|---|---|
 | [`TODO.md`](TODO.md) | 代码审查遗留项、1.9 发布前验收与真机验证、架构和工程待办。**全项目唯一待办清单**，用户可见改动同步 `CHANGELOG.md` | 每次修复或发现一个问题 |
 | [`legacy-compat.md`](legacy-compat.md) | 版本迁移框架引用点、当前迁移步骤、升级行为与验证方式 | 新增 / 删除迁移 step 时 |
-| [`FAN-WORK-NOTICE.md`](FAN-WORK-NOTICE.md) | 二创性质声明：语音素材（GPT-SoVITS）与 TTS 模型（VITS，VITS-fast 框架微调）的权利归属、可做/不可做清单、fork 时须移除的资源 | 语音/TTS 模型来源或授权口径变化时 |
+| [`FAN-WORK-NOTICE.md`](FAN-WORK-NOTICE.md) | 二创性质声明：语音素材（GPT-SoVITS）与 TTS 模型（VITS）的权利归属、可做/不可做清单、fork 时须移除的资源 | 语音/TTS 模型来源或授权口径变化时 |
 
 ### 2.2 TTS（语音合成）文档组
 
