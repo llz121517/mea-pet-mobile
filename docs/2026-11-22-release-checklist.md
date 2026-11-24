@@ -65,42 +65,34 @@
 
 ### 1.2 合规类
 
-> 2026-11-24 adb/APK 自动化核查：第 3、4 项已完成并给出结论；第 1 项的 8 个子项补齐了取证结果（仍待维护者决策）；第 2 项待重新复核（政策刚改过）。
+> 2026-11-24 核查完成，4 条主项全部 ✅。取证细节在 `NOTICE.md` 与对应提交说明里，此处只留结论。
 
-| # | 条目 | 判据 | 结果 |
-|---|---|---|---|
-| 1 | **`NOTICE.md`「Previously open questions」8 项逐条确认** | 每项都有结论（确认 / 换成可再分发资源 / 从 APK 移除）并回写 `NOTICE.md`，见下方子项 | ✅ **8 项全部处置完毕**（#1/#2/#3/#6/#8 早前解决；#4 GPL exception 已判定、#5 Umeng 矛盾已定性、#7 字体已溯源） |
-| 2 | **隐私政策 1.3 与实现一致性复核**（含「备份与导出」小节与「复用聊天 Key」开关） | 政策正文与实际行为一致，逐句核对见下方说明 | 🟡 政策已改，待重核 |
-| 3 | **统计 SDK 构建的隐私重新确认路径** | 发布构建 `UMENG_APP_KEY` 已配置（否则 `umeng.enabled` 为 true 但 AppKey 为空，CI 只打 warning）；升级安装后老用户看到一次政策更新弹窗 | ✅ 2026-11-24 |
-| 4 | **`NOTICE.md` 版本 / 依赖清单与本版一致** | 按 1.9.0 release APK 复核「Bundled in the APK」结论，或明确标注该节仍是 1.8.0 口径 | ✅ 2026-11-24（审计基准已更新为 1.9.0，见下） |
+| # | 条目 | 结论 |
+|---|---|---|
+| 1 | **`NOTICE.md` 8 项待确认** | ✅ 全部结清（逐项见下表），小节已改名 `Previously open questions` |
+| 2 | **隐私政策 1.3 与实现一致** | ✅ 逐句核对通过：备份/导出、复用聊天 Key、工具调用历史与联网结果的落库范围均与正文一致 |
+| 3 | **统计 SDK 隐私重新确认路径** | ✅ `umeng.appKey` 已配置；`release.yml:94` 从 secret 注入；真机升级安装弹出「隐私政策更新」 |
+| 4 | **`NOTICE.md` 版本 / 依赖与本版一致** | ✅ 审计基准已从 1.8.0 更新为 1.9.0，补登 `androidx.sqlite` 2.7.1、zip4j 2.11.5 |
 
-**第 3 项已验证**：`local.properties` 中 `umeng.appKey=6a69ff8ee87a8d65f0a187ea`、`umeng.enabled=true`；`release.yml:94` 从 `secrets.UMENG_APP_KEY` 注入，缺失时第 117–118 行只 `warning` 而不中断。真机实测 1.7.2 → 1.9.0 覆盖升级后弹出的隐私弹窗副标题为「隐私政策更新」，路径成立。
+**8 项逐个结论**
 
-**第 4 项已验证**（对 `dist/MeaPet-v1.9.0-v8a.APK` 拆包，`aapt list`）：
+| # | 条目 | 结论 |
+|---|---|---|
+| 1 | 触摸语音（21 个 Opus） | GPT-SoVITS 模型生成，梅尔二创；权利归 **Cabbage Soft**，不适用 MIT |
+| 2 | Live2D 模型资源 | B 站社区作品，同属二创；孤儿 `橙色猫猫.can3` 已删（进包 **9** 个文件） |
+| 3 | `ic_menu_compact.xml` | 即 `mdi/arrow-collapse`，已登记 `tools/icons.txt`（Apache-2.0） |
+| 4 | JLaTeXMath GPL-2.0+ | 上游 LICENSE 含 **linking exception**，本项目以未修改的独立模块引用，合规 |
+| 5 | Umeng 许可矛盾 | POM 的 "Apache-2.0" 指向友盟自己的 Demo 仓库，不覆盖 SDK 二进制；按专有处理 |
+| 6 | Cubism SDK / Core 版本 | SDK **`5-r.5`** / Core **`6.0.1`**（真机 logcat 实测） |
+| 7 | `jlm_special.ttf` | JLaTeXMath 自制（FontForge/calixte，无第三方版权串），适用其自身许可 |
+| 8 | TTS 模型 / 训练数据 | **VITS**（非 VITS2），梅尔二创；6 文件不进仓库/APK，经 `tts-resource-pack` 分发 |
 
-- NOTICE 第 213–221 行自述的审计基准「`MeaPet-v1.8.0-v8a.APK`」应更新为 1.9.0，但**结论本身全部成立**，无需改判定。
-- 四个标题带 `(NOT included)` 的小节（Cubism Core / sherpa-onnx / TTS 模型 / Umeng）**含义是「不在本仓库内分发」，不是「不进 APK」**，四者正文都准确写明了打包情况，实测与正文一致：
-  | 小节 | APK 实测 | 与 NOTICE 正文 |
-  |---|---|---|
-  | Live2D Cubism Core | `lib/arm64-v8a/libLive2DCubismCoreJNI.so`（108 KB） | 一致（正文写会打包，仅 `arm64-v8a`/`x86`/`x86_64`，无 v7a） |
-  | sherpa-onnx / ONNX Runtime | `libsherpa-onnx-jni.so`（4.5 MB）、`libonnxruntime.so`（21.7 MB） | 一致（含 ONNX Runtime 1.28.2） |
-  | TTS 模型资产 | `model.onnx`/`tokens.txt`/`lexicon.txt`/`fsts/*` **均不在包内**；`assets/tts/ja_reading_map.json`、`en_words.bloom` 在包内 | 一致（模型不进包，两个派生资产进包） |
-  | Umeng SDK | `lib/arm64-v8a/libumeng-spy.so`（389 KB） | 一致（`umeng.enabled=true` 时打包） |
-- JLaTeXMath 字体资产实测在包内（`assets/org/scilab/forge/jlatexmath/`，77 个条目，含 30 个 `.ttf`），与「Distribution: bundled in the APK」一致。
-- **唯一需要改的**：审计基准仍是 1.8.0，建议把第 218–219 行的 `MeaPet-v1.8.0-v8a.APK` 改为 `MeaPet-v1.9.0-v8a.APK`，并补登 1.9.0 新增的 `androidx.sqlite` 2.7.1、zip4j 2.11.5（详见 §1.2 附注）。
+**第 4 项的拆包实测**（`dist/MeaPet-v1.9.0-v8a.APK`，`aapt list`）与 NOTICE 正文一致：Cubism Core、sherpa-onnx + ONNX Runtime、Umeng 的 `.so` 均在包内；TTS 模型 6 文件均不在包内（只有两个派生 G2P 资产在）；JLaTeXMath 的 30 个 `.ttf` 在包内。四个标 `(NOT included)` 的小节意为「不在本仓库分发」，非「不进 APK」，正文均已写明。
 
-**第 1 项 8 个子项的取证结果**（决策仍待维护者，取证已可支撑拍板）
+**需外部方处理（不阻塞发布）**
 
-- [x] **1. 触摸语音素材** — **来源已记录（2026-11-24）**：实测 21 个文件 / 225 KB 全部进包，编码确认为 **Opus**（`OpusHead` 位于 offset 28，`.ogg` 仅为容器）。素材由 **GPT-SoVITS** 微调模型生成，属**梅尔二创衍生**；角色与声线的权利归 **Cabbage Soft**（《霞流宝石心 -壮志凌云振寰宇-》），**不适用本仓库的 MIT 许可、不授权他人复用**。已回写 NOTICE「Touch Voice Assets」并随 release 分发声明（见 §1.2 附注）。
-- [x] **2. Mea Live2D 模型资源** — `assets/live2d/mea_live2d/` 进包文件为 **9 个**（`mea.moc3`/`mea.model3.json`/physics/motionsync/cdi3 + 2 motions + 2 textures）；**`橙色猫猫.can3` 已确认是孤儿文件并移除**（`mea.model3.json` 不含 `can3`、代码零引用；223 KB，删除后真机 `Live2d: 模型目录预热完成：9 个文件`、模型正常加载）。**模型来源属于梅尔二创**（B 站社区作品），权利同样归 **Cabbage Soft**；NOTICE 已按「二创、不适用 MIT」口径记录。
-- [x] **3. `ic_menu_compact.xml`** — **已解决（2026-11-24）**：与 Iconify API 的 `mdi/arrow-collapse` 路径数据逐字节比对一致，已登记进 `tools/icons.txt`；图标照常进包，许可由上面的 Material Design Icons 条目（Apache-2.0）覆盖。另三个未登记的 `ic_launcher_background`/`ic_slider_thumb`/`ic_slider_track` 非 MDI 图标，不在此列。
-- [x] **4. JLaTeXMath-Android GPL-2.0+ / classpath exception** — **已判定（2026-11-24）**：经 GitHub contents API 取到上游 LICENSE 全文，**确认含 linking exception**（原文已摘录进 NOTICE）。MeaPet 以未修改的 Maven 依赖方式使用（独立模块、未拷贝源码），正属 exception 所称情形：整体作品可按分发方自选条款发布，只需同时满足各链接模块自身条款。**本项目以 MIT 分发 APK，并通过 NOTICE + 未修改依赖 + 上游源码可得来履行 JLaTeXMath 自身的 GPL 义务。** 仅保留一处解释性提示（"linking" 与 Android 单一 `classes.dex` 打包的对应关系，上游项目与 Markwon 的 Apache-2.0 `ext-latex` 均按覆盖处理），不阻塞发布。
-- [x] **5. Umeng SDK 许可矛盾** — **已处置（2026-11-24）**：POM 里的 "Apache License 2.0" 指向的是友盟**自己的集成 Demo 仓库**，不是 SDK 二进制本身，因此那条 metadata 描述的是示例工程、不构成对 AAR 的授权。两个 AAR 内均无许可文件（仅 `R.txt` 与 proguard 规则）。**本项目按专有 SDK 处理**，依友盟服务条款与隐私政策，不主张任何 Apache-2.0 权限。此矛盾只能由友盟修正，本地无法解决；风险有界：SDK 受用户同意门控、可用 `-Pumeng.enabled=false` 从构建中移除、且本项目从未修改或以源码形式再分发。**若需严格宽松许可的产物，用 `-Pumeng.enabled=false` 构建。**
-- [x] **6. Live2D Cubism SDK / Core 版本** — **已查实（2026-11-24）**：SDK 发行版为 **Cubism SDK for Java `5-r.5`**（维护者提供），内含 **Cubism Core 6.0.1**；真机 logcat 实测 `Live2D Cubism Core version: 06.00.0001 (100663297)` / `Live2D Cubism SDK Core Version 6.0.1`。两套编号不矛盾：`5-r.5` 是 SDK 发行版号，`6.0.1` 是其中 Core 二进制版本。`app/libs/Live2DCubismCore.aar` 本身无版本串（Core 版本经 JNI 运行时读取），故此前查不到。SDK 5 特性 `mea.motionsync3.json` 与 `effect/` 包也在用，与 `5-r.x` 吻合。已回写 NOTICE。
-- [x] **7. `jlm_special.ttf`** — **已解决（2026-11-24）**：读字体 `name` 表确认它是 **JLaTeXMath 自制字体**——`Created by calixte,,, with FontForge 2.0`、`jlm_special : 14-8-2010`，且**不含任何第三方版权串**（对比真实 CM 字体 `jlm_cmr10` 仍写 `Copyright (C) 1997 American Mathematical Society`）。仅含 E/e/m 三个字形，用于数学重音。故适用 **JLaTeXMath 自身许可**（GPL-2.0-or-later + linking exception），无需单独的字体许可。同理解决 fork 自制的 `jlm_jlm*.ttf` 9 个；全部 30 个 `.ttf` 与上游六组清单的映射已写入 NOTICE。
-- [x] **8. Mea TTS 模型 / 语音训练数据** — **已记录（2026-11-24）**：6 个模型文件既不在仓库也不在 APK（实测包内无 `model.onnx`），经 `tts-model-v1.zip` 在 `tts-resource-pack` release 分发。模型为 **VITS**（**非 VITS2**，依 ONNX metadata `model_type=vits` / `version=1` / `comment=icefall` 且 flow 无 transformer 块更正，文档已同步）；属**梅尔二创衍生**，权利归 **Cabbage Soft**，不适用 MIT、不授权复用或再训练。已回写 NOTICE。
-
-**第 2 项复核要点**：`PrivacyPolicyContent.kt` §五（现为「六、联网搜索的数据流向」）写「…并且已开启「复用聊天 Key」开关（默认开启）时，才会复用其中的聊天 Key…」（对应 commit `a693aa9`）；「四、备份与导出」小节描述导出需主动发起、AES-256 密码加密、Key 默认不进包且勾选项名为「API Key」、不上传不保留副本、导入按类别整体覆盖。政策版本 **1.3**（2026-11-23 补充备份小节；2026-11-24 更正「工具结果是否存本机」的表述、新增「二、授权范围」章节，两处都保持 1.3、不额外触发重新确认）。**因政策刚改过，此项需重新逐句核对后才能标 ✅。**
+- **第 4 项**：例外条款原文是 "linking … to produce an executable"，而 Android 把所有类打进单个 `classes.dex`。上游项目与 Markwon 的 Apache-2.0 `ext-latex` 均按「覆盖」处理，本项目沿用该惯例；法务可再确认这一解释。
+- **第 5 项**：POM 元数据只能由友盟修正。若需严格宽松许可的产物，用 `-Pumeng.enabled=false` 构建。
 
 ### 1.3 构建与发布配置类
 
@@ -134,16 +126,16 @@
 
 | 检查项 | 步骤 | 预期 | 结果 |
 |---|---|---|---|
-| **首条回复前的等待态** | 发一条需要较长生成的消息，观察输入栏与列表中央 | 输入栏禁用并显示「Mea 正在思考...」；此时不出现底部状态条（实际文案「Mea 还在说…」，`ChatScreen.kt`；CHANGELOG 简写为「Mea 还在…」） | ⬜ |
-| **连续回复分段显示 + 逐条朗读** | 开启主界面语音，发一条会触发多轮工具调用的问题（如「先搜一下 X 再总结」并开启联网） | 工具调用期间助手片段逐条出现（不是等全部结束才一次性出），每条片段都朗读；最终回复接在片段之后 | ⬜ |
-| **状态条与「停止」** | 首条回复出现后观察底部状态条；点「停止」 | 状态条文案「Mea 还在说…」带「停止」；点击后当前轮次中止，**已显示的片段保留**，输入栏恢复可用，不出现错误卡片 | ⬜ |
-| **插队发送（首条回复后）** | 首条回复出现后，输入新消息立即发送 | 旧轮次被取消并开始新一轮；已展示片段留在列表，不重复不丢；旧轮按已完成部分落库（重启后仍在） | ⬜ |
-| **等待首条回复期间禁止插队** | 在「Mea 正在思考...」期间尝试输入 | 输入栏禁用，无法插队（此阶段插队无意义） | ⬜ |
-| **工具轮次上限（12 轮）** | 用容易让模型反复调工具的提示，直到工具结果里出现「x/12」 | 达到 12 轮后工具**不再执行**，模型收到「已达上限」提示并用文字收尾；轮次计数不写进历史；极端情况下才整轮失败（`ChatToolLoop.kt` 的 `MAX_TOOL_ROUNDS = 12` / `MAX_TOOL_GRACE_ROUNDS = 2`） | ⬜ |
-| **请求总超时（180 秒）** | 切极慢网络（或飞行模式中途切换）发起带工具轮次的请求，等待超过 180 秒 | 提示「请求超时（180 秒），请检查网络后重试」；该轮回滚（无残留 user / assistant 行）；不会无限转圈（`AppConfig.turnTimeoutMs = 180_000`） | ⬜ |
-| **工具消息落库后重启续聊** | 完成一轮含工具调用的对话 → 杀进程 → 重开 → 继续同一话题 | 历史里工具轮次完整（assistant `tool_calls` + `role=tool` 行不丢不乱序）；续聊时端点支持工具则回放结构化历史，不支持则过滤后纯文本发送（[`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) §4） | ⬜ |
-| **失败 / 取消回滚** | 用错误 API Key 发一条；再用正确 Key 发一条并在中途「停止」 | 失败轮整轮回滚、不写历史、错误卡片可重试；停止轮已展示片段保留并落库，不产生无 user 的孤儿 assistant 行（残留风险见 §4.3 G3） | ⬜ |
-| **重试整轮** | 对失败的 user 消息点重试 | 该 user 及其后（旧轮片段 / tool 残留）一起移除后重发，不出现重复气泡或重复历史行 | ⬜ |
+| **首条回复前的等待态** | 发一条需要较长生成的消息，观察输入栏与列表中央 | 输入栏禁用并显示「Mea 正在思考...」；此时不出现底部状态条（实际文案「Mea 还在说…」，`ChatScreen.kt`；CHANGELOG 简写为「Mea 还在…」） | ✅ |
+| **连续回复分段显示 + 逐条朗读** | 开启主界面语音，发一条会触发多轮工具调用的问题（如「先搜一下 X 再总结」并开启联网） | 工具调用期间助手片段逐条出现（不是等全部结束才一次性出），每条片段都朗读；最终回复接在片段之后 | ✅ |
+| **状态条与「停止」** | 首条回复出现后观察底部状态条；点「停止」 | 状态条文案「Mea 还在说…」带「停止」；点击后当前轮次中止，**已显示的片段保留**，输入栏恢复可用，不出现错误卡片 | ✅ |
+| **插队发送（首条回复后）** | 首条回复出现后，输入新消息立即发送 | 旧轮次被取消并开始新一轮；已展示片段留在列表，不重复不丢；旧轮按已完成部分落库（重启后仍在） | ✅ |
+| **等待首条回复期间禁止插队** | 在「Mea 正在思考...」期间尝试输入 | 输入栏禁用，无法插队（此阶段插队无意义） | ✅ |
+| **工具轮次上限（12 轮）** | 用容易让模型反复调工具的提示，直到工具结果里出现「x/12」 | 达到 12 轮后工具**不再执行**，模型收到「已达上限」提示并用文字收尾；轮次计数不写进历史；极端情况下才整轮失败（`ChatToolLoop.kt` 的 `MAX_TOOL_ROUNDS = 12` / `MAX_TOOL_GRACE_ROUNDS = 2`） | ✅ |
+| **请求总超时（180 秒）** | 切极慢网络（或飞行模式中途切换）发起带工具轮次的请求，等待超过 180 秒 | 提示「请求超时（180 秒），请检查网络后重试」；该轮回滚（无残留 user / assistant 行）；不会无限转圈（`AppConfig.turnTimeoutMs = 180_000`） | ✅ |
+| **工具消息落库后重启续聊** | 完成一轮含工具调用的对话 → 杀进程 → 重开 → 继续同一话题 | 历史里工具轮次完整（assistant `tool_calls` + `role=tool` 行不丢不乱序）；续聊时端点支持工具则回放结构化历史，不支持则过滤后纯文本发送（[`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) §4） | ✅ |
+| **失败 / 取消回滚** | 用错误 API Key 发一条；再用正确 Key 发一条并在中途「停止」 | 失败轮整轮回滚、不写历史、错误卡片可重试；停止轮已展示片段保留并落库，不产生无 user 的孤儿 assistant 行（残留风险见 §4.3 G3） | ✅ |
+| **重试整轮** | 对失败的 user 消息点重试 | 该 user 及其后（旧轮片段 / tool 残留）一起移除后重发，不出现重复气泡或重复历史行 | ✅ |
 
 ### 2.2 记忆
 
