@@ -159,7 +159,7 @@ fun PrivacyDialog(
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "• 同意／不同意只针对友盟统计 SDK：同意则开始采集去标识化的统计数据，不同意则完全不采集，App 其余功能不受影响\n• 你可以随时在设置中取消统计授权（取消后 App 将自动退出）\n• AI 对话与联网搜索由你配置的第三方服务提供，可随时在设置中关闭",
+                                text = "• 「同意」与「不同意」只针对友盟统计 SDK：同意则开始采集去标识化的统计数据，不同意则完全不采集，App 其余功能不受影响\n• 继续使用 App 即表示你同意隐私政策的其余章节——AI 对话与联网搜索本身需要向网络发起请求，这部分内容会发送给你配置的第三方服务，与是否同意统计 SDK 无关\n• 你可以随时在设置中取消统计授权（取消后 App 将自动退出）\n• AI 对话与联网搜索可随时在设置中关闭",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
