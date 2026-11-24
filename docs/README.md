@@ -23,6 +23,7 @@
 | 查 1.8.0 真机验收记录（已通过，归档） | [`archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](archive/checklists/2026-11-15-tts-device-test-1.8.0.md) |
 | 了解 1.8.0 语音迁移的全过程与最终结论（已归档） | [`archive/reports/2026-11-15-migration-report-1.8.0.md`](archive/reports/2026-11-15-migration-report-1.8.0.md) |
 | 改 / 删旧版本迁移代码 | [`legacy-compat.md`](legacy-compat.md)、[`legacy/README.md`](../app/src/main/java/com/meapet/mobile/legacy/README.md) |
+| 了解本项目的二创性质与语音/Live2D 资源使用边界 | [`FAN-WORK-NOTICE.md`](FAN-WORK-NOTICE.md)
 | 查 1.6.0 及更早的发布记录 | [`archive/changelog/`](archive/changelog/) |
 | 看 1.8.0 TTS 的实施计划（历史） | [`archive/plans/`](archive/plans/) |
 
@@ -34,6 +35,7 @@
 |---|---|---|
 | [`TODO.md`](TODO.md) | 代码审查遗留项、1.9 发布前验收与真机验证、架构和工程待办。**全项目唯一待办清单**，用户可见改动同步 `CHANGELOG.md` | 每次修复或发现一个问题 |
 | [`legacy-compat.md`](legacy-compat.md) | 版本迁移框架引用点、当前迁移步骤、升级行为与验证方式 | 新增 / 删除迁移 step 时 |
+| [`FAN-WORK-NOTICE.md`](FAN-WORK-NOTICE.md) | 二创性质声明：语音素材（GPT-SoVITS）与 TTS 模型（VITS，VITS-fast 框架微调）的权利归属、可做/不可做清单、fork 时须移除的资源 | 语音/TTS 模型来源或授权口径变化时 |
 
 ### 2.2 TTS（语音合成）文档组
 

@@ -111,16 +111,16 @@ Interface icons converted to `VectorDrawable`.
 - **License:** Apache License 2.0
 - **URL:** https://pictogrammers.com/library/mdi/
 - **License text:** https://www.apache.org/licenses/LICENSE-2.0
-- **Notes:** 34 icons covering the settings screens, main / overlay
+- **Notes:** 35 icons covering the settings screens, main / overlay
   menus and the input bars, converted from Iconify SVG via
   `tools/svg2vd.py` (see `tools/icons.txt`). Apache 2.0 does not require
   attribution, but credit is given on the in-app About page as good
   practice.
 - **Distribution:** bundled in the APK as `VectorDrawable` resources.
-- **Pending:** `ic_menu_compact.xml` (context-compaction menu, added in
-  commit `9a302ba`) uses the material icon style but is not listed in
-  `tools/icons.txt`; its exact icon name / source is not recorded — see
-  "Pending confirmation" below.
+- **Resolved 2026-11-24:** `ic_menu_compact.xml` (context-compaction menu,
+  commit `9a302ba`) was the one icon missing from `tools/icons.txt`; it
+  matched `mdi/arrow-collapse` byte-for-byte against the Iconify API and
+  has been registered there.
 
 ---
 
@@ -151,7 +151,16 @@ The on-device text-to-speech pipeline uses the **sherpa-onnx** Android AAR
 
 ## TTS Model Assets & G2P Data (NOT included)
 
-- **Mea VITS2 model weights** — `model.onnx` (~75 MB), together with
+> **Model vs. framework (corrected 2026-11-24).**
+> **The model is VITS. VITS-fast is the fine-tuning framework used to
+> produce it** ([Plachtaa/VITS-fast-fine-tuning](https://github.com/Plachtaa/VITS-fast-fine-tuning)).
+> It is **not** VITS2, as earlier revisions of this file and
+> `tools/tts/build_model.md` stated. Evidence read straight out of the
+> shipped weights: the ONNX metadata says `model_type=vits`, `version=1`,
+> `comment=icefall`, and the flow contains **no transformer blocks** —
+> the transformer-flow is VITS2's defining change and is absent here.
+
+- **Mea TTS model weights** — `model.onnx` (~75 MB), together with
   `lexicon.txt` / `tokens.txt` / `fsts/{phone,date,number}.fst`, is packaged as
   `tts-model-v1.zip` (6 files, ~84 MB) and distributed as a separate GitHub
   Release asset. It is **not** in this repository; copyright and licensing of the
@@ -528,17 +537,26 @@ The app plays 21 pre-recorded Japanese touch-reaction lines.
 
 - **Location in this repo:** `app/src/main/assets/voice/{upper,lower_left,lower_right}/*.ogg`
   (21 files, 48 kHz mono Opus).
-- **Version:** not applicable / not recorded.
-- **Author/Org:** not recorded in the repository.
-- **License:** **pending** — no source, author, or license information is
-  recorded in the repo, in the commit history, or in the files themselves
-  (the Ogg Opus comment header only contains
-  `Lavf62.12.100` / `encoder=Lavc62.28.100 libopus`). See "Pending
-  confirmation".
+- **Source:** generated with a **GPT-SoVITS** model fine-tuned on the
+  character's voice. These are **fan-made derivative works (二创)** of
+  the character 梅尔·艾什礼佩克 (Mare Ashley-Pecker).
+- **Author/Org:** the recordings were produced for this project; the
+  underlying character and its voice are the property of
+  **Cabbage Soft** (developers/publishers of
+  《霞流宝石心 -壮志凌云振寰宇-》 / ジュエリー・ハーツ・アカデミア
+  -We will wing wonder world-, 2022).
+- **License / rights:** **All rights to the character, its likeness and
+  its voice remain with Cabbage Soft.** These clips are **not** covered
+  by this repository's MIT license, and no license is granted to reuse,
+  redistribute or train on them. They are bundled only because this app
+  is a non-commercial fan work that displays the same character; anyone
+  forking the app should **remove them or obtain their own permission**
+  from the rights holder.
 - **Distribution:** bundled in the APK.
 - **Notes:** the WAV originals were re-encoded to Opus by
   `tools/encode-voice-assets.ps1` (ffmpeg/libopus is used at build time
-  only and is not shipped).
+  only and is not shipped). A distribution notice also ships as a
+  release asset — see "Fan-work statement" below.
 
 ---
 
@@ -602,17 +620,21 @@ assumed to be MIT/Apache-2.0; confirm with the respective rights holder
 before redistributing.
 
 > **2026-11-24 re-audit** (`dist/MeaPet-v1.9.0-v8a.APK`, unpacked with
-> `aapt list`): items 2 (the `.can3` part) and 3 are now **resolved**; the
-> remaining six are confirmed as outstanding, with the evidence below
-> narrowed down so the rights holder only has to make the decision.
+> `aapt list`): items **1, 2, 3, 6 and 8 are resolved** (provenance
+> recorded by the maintainer / orphan file removed / icon registered /
+> SDK version recorded). The remaining three — 4 (JLaTeXMath GPL
+> question), 5 (Umeng license metadata) and 7 (`jlm_special.ttf`) —
+> still need a maintainer or legal decision.
 
-1. **Touch voice assets** (`app/src/main/assets/voice/**`) — **21 files,
-   225 KB total, all bundled in the APK** under `voice/{upper,lower_left,
-   lower_right}/`. Verified the codec is **Opus**: every file carries the
-   `OpusHead` magic at offset 28 (the `.ogg` extension is only the
-   container). No source/author/license recorded in the repo; not
-   traceable to a published release. **Decision needed:** confirm with the
-   author, replace with self-produced/CC0 voice clips, or drop them.
+1. ~~**Touch voice assets**~~ **Resolved 2026-11-24** — 21 files
+   (225 KB) bundled in the APK; codec verified as **Opus** (`OpusHead`
+   magic at offset 28, `.ogg` is only the container). Provenance is now
+   recorded: generated with a **GPT-SoVITS** model fine-tuned on the
+   character's voice, as **fan-made derivative works (二创)**. All rights
+   to the character and voice belong to **Cabbage Soft**
+   (《霞流宝石心 -壮志凌云振寰宇-》). **The clips are therefore not MIT
+   and are not licensed for reuse** — see the "Touch Voice Assets"
+   section above and the release-asset fan-work statement.
 2. **Mea Live2D model assets** (`app/src/main/assets/live2d/mea_live2d/**`)
    — 10 files bundled in the APK (moc3/model3/physics/motionsync/cdi3,
    2 motions, 2 textures). Community work from Bilibili with no explicit
@@ -656,10 +678,43 @@ before redistributing.
    `OFL.txt`), and `OFL.txt` explicitly names only the AMS fonts
    (`eufb10`/`eufm10`/`msam10`/`msbm10`). `jlm_special.ttf` (2.2 KB,
    JLaTeXMath's own) falls under none of them.
-8. **Mea VITS2 model / voice training data** — the model package
-   (`tts-model-v1.zip`) is distributed outside this repository; confirmed
+8. ~~**Mea TTS model / voice training data**~~ **Resolved 2026-11-24** —
    the 6 model files (`model.onnx`, `lexicon.txt`, `tokens.txt`,
-   `fsts/*.fst`) are **neither in the repo nor in the APK** (only the two
-   derived G2P assets ship — see "TTS Model Assets"). Rights over the
-   model and the voice data rest with the original author(s) and are not
-   documented here.
+   `fsts/*.fst`) are neither in the repo nor in the APK (only the two
+   derived G2P assets ship — see "TTS Model Assets"); they are distributed
+   as `tts-model-v1.zip` on the `tts-resource-pack` release. Provenance is
+   now recorded: a **VITS** model fine-tuned with the **VITS-fast**
+   framework on the character's voice — a
+   **fan-made derivative work (二创)**. All rights to the character and
+   voice belong to **Cabbage Soft**, so the weights are **not MIT** and no
+   license is granted to reuse or retrain them. The architecture is
+   **VITS** (not VITS2) — see the correction note in "TTS Model Assets".
+
+---
+
+## Fan-work statement (二创声明)
+
+MeaPet is an **unofficial fan work** based on
+《霞流宝石心 -壮志凌云振寰宇-》 (ジュエリー・ハーツ・アカデミア
+-We will wing wonder world-, Cabbage Soft, 2022), produced for
+non-commercial personal use. It contains **no game assets** from the
+original work.
+
+**All rights to the character 梅尔·艾什礼佩克 (Mare Ashley-Pecker), its
+likeness and its voice belong to Cabbage Soft.** Consequently the
+following shipped/generated assets are **not** covered by this
+repository's MIT license, and **no license is granted** to reuse,
+redistribute or train on them:
+
+| Asset | Where it lives | Produced with |
+|---|---|---|
+| 21 touch-voice Opus clips | `app/src/main/assets/voice/**` (in the APK) | GPT-SoVITS fine-tune |
+| TTS model weights | `tts-model-v1.zip` on the `tts-resource-pack` release (not in the repo or APK) | VITS model, VITS-fast framework |
+| Live2D model assets | `app/src/main/assets/live2d/mea_live2d/**` (in the APK) | community work (Bilibili) |
+
+**Forks must remove these assets** and supply their own legally-sourced
+alternatives; the source code may still be used under MIT.
+
+The full statement, including the permitted / prohibited uses and the
+takedown contact, is published as a release asset and kept in the repo at
+[`docs/FAN-WORK-NOTICE.md`](docs/FAN-WORK-NOTICE.md).
