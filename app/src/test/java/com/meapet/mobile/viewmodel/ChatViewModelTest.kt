@@ -16,6 +16,7 @@ import com.meapet.mobile.memory.MemoryType
 import com.meapet.mobile.settings.SettingsManager
 import com.meapet.mobile.settings.ApiConnection
 import com.meapet.mobile.tts.TtsManager
+import com.meapet.mobile.update.AppRelease
 import com.meapet.mobile.update.UpdateCheckResult
 import com.meapet.mobile.update.UpdateChecker
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +29,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -273,6 +275,90 @@ class ChatViewModelTest {
         val dialog = vm.state.value.memoryDialog
         assertNotNull(dialog)
         assertEquals(1, dialog?.memories?.size)
+    }
+
+    /**
+     * 清除对话只重置对话相关字段，不得连带清空更新提示与记忆弹窗（1.7.2 修过的回归）。
+     *
+     * 构造「启动检测到新版本 + 记忆弹窗打开」两个同时存在的假状态，再触发清除对话。
+     */
+    @Test
+    fun `清除对话只重置对话状态而不误关更新提示与记忆弹窗`() = runTest(dispatcher.scheduler) {
+        whenever(settingsManager.isAutoUpdateCheckEnabled()).thenReturn(true)
+        wheneverBlocking { updateChecker.check() }.thenReturn(
+            UpdateCheckResult.UpdateAvailable(
+                release = AppRelease(
+                    tagName = "v1.10.0",
+                    versionName = "1.10.0",
+                    htmlUrl = "https://example.com/release"
+                ),
+                currentVersion = "1.9.0"
+            )
+        )
+        whenever(chatService.getHistory())
+            .thenReturn(listOf(ChatMessage(role = ChatRole.user, content = "旧消息")))
+        wheneverBlocking { memoryManager.getAllMemories() }.thenReturn(listOf(mock<MemoryItem>()))
+
+        val vm = ChatViewModel(application)
+        vm.advance()
+        assertNotNull("启动检测应产生更新提示", vm.state.value.updateNotice)
+
+        vm.onEvent(ChatEvent.ShowMemories)
+        vm.advance()
+        assertNotNull("记忆弹窗应已打开", vm.state.value.memoryDialog)
+
+        vm.onEvent(ChatEvent.ClearConversation)
+        vm.advance()
+
+        val state = vm.state.value
+        assertTrue("对话应被清空", state.messages.isEmpty())
+        verify(chatService).clearHistory()
+        assertNotNull("更新提示被清除对话误清", state.updateNotice)
+        assertNotNull("记忆弹窗被清除对话误关", state.memoryDialog)
+    }
+
+    /**
+     * 压缩提醒的弹出 / 忽略 / 压缩完成都只动压缩相关字段，不得连带清空更新提示与记忆弹窗。
+     */
+    @Test
+    fun `压缩提醒与压缩结果不影响更新提示与记忆弹窗`() = runTest(dispatcher.scheduler) {
+        whenever(settingsManager.isAutoUpdateCheckEnabled()).thenReturn(true)
+        wheneverBlocking { updateChecker.check() }.thenReturn(
+            UpdateCheckResult.UpdateAvailable(
+                release = AppRelease("v1.10.0", "1.10.0", "https://example.com/release"),
+                currentVersion = "1.9.0"
+            )
+        )
+        whenever(chatService.getHistory())
+            .thenReturn(listOf(ChatMessage(role = ChatRole.user, content = "旧消息")))
+        // 越过 65536 的提醒阈值：冷启动刷新时即判定「该提醒压缩」
+        wheneverBlocking { chatService.refreshContextTokens() }.thenReturn(70_000)
+        wheneverBlocking { chatService.compaction() }.thenReturn(CompactionState())
+        wheneverBlocking { chatService.compactContext() }.thenReturn(Result.success(3))
+
+        val vm = ChatViewModel(application)
+        vm.advance()
+        assertNotNull(vm.state.value.updateNotice)
+        assertTrue("越过阈值应给出压缩提醒", vm.state.value.compactHint)
+        assertTrue("越过阈值应显示压缩入口", vm.state.value.canCompactContext)
+
+        vm.onEvent(ChatEvent.ShowMemories)
+        vm.advance()
+        assertNotNull(vm.state.value.memoryDialog)
+
+        // 忽略提醒
+        vm.onEvent(ChatEvent.DismissCompactHint)
+        vm.advance()
+        assertFalse("提醒应被忽略", vm.state.value.compactHint)
+        assertNotNull("更新提示被压缩提醒误清", vm.state.value.updateNotice)
+        assertNotNull("记忆弹窗被压缩提醒误关", vm.state.value.memoryDialog)
+
+        // 手动压缩完成
+        vm.onEvent(ChatEvent.CompactContext)
+        vm.advance()
+        assertNotNull("压缩完成应有回执", vm.state.value.compactionNotice)
+        assertNotNull("更新提示被压缩结果误清", vm.state.value.updateNotice)
+        assertNotNull("记忆弹窗被压缩结果误关", vm.state.value.memoryDialog)
     }
 
     /**
