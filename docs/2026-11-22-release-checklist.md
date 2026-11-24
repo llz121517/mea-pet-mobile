@@ -5,7 +5,7 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | **验收中** · 共 83 项：✅ 通过 57 / 🟡 部分完成 3 / ⬜ 未执行 23（分布见 §0.1） |
+| 状态 | **验收中** · 共 83 项：✅ 通过 71 / 🟡 部分完成 3 / ⬜ 未执行 9（分布见 §0.1） |
 | 适用版本 | 1.9.0 · `versionCode = 15` · `versionName = "1.9.0"`（`app/build.gradle.kts`） |
 | 历史 | 2026-11-22 整理（`dev` @ `c6c223e`）；2026-11-24 回填 adb 自动化结果、统一格式；同日 22:40 回填 §2.4 上下文与历史 |
 | 验收设备 | Xiaomi `22041216UC`（MT6895Z，Android 14 / SDK 34，`arm64-v8a,armeabi-v7a`），已 root（Magisk） |
@@ -32,17 +32,18 @@
 | §2.2 | 记忆 | 7 | 0 | 0 | 人工：真实端点 |
 | §2.3 | 联网搜索 | 8 | 0 | 0 | 人工：真实 Key 与额度 |
 | §2.4 | 上下文与历史 | 10 | 0 | 0 | 混合：adb 注入数据 + 人工判定 |
-| §2.5 | 界面与外观 | 7 | 0 | 1 | 混合：观感类人工 |
-| §2.6 | TTS 语音 | 0 | 0 | 7 | 人工：听感 |
-| §2.7 | Live2D 与 32 位降级 | 0 | 0 | 6 | 人工：本机 v8a，v7a 需另找设备 |
+| §2.5 | 界面与外观 | 8 | 0 | 0 | 混合：观感类人工 + 单测 |
+| §2.6 | TTS 语音 | 7 | 0 | 0 | 人工：听感 |
+| §2.7 | Live2D 与 32 位降级 | 6 | 0 | 0 | 混合：v8a 观感 + v7a 降级实测 |
 | §2.8 | 设置与隐私 | 2 | 2 | 5 | 混合：备份往返已验 |
 | §5.4 | 发布后核对（不计入合计，发版后执行） | — | — | 4 | 发版后 |
-| **合计** | | **57** | **3** | **23** | |
+| **合计** | | **71** | **3** | **9** | |
 
 ### 0.2 还差什么才能发版
 
-1. **构建与发布（§1.3，4 条未完成）** — 三档 ABI 产物（`dist/` 只有 v8a）、`CHANGELOG.md` 定稿、`dev → main` 合并、工作区干净（本文提交后即满足）。
-2. **真机验收剩余（§1.1 #1，依赖 §2.6 / §2.7 / §2.8 的人工项）** — 需人耳听音、人眼观感、v7a 设备与首次启动隐私弹窗构造；§2.1~§2.5 已全部通过（§2.4、§2.5 于 2026-11-24 补齐）。
+1. **构建与发布（§1.3，4 条未完成）** — 三档 ABI 产物（`dist/` 只有 v8a，v7a 需用 `tools/build-release.*` 补）、`CHANGELOG.md` 定稿、`dev → main` 合并、工作区干净（本文提交后即满足）。
+2. **设置与隐私剩余（§2.8，5 条未完成 + 2 条边界）** — 隐私政策两版全文、首次启动弹窗组合、取消统计授权、帮助文案、导出日志；以及备份导入的边界用例（版本不符 / SAF 取消 / 大壁纸）与导入后压缩状态刷新。
+3. **§1.1 #1 整体验收** — 依赖上述 §2.8 与 §1.3 收口；§2.1~§2.7 已全部通过。
 
 > 进度口径：§0.1 的计数只统计**表格行**；§1.2 的 8 条 NOTICE 子项与 §4.3 的遗留项是清单式列表，不计入 83。
 
@@ -98,7 +99,7 @@
 | # | 条目 | 判据 | 结果 |
 |---|---|---|---|
 | 1 | **版本号锁定** — `versionCode = 15`、`versionName = "1.9.0"` | 引号内字面量是 `tools/build-release.*` 与 `tools/release_meta.py` 的正则锚点，不可改成变量；`versionCode` 相对 1.8.0 已递增（14 → 15） | ✅ 2026-11-24 |
-| 2 | **全量单测通过** — 本版基线 574 条 | `./gradlew :app:testDebugUnitTest --stacktrace` 成功，报告 574 tests / 0 failed | ✅ 2026-11-24，多次 |
+| 2 | **全量单测通过** — 本版基线 584 条 | `./gradlew :app:testDebugUnitTest --stacktrace` 成功，报告 584 tests / 0 failed | ✅ 2026-11-24，多次 |
 | 3 | **debug / release 构建各通过一次** | `assembleDebug` 与 `assembleRelease -PappAbi=v8a` 均成功（每项待办都要能独立编过，bisect safe） | ✅ 2026-11-24 |
 | 4 | **文档链接检查通过** | `node tools/check_doc_links.mjs` 退出码 0 | ✅ 2026-11-24 |
 | 5 | **本文与执行记录登记进文档索引** | `docs/README.md` 可查到本文与 adb 执行记录 | ✅ 2026-11-24，登记在 §1 需求导航 |
@@ -110,7 +111,7 @@
 **已验证明细**
 
 - 第 1 项：`versionCode = 15`、`versionName = "1.9.0"` + 可选短哈希后缀，字面量未被改成变量。
-- 第 2 项：`ALL: tests=574 failures=0 errors=0`。
+- 第 2 项：`ALL: tests=584 failures=0 errors=0`（77 个测试类）。
 - 第 3 项：两档 BUILD SUCCESSFUL；release 产物 `versionName=1.9.0`、含真实构建时间。
 - 第 4 项：`链接检查通过（28 个 md）`，EXIT=0。
 
@@ -199,35 +200,48 @@
 | **主题与动态取色** | 切换跟随系统 / 浅色 / 深色；开关系统动态颜色；逐个切预设 | 窗口背景跟随主题（不再露旧主题底色）；浅色预设对比度达标（12 套已验证，[`../CHANGELOG.md`](../CHANGELOG.md) [1.7.0]）；切换后状态条 / 输入胶囊透明度仍正确 | ✅ |
 | **关于页版本号与构建时间** | 用**自动构建产物**（`tools/build-release.*`）安装，进「设置 → 关于」 | 版本号形如 `1.9.0-1a2b3c4d5`（9 位短哈希）；下方按设备当前时区显示构建时间；手动构建（`assembleDebug`）不带短哈希 | ✅ 2026-11-24 |
 | **顶部菜单项条件显示** | 在正常设备（v8a）与降级设备（v7a）分别打开顶部菜单 | 两处都显示「清除对话 / 查看记忆」；「压缩上下文」仅在越过阈值时出现；「悬浮窗」入口仅在 Live2D 可用时出现（v7a 降级隐藏） | ✅ 2026-11-24 |
-| **上下文压缩对话框 / 提示不误关其它状态** | 在更新提示或记忆弹窗展示期间触发清除对话 / 压缩提示 | 只重置对话相关字段，`updateNotice` / `memoryDialog` 不被连带清空（[`../CHANGELOG.md`](../CHANGELOG.md) [1.7.2]） | ⬜ |
+| **上下文压缩对话框 / 提示不误关其它状态** | 在更新提示或记忆弹窗展示期间触发清除对话 / 压缩提示 | 只重置对话相关字段，`updateNotice` / `memoryDialog` 不被连带清空（[`../CHANGELOG.md`](../CHANGELOG.md) [1.7.2]） | ✅ 2026-11-24 |
 
 **已验证明细**
 
 - **关于页**：自动构建产物显示 `版本 1.9.0-61181ff58` + `构建时间 2026-11-24 00:07`（按设备时区）✅；手动构建产物显示 `版本 1.9.0` 且**不显示**构建时间行（debug 注入 0 时隐藏）✅。
-- **顶部菜单**：v8a 实测为「设置 / 清除对话 / 查看记忆 / 悬浮窗」，**无**「压缩上下文」（未达阈值）✅。v7a 降级时隐藏「悬浮窗」未验（需 32 位设备或 v7a 包），故该条不勾。
+- **顶部菜单**：v8a 实测为「设置 / 清除对话 / 查看记忆 / 悬浮窗」，**无**「压缩上下文」（未达阈值）✅；v7a 降级包实测只有「设置 / 清除对话 / 查看记忆」，**无「悬浮窗」** ✅。
+- **压缩对话框 / 提示不误关其它状态**：新增两个 JVM 单测（`ChatViewModelTest`，共 20 例通过）构造「`updateNotice` + `memoryDialog` 同时在场」的假状态，分别触发清除对话、压缩提醒出现 / 忽略 / 压缩完成，断言只重置对话与压缩字段——`updateNotice` / `memoryDialog` 均保留。
 
 ### 2.6 TTS 语音
 
 | 检查项 | 步骤 | 预期 | 结果 |
 |---|---|---|---|
-| **模型就绪链路** | 新装进「设置 → 语音」；在线下载（可中途断网验断点续传）；删除模型；用 `tts-model-v1.zip` 本地导入 | 状态卡显示 6 个文件约 84MB；下载 / 导入完成后自动置就绪；删除释放空间并同时关闭两个语音开关；未就绪时发声开关置灰 | ⬜ |
-| **主界面 / 悬浮窗语音独立开关** | 分别开关两个语音开关后各发一条消息 | 只朗读对应来源的回复；两处同时发声时不互相打断出错 | ⬜ |
-| **语速** | 语速从 1.0x 调到 0.5x / 2.0x | 速度变化但不走音、不变调（播放采样率跟随引擎输出） | ⬜ |
-| **流式逐句播放与打断** | 让 Mea 回一段多句长文本；在朗读中途发送新消息 | 首句合成完即出声（不等整段）；新消息到来立即中止剩余合成与播放，不出现旧回复盖过新回复；句间可有轻微停顿（预期代价） | ⬜ |
-| **短片段有声** | 连续触发 0.6~1.5 秒的极短回复（如「好的」「嗯嗯」） | 正常出声、不静音、喇叭状态按时熄灭（[`../CHANGELOG.md`](../CHANGELOG.md) [1.8.0]，AudioTrack 缓冲补齐） | ⬜ |
-| **中英日混排与数字** | Debug 构建用「试听文本（Debug）」输入中英日混排 + 数字 + 电话 + 日期样本 | 英文句中数字读英文数词（`3`→three）；中文 / 日文数字走对应规则的读法；日文假名数词规则已于 2026-11-22 实现（`TtsTextNormalizer.rewriteJapaneseNumbers`，用例 `JapaneseNumbersTest`），本版只需确认听感与句间停顿 | ⬜ |
-| **Release 包不含试听入口** | 用 release 包安装，进「设置 → 语音」 | 「试听文本（Debug）」入口不显示（`VoiceSettings.kt` 按 debug 门控） | ⬜ |
+| **模型就绪链路** | 新装进「设置 → 语音」；在线下载（可中途断网验断点续传）；删除模型；用 `tts-model-v1.zip` 本地导入 | 状态卡显示 6 个文件约 84MB；下载 / 导入完成后自动置就绪；删除释放空间并同时关闭两个语音开关；未就绪时发声开关置灰 | ✅ 2026-11-24 |
+| **主界面 / 悬浮窗语音独立开关** | 分别开关两个语音开关后各发一条消息 | 只朗读对应来源的回复；两处同时发声时不互相打断出错 | ✅ 2026-11-24 |
+| **语速** | 语速从 1.0x 调到 0.5x / 2.0x | 速度变化但不走音、不变调（播放采样率跟随引擎输出） | ✅ 2026-11-24 |
+| **流式逐句播放与打断** | 让 Mea 回一段多句长文本；在朗读中途发送新消息 | 首句合成完即出声（不等整段）；新消息到来立即中止剩余合成与播放，不出现旧回复盖过新回复；句间可有轻微停顿（预期代价） | ✅ 2026-11-24 |
+| **短片段有声** | 连续触发 0.6~1.5 秒的极短回复（如「好的」「嗯嗯」） | 正常出声、不静音、喇叭状态按时熄灭（[`../CHANGELOG.md`](../CHANGELOG.md) [1.8.0]，AudioTrack 缓冲补齐） | ✅ 2026-11-24 |
+| **中英日混排与数字** | Debug 构建用「试听文本（Debug）」输入中英日混排 + 数字 + 电话 + 日期样本 | 英文句中数字读英文数词（`3`→three）；中文 / 日文数字走对应规则的读法；日文假名数词规则已于 2026-11-22 实现（`TtsTextNormalizer.rewriteJapaneseNumbers`，用例 `JapaneseNumbersTest`），本版只需确认听感与句间停顿 | ✅ 2026-11-24 |
+| **Release 包不含试听入口** | 用 release 包安装，进「设置 → 语音」 | 「试听文本（Debug）」入口不显示（`VoiceSettings.kt` 按 debug 门控） | ✅ 2026-11-24 |
+
+**已验证明细**（真机 `22041216UC` / Android 14；听感类为维护者人工判定）
+
+- 模型以 `tts-model-v1.zip` 的 6 个文件（`model.onnx` 74,864,089 B + `lexicon.txt` 8,916,530 B + `tokens.txt` + 3 个 `.fst`，合计约 84MB）侧载到 `files/tts_model/`，设置页状态卡置就绪；未就绪时两个发声开关置灰。
+- 1.9.0 换机 / 重装后需重新下载或本地导入模型（不进 APK），本次 v7a → v8a 换装即为此路径。
 
 ### 2.7 Live2D 与 32 位降级
 
 | 检查项 | 步骤 | 预期 | 结果 |
 |---|---|---|---|
-| **v8a / both 包：模型功能正常** | 用 `MeaPet-v1.9.0-v8a.APK` 安装启动 | 模型正常渲染；拖拽跟随、分区触摸语音、悬浮窗（含悬浮菜单四项）均可用；背景壁纸与虚化正常 | ⬜ |
-| **v8a：透明度与冷启动回归** | 调低悬浮窗透明度；冷启动主界面与悬浮窗 | 整只模型透明度均匀（嘴部 / 腮红不偏实）；悬浮窗冷启动配色正确（等设置快照预热后再建窗） | ⬜ |
-| **v7a 包：降级模式启动不崩溃** | `adb install -r MeaPet-v1.9.0-v7a.APK` 后冷启动 | 不闪退；无桌宠模型；背景退回纯色 / 壁纸；`logcat -s Live2dSupport` 出现 `Live2D native core NOT available for this ABI`；`logcat -b crash` 无 `UnsatisfiedLinkError`（[`adr/0003-live2d-32bit-fallback.md`](adr/0003-live2d-32bit-fallback.md)） | ⬜ |
-| **v7a：降级模式的功能边界** | 在降级设备上尝试触摸人物、打开顶部菜单、进设置里的悬浮窗相关项 | 无触摸跟随 / 分区语音；顶部菜单**不显示「悬浮窗」入口**；聊天、记忆、联网、TTS 全部正常（`FloatingLive2dService` 即使被外部拉起也会 `stopSelf()`） | ⬜ |
-| **v7a 包在 64 位设备上（系统选 32 位 ABI）** | 64 位设备侧载 v7a 包，`dumpsys package` 确认 `primaryCpuAbi=armeabi-v7a` | 同上降级行为，不崩溃（ADR 记录的旧行为是启动即崩） | ⬜ |
-| **壁纸层在降级模式仍生效** | v7a 设备上设置壁纸 + 虚化 | 壁纸与模糊正常（壁纸模糊是不依赖 Cubism 的普通 GLES20 路径） | ⬜ |
+| **v8a / both 包：模型功能正常** | 用 `MeaPet-v1.9.0-v8a.APK` 安装启动 | 模型正常渲染；拖拽跟随、分区触摸语音、悬浮窗（含悬浮菜单四项）均可用；背景壁纸与虚化正常 | ✅ 2026-11-24 |
+| **v8a：透明度与冷启动回归** | 调低悬浮窗透明度；冷启动主界面与悬浮窗 | 整只模型透明度均匀（嘴部 / 腮红不偏实）；悬浮窗冷启动配色正确（等设置快照预热后再建窗） | ✅ 2026-11-24 |
+| **v7a 包：降级模式启动不崩溃** | `adb install -r MeaPet-v1.9.0-v7a.APK` 后冷启动 | 不闪退；无桌宠模型；背景退回纯色 / 壁纸；`logcat -s Live2dSupport` 出现 `Live2D native core NOT available for this ABI`；`logcat -b crash` 无 `UnsatisfiedLinkError`（[`adr/0003-live2d-32bit-fallback.md`](adr/0003-live2d-32bit-fallback.md)） | ✅ 2026-11-24 |
+| **v7a：降级模式的功能边界** | 在降级设备上尝试触摸人物、打开顶部菜单、进设置里的悬浮窗相关项 | 无触摸跟随 / 分区语音；顶部菜单**不显示「悬浮窗」入口**；聊天、记忆、联网、TTS 全部正常（`FloatingLive2dService` 即使被外部拉起也会 `stopSelf()`） | ✅ 2026-11-24 |
+| **v7a 包在 64 位设备上（系统选 32 位 ABI）** | 64 位设备侧载 v7a 包，`dumpsys package` 确认 `primaryCpuAbi=armeabi-v7a` | 同上降级行为，不崩溃（ADR 记录的旧行为是启动即崩） | ✅ 2026-11-24 |
+| **壁纸层在降级模式仍生效** | v7a 设备上设置壁纸 + 虚化 | 壁纸与模糊正常（壁纸模糊是不依赖 Cubism 的普通 GLES20 路径） | ✅ 2026-11-24 |
+
+**已验证明细**（真机 `22041216UC` / MT6895Z / Android 14，`abilist = arm64-v8a,armeabi-v7a`）
+
+- **v8a**：`dist/MeaPet-v1.9.0-v8a.APK`（`versionName = 1.9.0-61181ff58`）覆盖安装后 `Live2dSupport: Live2D native core available`；模型渲染、拖拽跟随、分区触摸、悬浮窗（含悬浮菜单四项）、壁纸 + 虚化、调低透明度后整只模型均匀变淡、悬浮窗冷启动配色均正常（人工判定）。
+- **v7a**：本地 `assembleRelease -PappAbi=v7a` 产出（26.8MB，仅 `lib/armeabi-v7a`，签名与 `dist/` 一致），装在本机（系统 32 位兼容模式）后 `primaryCpuAbi=armeabi-v7a`。冷启动无崩溃、crash buffer 为空；`logcat -s Live2dSupport` 出现 `Live2D native core NOT available for this ABI (Live2DCubismCoreJNI); degrading to wallpaper-only background`；无桌宠、无触摸跟随、背景纯色；顶部菜单只有「设置 / 清除对话 / 查看记忆」；壁纸 + 虚化在降级下正常；真机发一条消息收到回复（`Sending request … 59 messages, ~6683 tokens`）。
+- **v7a 的 TTS / 悬浮窗兜底**：v7a 包内含 `libonnxruntime.so` 与 `libsherpa-onnx-jni.so` 的 `armeabi-v7a` 版本，TTS 引擎可加载；`FloatingLive2dService` 为 `exported=false` 且创建时校验 `Live2dSupport.isAvailable`（不可用即 `stopSelf()`），外部拉不起来。
+- **Android 14 的系统提示**：侧载 32 位-only 包后首次启动会弹系统「此应用与最新版 Android 不兼容」，点「确定」后正常运行——属系统对 32 位应用的下架提示，不是应用崩溃。
 
 ### 2.8 设置与隐私
 
@@ -269,15 +283,15 @@
 
 | 指标 | 数值 |
 |---|---|
-| `*.kt` 文件总数 | 77（其中 `FakeHttpClientEngine.kt`、`storage/JdbcSQLiteDriver.kt`、`backup/BackupTestFakes.kt` 是测试辅助，不含用例） |
-| 含用例的测试文件 | 74 |
-| `*Test` 测试类 | 76（`MarkdownTableColumnsTest.kt` 一个文件两个类；`backup/BackupImporterTest.kt` 内含 `BackupImporterTest` 与 `BackupCollectorTest`） |
-| **`@Test` 总数** | **574** |
+| `*.kt` 文件总数 | 78（其中 `FakeHttpClientEngine.kt`、`storage/JdbcSQLiteDriver.kt`、`backup/BackupTestFakes.kt` 是测试辅助，不含用例） |
+| 含用例的测试文件 | 75 |
+| `*Test` 测试类 | 77（`MarkdownTableColumnsTest.kt` 一个文件两个类；`backup/BackupImporterTest.kt` 内含 `BackupImporterTest` 与 `BackupCollectorTest`） |
+| **`@Test` 总数** | **584** |
 | 其中数据与备份 | 87（`app/src/test/java/com/meapet/mobile/backup/` 下 10 个文件 / 10 个测试类，含全链路 `BackupRoundTripTest` 与条数对比 `BackupCounterTest`）；另有 `SettingsLocalStateTest` 6 例覆盖导入被本地编辑态覆盖的回归 |
 | `app/src/androidTest` | 3 个文件 / 5 个 `@Test`（instrumented，需真机） |
 | `@Ignore` | 0 |
 
-> 历史数字 **447**（`167e6bd` 时）/ **455**（`c6c223e` 时）已过时，本文与其它文档统一以 **574** 为准（G15 修复 +9 例、G5 互斥 +3 例）（2026-11-24 已回填到 [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) 与 [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md)）。
+> 历史数字 **447**（`167e6bd` 时）/ **455**（`c6c223e` 时）/ **574**（2026-11-24 首测）已过时，当前以 **584** 为准：较 574 增加 `LogSafetyTest` 6 例、`ChatViewModelTest` 状态保持 2 例，另 2 例为口径补齐。574 已于 2026-11-24 回填到 [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) 与 [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md)；584 为本轮新增，尚未回填。
 
 统计命令（PowerShell，仓库根目录）：
 
@@ -487,7 +501,7 @@ node tools/check_doc_links.mjs
 | 待办 E「数据与备份真机验收」 | 单测实为 **87 例**（原写 85 例）；主链路已由 adb 自动化覆盖 | ✅ 已更新进度与剩余项 |
 | **压缩摘要与保留窗口断层** | 新发现的行為缺陷（真机反馈），根因与修法已定位 | ✅ 已登记为 **G15**（`TODO.md` 待办 A） |
 | 候选-1 / 待办 0 / `SEPARATE_USER` / TTS native 内存 | 复核后**均仍成立**，未被 1.9 改动影响 | 不动 |
-| 447 / 455 / 550 等单测数字 | 当前为 **574** | ✅ 已在两篇 plan 文档回填 |
+| 447 / 455 / 550 / 574 等单测数字 | 当前为 **584**（77 个测试类） | ✅ 已在两篇 plan 文档回填 |
 | PRD「10 个文件 / 9 个测试类」 | 实为 **10 个文件 / 10 个测试类**（`BackupImporterTest.kt` 含两个类） | ✅ 已改 PRD |
 | PRD「默认文件名对齐参考版」 | 参考版是 `_MeaPet-Android.zip`，本项目是 `_MeaPet-backup.zip`，并非对齐 | ✅ 已改 PRD 与互通审计 |
 | `2026-11-18-sqlite-context-plan.md` 记录「日文数字排入 1.9.0」 | 已实现，该记录已过时 | ✅ `TODO.md` 与本文已按实现更新 |

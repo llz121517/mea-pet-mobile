@@ -211,3 +211,42 @@ adb logcat -d | Select-String "Compacting|Auto compaction|Manual compaction|Hard
 # 压缩状态（摘要 + 覆盖点）
 sqlite3 tmp/x.db "select json_extract(value,'$.coveredToMessageId'), json_extract(value,'$.coveredCount') from meta where key='context_compaction'"
 ```
+
+---
+
+## 9. 第三轮：§2.5 / §2.6 / §2.7（2026-11-24 22:40~23:00）
+
+**目标**：用同一台 64 位设备把 v7a 降级路径跑出来，并回到 v8a 验模型功能。
+
+**v7a 包怎么来的**：`dist/` 只有 v8a，本地构建 `.\gradlew.bat :app:assembleRelease -PappAbi=v7a`，产物 `app/build/outputs/apk/release/app-release.apk`（26.8MB，仅 `lib/armeabi-v7a`，`versionName=1.9.0`，签名与 `dist/` 同证书）。没有跑 `tools/build-release.*`，所以文件名不带 `MeaPet-v1.9.0-v7a.APK`、也没有短哈希后缀。
+
+**换装步骤**（release 与 debug 签名不同，必须先卸载；卸载会清数据）：
+
+1. 备份 `databases/meapet.db`、`files/datastore/meapet_preferences.preferences_pb` 到电脑；
+2. `pm uninstall com.meapet.mobile` → `su -c "pm install -r -d /data/local/tmp/v7a.apk"`；
+3. 启动一次让系统建私有目录（此时 uid 会变，本机为 `u0_a400`），`force-stop`；
+4. push 回 DB / prefs，`chown -R u0_a400:u0_a400`、`chmod 600`、`restorecon -R`；
+5. 验证完 v7a 后用 `pm install -r -d dist/MeaPet-v1.9.0-v8a.APK` **覆盖安装**（同签名，数据保留）。
+
+**观察到的事实**
+
+- 32 位包在 Android 14 首次启动会弹系统「此应用与最新版 Android 不兼容」，点「确定」继续，不是崩溃；`logcat -b crash` 为空。
+- `Live2dSupport: Live2D native core NOT available for this ABI (Live2DCubismCoreJNI); degrading to wallpaper-only background`；`primaryCpuAbi=armeabi-v7a`。
+- v7a 顶部菜单只有「设置 / 清除对话 / 查看记忆」；壁纸 + 虚化正常；发消息能收到回复（`Sending request … 59 messages, ~6683 tokens`）。
+- v7a 包内仍有 `lib/armeabi-v7a/libonnxruntime.so` 与 `libsherpa-onnx-jni.so`，TTS 引擎可加载（模型未随包分发）。
+- 换回 v8a 后 `Live2dSupport: Live2D native core available`，`versionName=1.9.0-61181ff58`（自动构建产物）。
+
+**TTS 模型侧载**（84MB，免下载）：
+
+```powershell
+# 解压 tools 产物后按 REQUIRED_MODEL_FILES 的相对路径放进去
+adb push tmp\ttsmodel\model.onnx   /data/local/tmp/ttsmodel/model.onnx
+adb push tmp\ttsmodel\lexicon.txt  /data/local/tmp/ttsmodel/lexicon.txt
+adb push tmp\ttsmodel\tokens.txt   /data/local/tmp/ttsmodel/tokens.txt
+adb push tmp\ttsmodel\fsts\*.fst   /data/local/tmp/ttsmodel/fsts/
+adb shell su -c "cp -r /data/local/tmp/ttsmodel/. /data/data/com.meapet.mobile/files/tts_model/"
+adb shell su -c "chown -R u0_a400:u0_a400 /data/data/com.meapet.mobile/files/tts_model"
+adb shell su -c "restorecon -R /data/data/com.meapet.mobile/files/tts_model"
+```
+
+就绪判定只看 `files/tts_model/` 下 6 个必需文件是否齐全（`TtsModelManager.isModelReady`），不需要额外标记文件。
