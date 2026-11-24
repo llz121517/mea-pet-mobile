@@ -540,6 +540,7 @@ class ChatService(
                 tailFragments = tail,
                 maxMessages = maxMessages,
                 summary = state.summary,
+                summaryUpdatedAt = state.updatedAt,
                 skipOldest = skipOldest,
                 includeToolHistory = includeToolHistory
             )

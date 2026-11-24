@@ -24,7 +24,7 @@
 - [已完成] M1：`storage/SqliteDatabase`（初始为单连接 + Mutex，后续 `7650552` 改为一写多读连接池，见 §4.2；BEGIN IMMEDIATE 事务、`user_version` 迁移、V1 schema，包含工具消息字段与压缩状态表位）；`ConversationRepository`（SQLite / 内存实现）；`MemoryStore` 接口 + `SqliteMemoryStore`，`MemoryRepository`（JSON）实现同一接口作备胎；`ConversationManager` 改为内存窗口 + 有序异步写队列，完整历史留在仓库。
 - [已完成] M2：`LegacyJsonImporter`（单事务、幂等、读回校验、标记 meta.legacy_json_import 与数据同事务）；历史 JSON 中废弃的记忆操作附加字段忽略，不参与导入后的请求或记忆处理。
 - [已完成] UI 解耦首版：首屏读仓库最近 50 条，向上 keyset 懒加载；清除对话的撤销快照改用仓库完整历史。
-- 验证：已有 JVM 单测与 debug 构建覆盖存储和上下文功能；最终验证见 [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) §测试与待验证项（2026-11-22 全量 447 条单测通过；**2026-11-24 复核时全量为 562 条**，后续改动追加测试后需以最新一次全量结果为准）。
+- 验证：已有 JVM 单测与 debug 构建覆盖存储和上下文功能；最终验证见 [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) §测试与待验证项（2026-11-22 全量 447 条单测通过；**2026-11-24 复核时全量为 571 条**，后续改动追加测试后需以最新一次全量结果为准）。
 
 注意：旧 JSON 只含约 27 到 35 条消息，「完整历史」只能从升级后开始累积，发布说明需写明。
 

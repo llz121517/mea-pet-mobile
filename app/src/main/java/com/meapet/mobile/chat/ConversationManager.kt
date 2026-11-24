@@ -13,6 +13,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.time.Instant
+import java.time.ZoneId
 
 /**
  * 会话历史管理器。
@@ -200,6 +202,9 @@ class ConversationManager(
      *   并入最后一条 user 的发出副本，**不写入历史**；全部为空则不附加
      * @param tailMode tail 的发送方式，见 [TailMode]
      * @param maxMessages 最大消息数（滑动窗口，从末尾取）
+     * @param summary 已有压缩摘要；非空时并入首条 system 末尾
+     * @param summaryUpdatedAt 摘要生成时间（毫秒时间戳，0 = 未知）：只用来在摘要头写明
+     *   「截至哪一天」并声明冲突时以原文为准，让模型能判断摘要与后文谁更新
      * @param includeToolHistory 是否保留工具历史（`assistant.rawAssistantJson` 与 `role=tool`）。
      *   工具模式（端点支持 tools）为 true：原样回传 `tool_calls` / `reasoning_content`；
      *   只读模式或端点不支持 tools 时为 false：过滤 tool 消息、assistant 只留正文
@@ -212,6 +217,7 @@ class ConversationManager(
         tailMode: TailMode = DEFAULT_TAIL_MODE,
         maxMessages: Int = 30,
         summary: String = "",
+        summaryUpdatedAt: Long = 0L,
         skipOldest: Int = 0,
         includeToolHistory: Boolean = true
     ): List<ChatMessage> {
@@ -221,8 +227,12 @@ class ConversationManager(
                 append("\n\n$stableContext")
             }
             if (summary.isNotBlank()) {
-                // 摘要并入首条 system 末尾（不做独立 system/user 消息，兼容严格模板）
-                append("\n\n【对话摘要】（较早内容的压缩，供参考）\n")
+                // 摘要并入首条 system 末尾（不做独立 system/user 消息，兼容严格模板）。
+                // 明确写「与后文冲突以后文为准」：摘要是压缩那一刻的快照，保留窗口里可能
+                // 已经完成/推翻它记录的事，不给优先级约定模型就无从判断谁更新。
+                append("\n\n【对话摘要】（较早内容的压缩")
+                appendSummaryTime(summaryUpdatedAt)
+                append("。若与后文原文冲突，以后文原文为准）\n")
                 append(summary)
             }
         }
@@ -253,6 +263,23 @@ class ConversationManager(
                 )
             )
         }
+    }
+
+    /**
+     * 摘要头的「截至日期」：把 [summaryUpdatedAt] 转成设备时区的日期串。
+     *
+     * 摘要只在压缩那一刻生成，之后两天不压缩它就还是两天前的快照；写明日期后模型可以
+     * 自行判断「这条进度描述可能已过期」。时间戳缺失（0）或非法时退化为不带日期。
+     */
+    private fun StringBuilder.appendSummaryTime(summaryUpdatedAt: Long) {
+        if (summaryUpdatedAt <= 0L) return
+        val date = runCatching {
+            Instant.ofEpochMilli(summaryUpdatedAt)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate()
+        }.getOrNull() ?: return
+        append("，截至 ")
+        append(date)
     }
 
     /**

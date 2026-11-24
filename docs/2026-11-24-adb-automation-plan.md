@@ -26,7 +26,7 @@
 | 检查单项 | 层 | 方式 | 结论 |
 |---|---|---|---|
 | 版本号锁定 | D | `grep versionCode/versionName` | ✅ |
-| 全量单测（562 条） | D | `gradlew testDebugUnitTest` | ✅ |
+| 全量单测（571 条） | D | `gradlew testDebugUnitTest` | ✅ |
 | debug / release 构建 | D | `assembleDebug` / `assembleRelease -PappAbi=v8a` | ✅ |
 | 文档链接检查 | D | `node tools/check_doc_links.mjs` | ✅ |
 | 工作区干净 | D | `git status --short` | 🟡 检查单自身改写待提交 |

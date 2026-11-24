@@ -165,4 +165,79 @@ class ChatServiceCompactionTest {
 
         assertTrue(svc.compactContext().isFailure)
     }
+
+    /**
+     * 注入侧必须有冲突优先级约定（G15 成因④）：摘要是压缩那一刻的快照，保留窗口里可能已经
+     * 完成/推翻它记录的事。不写「以后文为准」，模型面对矛盾结论只能猜。
+     */
+    @Test
+    fun `摘要注入时声明与后文冲突以后文为准`() = runTest {
+        val cm = ConversationManager()
+        preload(cm, turns = 12)
+        val store = InMemoryCompactionStore()
+        val engine = engine()
+        val svc = service(cm, store, engine)
+
+        svc.compactContext()
+        svc.sendMessage("继续聊")
+
+        val body = (engine.requests.last().body as RequestBody.Json).content
+        assertTrue(
+            body.contains("若与后文原文冲突，以后文原文为准"),
+            "摘要头必须声明冲突时的优先级: $body"
+        )
+    }
+
+    /** 摘要头带上生成日期，模型才能判断这条进度描述是否已经过期。 */
+    @Test
+    fun `摘要注入时带上截至日期`() = runTest {
+        val cm = ConversationManager()
+        preload(cm, turns = 12)
+        // 固定一个已知时间点，断言日期串出现在摘要头
+        val fixedAt = java.time.LocalDate.of(2026, 11, 24)
+            .atTime(12, 0)
+            .atZone(java.time.ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        val store = InMemoryCompactionStore()
+        val engine = engine()
+        val svc = service(cm, store, engine)
+
+        svc.compactContext()
+        // 把 updatedAt 改成固定值再发下一轮（真实链路里由压缩时间写入）
+        store.save(store.load().copy(updatedAt = fixedAt))
+        // compactionState 在内存里有缓存，重建 service 让它重新 load
+        val svc2 = service(cm, store, engine)
+        svc2.sendMessage("继续聊")
+
+        val body = (engine.requests.last().body as RequestBody.Json).content
+        assertTrue(body.contains("截至 2026-11-24"), "摘要头应带生成日期: $body")
+    }
+
+    /**
+     * 摘要只是「较早内容的压缩」，不该吞掉保留窗口里的原文：重叠区只进摘要请求，
+     * 不改变发给聊天端点的消息集合。
+     */
+    @Test
+    fun `重叠区不进入聊天请求只影响摘要请求`() = runTest {
+        val cm = ConversationManager()
+        preload(cm, turns = 12)
+        val store = InMemoryCompactionStore()
+        val engine = engine()
+        val svc = service(cm, store, engine)
+
+        svc.compactContext()
+        val summaryReqBody = (engine.requests.last().body as RequestBody.Json).content
+        svc.sendMessage("继续聊")
+        val chatReqBody = (engine.requests.last().body as RequestBody.Json).content
+
+        assertTrue(
+            summaryReqBody.contains("用于判断哪些状态已经过期"),
+            "摘要请求应带重叠区"
+        )
+        assertFalse(
+            chatReqBody.contains("用于判断哪些状态已经过期"),
+            "重叠区只用于摘要请求，不该进入聊天请求: $chatReqBody"
+        )
+    }
 }

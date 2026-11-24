@@ -9,6 +9,8 @@ import com.meapet.mobile.client.model.ApiResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 /**
  * 上下文压缩器：把较早的对话轮次折叠成一段滚动摘要。
@@ -18,6 +20,10 @@ import kotlinx.coroutines.withContext
  *   [CompactionConfig.MIN_KEEP_TURNS] 轮原文保留，避免把一轮拆开；
  * - **滚动摘要**：新摘要 = LLM(旧摘要 + 本次要折叠的消息)，只处理增量，
  *   成本与折叠段长度成正比；
+ * - **摘要输入带保留窗口的只读参照区**：折叠点之后尚未并入摘要的**整个保留窗口**会一并以
+ *   「仅用于判断状态是否过期、不要写进摘要」的身份发给摘要模型。否则摘要里写的「某事项
+ *   未完成」在保留窗口里已经完成时，模型只能看到过期结论。参照区不做截断——它本身就是
+ *   保留窗口，而折叠点后的第一条正是「摘要没覆盖到的最早内容」，丢弃它就等于没修。
  * - **纯文本输出**：摘要直接用模型回复正文，不要求 JSON（容错更好，也不需要 schema）；
  * - 摘要**并入首条 system 末尾**，不做独立 system/user 消息（兼容性最好，见 TailMode 调研）。
  *
@@ -37,6 +43,8 @@ class ContextCompactor(
 
         /** 折进摘要时单条工具结果的截断长度（工具结果是机器 JSON，不需要全文）。 */
         private const val SUMMARY_TOOL_CONTENT_CHARS = 200
+
+        private val DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     }
 
     /**
@@ -45,19 +53,28 @@ class ContextCompactor(
      * @param messages 当前窗口内的非 system 消息（按时间正序）
      * @param previousSummary 已有摘要（空串 = 首次压缩）
      * @param foldCount 要折叠的消息条数（由 [foldCountFor] 计算，保证按轮对齐）
+     * @param now 当前时间，用于给摘要里的进度类描述打时间锚；测试可注入固定值
      * @return 新摘要正文；[foldCount] 为 0 或调用失败时返回 null
      */
     suspend fun compact(
         messages: List<ChatMessage>,
         previousSummary: String,
-        foldCount: Int
+        foldCount: Int,
+        now: ZonedDateTime = ZonedDateTime.now()
     ): String? {
         if (foldCount <= 0 || foldCount > messages.size) return null
         val toFold = messages.take(foldCount)
+        // 折叠点之后仍在窗口里的**全部**消息：只送给摘要模型判断状态新旧，不写进摘要正文。
+        // 不能只取尾部几条——完成事件可能落在保留窗口更靠前的位置。
+        val stillInWindow = messages.drop(foldCount)
         // 只记条数，不记内容（记忆/对话内容属隐私，禁止进日志）
-        Log.i(TAG, "Compacting $foldCount message(s); previous summary ${previousSummary.length} chars")
+        Log.i(
+            TAG,
+            "Compacting $foldCount message(s); previous summary ${previousSummary.length} chars, " +
+                "overlap ${stillInWindow.size} message(s)"
+        )
 
-        val body = buildSummaryPrompt(toFold, previousSummary)
+        val body = buildSummaryPrompt(toFold, previousSummary, stillInWindow, now)
         return withContext(Dispatchers.IO) {
             try {
                 val request = ApiRequest.chatCompletion(
@@ -80,13 +97,21 @@ class ContextCompactor(
         }
     }
 
-    private fun buildSummaryPrompt(toFold: List<ChatMessage>, previousSummary: String): String = buildString {
+    private fun buildSummaryPrompt(
+        toFold: List<ChatMessage>,
+        previousSummary: String,
+        stillInWindow: List<ChatMessage>,
+        now: ZonedDateTime
+    ): String = buildString {
+        val today = now.format(DATE_FORMAT)
         appendLine("请把下面的对话整理成一段持续更新的「对话摘要」，供后续对话继续使用。")
         appendLine("要求：")
         appendLine("1. 第三人称、中文、中性语气，不要用角色口癖，不要加任何说明或标题；")
-        appendLine("2. 保留用户信息与约定（尤其是日期、承诺、称呼）、进行中的话题、已得出的结论、双方关系与情绪状态；")
-        appendLine("3. 合并旧摘要中仍然有效的信息，去掉已过期或已被纠正的内容；")
-        appendLine("4. 控制在 400 字以内，只输出摘要正文。")
+        appendLine("2. 保留用户信息与约定（尤其是日期、承诺、称呼）、已得出的结论、双方关系与情绪状态；")
+        appendLine("3. 不记录「正在做 / 待办 / 尚未完成」这类进度状态。确实重要时写成带时间锚的形式，")
+        appendLine("   例如「截至 $today，用户尚未收到 X」；没有时间锚的进度描述一律不写；")
+        appendLine("4. 合并旧摘要中仍然有效的信息，去掉已过期或已被纠正的内容；")
+        appendLine("5. 控制在 400 字以内，只输出摘要正文。")
         appendLine()
         if (previousSummary.isNotBlank()) {
             appendLine("【已有摘要】")
@@ -94,7 +119,22 @@ class ContextCompactor(
             appendLine()
         }
         appendLine("【需要并入摘要的对话】")
-        toFold.forEach { msg ->
+        appendMessages(toFold, SUMMARY_TOOL_CONTENT_CHARS)
+        if (stillInWindow.isNotEmpty()) {
+            appendLine()
+            // 这一段是「真值参照」：让摘要模型自己发现旧摘要里的状态已经过期，
+            // 否则折叠段里的「待办未完成」会一直留在摘要里，与保留窗口自相矛盾
+            appendLine("【最近对话（参考，用于判断哪些状态已经过期）】")
+            appendLine("以下是折叠点之后仍在对话窗口里的最近内容，**不要写进摘要正文**，只用于核对：")
+            appendLine("- 若旧摘要或折叠段里的某件事在这里已经完成、取消或改变，摘要中不得再保留「未完成 / 进行中」的描述；")
+            appendLine("- 若无法判断是否已过期，就不要写这条进度状态，只保留耐久事实。")
+            appendMessages(stillInWindow, Int.MAX_VALUE)
+        }
+    }
+
+    /** 按角色标签追加消息；[maxContentChars] 用于截断机器生成的长内容。 */
+    private fun StringBuilder.appendMessages(messages: List<ChatMessage>, maxContentChars: Int) {
+        messages.forEach { msg ->
             val role = when (msg.role) {
                 ChatRole.user -> "用户"
                 ChatRole.assistant -> "助手"
@@ -103,8 +143,8 @@ class ContextCompactor(
             }
             // 工具结果是机器生成的大段 JSON（单条可达上千字符），原样塞进摘要请求既贵又
             // 淹没人话：按概览所需截断，摘要只需要「查了什么、大致得到什么」
-            val text = if (msg.role == ChatRole.tool && msg.content.length > SUMMARY_TOOL_CONTENT_CHARS) {
-                msg.content.take(SUMMARY_TOOL_CONTENT_CHARS) + "…"
+            val text = if (msg.content.length > maxContentChars) {
+                msg.content.take(maxContentChars) + "…"
             } else {
                 msg.content
             }
