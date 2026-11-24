@@ -60,9 +60,10 @@ when downloading.
   `app/libs/Live2DCubismCore.aar` is git-ignored (`app/libs/.gitignore`),
   so it is not part of this repository, but when present it is packaged
   into the released APK as `lib/<abi>/libLive2DCubismCoreJNI.so` (the
-  published v1.8.0 APK contains that file for `arm64-v8a`).
+  published APKs (v1.8.0 and v1.9.0) contain that file for `arm64-v8a`).
 - **Version:** not recorded in the repo — see "Pending confirmation"
-  below.
+  below. Measured on a device (2026-11-24): **Cubism Core 6.0.1**
+  (`logcat -s Live2d` → `Live2D Cubism Core version: 06.00.0001`).
 - **Notes:** the Core AAR used by this project ships prebuilt JNI
   libraries for `arm64-v8a`, `x86` and `x86_64` only (no `armeabi-v7a`
   binary).
@@ -215,7 +216,7 @@ app. Versions were cross-checked against `gradle/libs.versions.toml`, the
 Compose BOM `2026.02.01`, the local Gradle cache
 (`~/.gradle/caches/modules-2/files-2.1`), the Maven POM metadata fetched
 from Google Maven / Maven Central / JitPack, and the released APKs in
-`dist/` (in particular `MeaPet-v1.8.0-v8a.APK`, the newest APK present
+`dist/` (in particular `MeaPet-v1.9.0-v8a.APK`, the newest APK present
 when this NOTICE was audited). "Bundled in the APK" is meant to hold for
 release builds, where R8 may additionally strip unused code.
 
@@ -595,30 +596,64 @@ metadata, the cached POMs or the published APKs. They must **not** be
 assumed to be MIT/Apache-2.0; confirm with the respective rights holder
 before redistributing.
 
-1. **Touch voice assets** (`app/src/main/assets/voice/**`, 21 Opus
-   files) — no source/author/license recorded; not traceable to a
-   published release.
-2. **Mea Live2D model assets**
-   (`app/src/main/assets/live2d/mea_live2d/**`) — community work from
-   Bilibili with no explicit license text. The additional
-   `橙色猫猫.can3` (Cubism Editor animation project, not referenced by
-   `mea.model3.json`) has no separate provenance record.
-3. **`ic_menu_compact.xml`** — material-style vector icon added for the
-   context-compaction menu; not listed in `tools/icons.txt`, exact
-   MDI / Material Symbols name not recorded.
-4. **JLaTeXMath-Android GPL-2.0+ / classpath exception** — whether the
-   exception covers this Android fork and whether the current APK
-   distribution complies should be confirmed by the maintainer/legal.
-   (The Maven POM only states "GNU General Public License, version 2".)
-5. **Umeng SDK license metadata** — POMs declare Apache-2.0 while the
-   SDK is governed by Umeng's proprietary terms / privacy policy.
-6. **Live2D Cubism SDK / Cubism Core version** — not recorded in the
-   repository (the Core AAR is git-ignored and unversioned); the exact
-   Cubism SDK release used for the vendored Java framework is also
-   unrecorded.
-7. **`jlm_special.ttf`** (bundled by JLaTeXMath-Android) — not listed in
-   the upstream font-license inventory.
+> **2026-11-24 re-audit** (`dist/MeaPet-v1.9.0-v8a.APK`, unpacked with
+> `aapt list`): items 2 (the `.can3` part) and 3 are now **resolved**; the
+> remaining six are confirmed as outstanding, with the evidence below
+> narrowed down so the rights holder only has to make the decision.
+
+1. **Touch voice assets** (`app/src/main/assets/voice/**`) — **21 files,
+   225 KB total, all bundled in the APK** under `voice/{upper,lower_left,
+   lower_right}/`. Verified the codec is **Opus**: every file carries the
+   `OpusHead` magic at offset 28 (the `.ogg` extension is only the
+   container). No source/author/license recorded in the repo; not
+   traceable to a published release. **Decision needed:** confirm with the
+   author, replace with self-produced/CC0 voice clips, or drop them.
+2. **Mea Live2D model assets** (`app/src/main/assets/live2d/mea_live2d/**`)
+   — 10 files bundled in the APK (moc3/model3/physics/motionsync/cdi3,
+   2 motions, 2 textures). Community work from Bilibili with no explicit
+   license text. ~~The additional `橙色猫猫.can3`…~~ **Resolved
+   2026-11-24:** `橙色猫猫.can3` (223 KB, Cubism Editor project file) was
+   an orphan — `mea.model3.json` does not reference it and no code loaded
+   it — so it was removed from the repo and no longer ships in the APK.
+   The remaining model assets still need provenance confirmation.
+3. ~~**`ic_menu_compact.xml`**…~~ **Resolved 2026-11-24:** the icon is
+   `mdi/arrow-collapse` (path data matched against the Iconify API) and is
+   now registered in `tools/icons.txt`. It remains bundled in the APK as
+   before, with its license covered by the Material Design Icons entry
+   above (Apache-2.0).
+4. **JLaTeXMath-Android GPL-2.0+ / classpath exception** — transitive
+   dependency `ru.noties:jlatexmath-android:0.2.0` (via
+   `io.noties.markwon:ext-latex`). Re-checked 2026-11-24: the AAR contains
+   **no GPL license text at all** (only `R.txt`) and the Gradle cache has
+   no POM file for it, so the "GPL v2 or later, with classpath exception"
+   claim above rests on the upstream `LICENSE` file alone. Whether that
+   exception covers this Android fork, and whether shipping the combined
+   APK complies, still needs maintainer/legal confirmation.
+5. **Umeng SDK license metadata** — POMs declare Apache-2.0 while the SDK
+   is governed by Umeng's proprietary terms / privacy policy. Re-checked
+   2026-11-24: both AARs (`common-9.9.2`, `asms-1.8.7.2`) contain **no
+   license file whatsoever** (only `R.txt`), so the contradiction stands
+   and there is no in-artifact evidence favouring either statement.
+6. **Live2D Cubism SDK / Cubism Core version** — confirmed 2026-11-24:
+   `app/libs/Live2DCubismCore.aar` is git-ignored (`app/libs/.gitignore`)
+   and carries **no version string** in its bytecode — the version is read
+   at runtime via JNI (`CubismCoreVersion`, whose class only holds the
+   `%02d.%02d.%04d (%d)` format string). **The version was obtained from a
+   device run instead:** `logcat -s Live2d` reports
+   `Live2D Cubism Core version: 06.00.0001 (100663297)` and
+   `Live2D Cubism SDK Core Version 6.0.1` — i.e. **Cubism Core 6.0.1**.
+   The vendored framework under `app/src/main/java/com/live2d/` still
+   records no release, so its matching SDK release remains unconfirmed.
+7. **`jlm_special.ttf`** (bundled by JLaTeXMath-Android) — confirmed
+   2026-11-24 as genuinely uncovered: the AAR's `fonts/licences/` holds
+   only three files (`Knuth_License.txt`, `License_for_dsrom.txt`,
+   `OFL.txt`), and `OFL.txt` explicitly names only the AMS fonts
+   (`eufb10`/`eufm10`/`msam10`/`msbm10`). `jlm_special.ttf` (2.2 KB,
+   JLaTeXMath's own) falls under none of them.
 8. **Mea VITS2 model / voice training data** — the model package
-   (`tts-model-v1.zip`) is distributed outside this repository; rights
-   over the model and the voice data rest with the original author(s) and
-   are not documented here.
+   (`tts-model-v1.zip`) is distributed outside this repository; confirmed
+   the 6 model files (`model.onnx`, `lexicon.txt`, `tokens.txt`,
+   `fsts/*.fst`) are **neither in the repo nor in the APK** (only the two
+   derived G2P assets ship — see "TTS Model Assets"). Rights over the
+   model and the voice data rest with the original author(s) and are not
+   documented here.

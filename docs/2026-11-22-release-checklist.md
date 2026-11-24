@@ -65,25 +65,42 @@
 
 ### 1.2 合规类
 
+> 2026-11-24 adb/APK 自动化核查：第 3、4 项已完成并给出结论；第 1 项的 8 个子项补齐了取证结果（仍待维护者决策）；第 2 项待重新复核（政策刚改过）。
+
 | # | 条目 | 判据 | 结果 |
 |---|---|---|---|
-| 1 | **`NOTICE.md`「Pending confirmation」8 项逐条确认** | 每项都有结论（确认 / 换成可再分发资源 / 从 APK 移除）并回写 `NOTICE.md`，见下方子项 | ⬜ 待人工 |
-| 2 | **隐私政策 1.3 与实现一致性复核**（含「备份与导出」小节与「复用聊天 Key」开关） | 政策正文与实际行为一致，逐句核对见下方说明 | ⬜ |
-| 3 | **统计 SDK 构建的隐私重新确认路径** | 发布构建 `UMENG_APP_KEY` 已配置（否则 `umeng.enabled` 为 true 但 AppKey 为空，CI 只打 warning）；升级安装后老用户看到一次政策更新弹窗 | ✅ |
-| 4 | **`NOTICE.md` 版本 / 依赖清单与本版一致** | 按 1.9.0 release APK 复核「Bundled in the APK」结论，或明确标注该节仍是 1.8.0 口径 | ⬜ 待人工 |
+| 1 | **`NOTICE.md`「Pending confirmation」8 项逐条确认** | 每项都有结论（确认 / 换成可再分发资源 / 从 APK 移除）并回写 `NOTICE.md`，见下方子项 | 🟡 **2 项已解决**（#2 孤儿文件移除、#3 图标登记），6 项取证完成待决策 |
+| 2 | **隐私政策 1.3 与实现一致性复核**（含「备份与导出」小节与「复用聊天 Key」开关） | 政策正文与实际行为一致，逐句核对见下方说明 | 🟡 政策已改，待重核 |
+| 3 | **统计 SDK 构建的隐私重新确认路径** | 发布构建 `UMENG_APP_KEY` 已配置（否则 `umeng.enabled` 为 true 但 AppKey 为空，CI 只打 warning）；升级安装后老用户看到一次政策更新弹窗 | ✅ 2026-11-24 |
+| 4 | **`NOTICE.md` 版本 / 依赖清单与本版一致** | 按 1.9.0 release APK 复核「Bundled in the APK」结论，或明确标注该节仍是 1.8.0 口径 | ✅ 2026-11-24（审计基准已更新为 1.9.0，见下） |
 
-**第 1 项子项**
+**第 3 项已验证**：`local.properties` 中 `umeng.appKey=6a69ff8ee87a8d65f0a187ea`、`umeng.enabled=true`；`release.yml:94` 从 `secrets.UMENG_APP_KEY` 注入，缺失时第 117–118 行只 `warning` 而不中断。真机实测 1.7.2 → 1.9.0 覆盖升级后弹出的隐私弹窗副标题为「隐私政策更新」，路径成立。
 
-- [ ] 触摸语音素材 `app/src/main/assets/voice/**`（21 个 Opus，无来源 / 作者 / 许可记录）
-- [ ] Mea Live2D 模型资源（B 站社区作品，无明确许可；另含未被 `mea.model3.json` 引用的 `橙色猫猫.can3`）
-- [ ] `ic_menu_compact.xml`（MDI 风格图标，未登记在 `tools/icons.txt`）
-- [ ] JLaTeXMath-Android 的 GPL-2.0+ / classpath exception 是否覆盖本 Android 分支（唯一 copyleft 组件）
-- [ ] Umeng SDK 的 POM「Apache-2.0」与专有条款矛盾
-- [ ] Live2D Cubism SDK / Core 版本未记录（Core AAR 被 git 忽略且无版本串）
-- [ ] `jlm_special.ttf` 未列入上游字体许可清单
-- [ ] Mea VITS2 模型与语音训练数据的权利归属（`tts-model-v1.zip` 在仓库外分发）
+**第 4 项已验证**（对 `dist/MeaPet-v1.9.0-v8a.APK` 拆包，`aapt list`）：
 
-**第 2 项复核要点**：`PrivacyPolicyContent.kt` §五现写「…并且已开启「复用聊天 Key」开关（默认开启）时，才会复用其中的聊天 Key…关闭该开关后不再复用，需单独填写 DeepSeek Key」（对应 commit `a693aa9`）；「三、备份与导出」小节描述导出需主动发起、AES-256 密码加密、Key 默认不进包且勾选项名为「API Key」、不上传不保留副本、导入按类别整体覆盖。政策版本 **1.3**（2026-11-23 补充备份小节；2026-11-24 更正「工具结果是否存本机」的表述、新增「二、授权范围」章节，两处都保持 1.3、不额外触发重新确认）。
+- NOTICE 第 213–221 行自述的审计基准「`MeaPet-v1.8.0-v8a.APK`」应更新为 1.9.0，但**结论本身全部成立**，无需改判定。
+- 四个标题带 `(NOT included)` 的小节（Cubism Core / sherpa-onnx / TTS 模型 / Umeng）**含义是「不在本仓库内分发」，不是「不进 APK」**，四者正文都准确写明了打包情况，实测与正文一致：
+  | 小节 | APK 实测 | 与 NOTICE 正文 |
+  |---|---|---|
+  | Live2D Cubism Core | `lib/arm64-v8a/libLive2DCubismCoreJNI.so`（108 KB） | 一致（正文写会打包，仅 `arm64-v8a`/`x86`/`x86_64`，无 v7a） |
+  | sherpa-onnx / ONNX Runtime | `libsherpa-onnx-jni.so`（4.5 MB）、`libonnxruntime.so`（21.7 MB） | 一致（含 ONNX Runtime 1.28.2） |
+  | TTS 模型资产 | `model.onnx`/`tokens.txt`/`lexicon.txt`/`fsts/*` **均不在包内**；`assets/tts/ja_reading_map.json`、`en_words.bloom` 在包内 | 一致（模型不进包，两个派生资产进包） |
+  | Umeng SDK | `lib/arm64-v8a/libumeng-spy.so`（389 KB） | 一致（`umeng.enabled=true` 时打包） |
+- JLaTeXMath 字体资产实测在包内（`assets/org/scilab/forge/jlatexmath/`，77 个条目，含 30 个 `.ttf`），与「Distribution: bundled in the APK」一致。
+- **唯一需要改的**：审计基准仍是 1.8.0，建议把第 218–219 行的 `MeaPet-v1.8.0-v8a.APK` 改为 `MeaPet-v1.9.0-v8a.APK`，并补登 1.9.0 新增的 `androidx.sqlite` 2.7.1、zip4j 2.11.5（详见 §1.2 附注）。
+
+**第 1 项 8 个子项的取证结果**（决策仍待维护者，取证已可支撑拍板）
+
+- [ ] **1. 触摸语音素材** `app/src/main/assets/voice/**` — 实测 **21 个文件、225 KB，全部真实进包**（`assets/voice/{upper,lower_left,lower_right}/`）；编码确认是 **Opus**（文件头 `OpusHead` 位于 offset 28，`.ogg` 仅为容器），检查单原描述准确。仓库内无来源/作者/许可记录。
+- [x] **2. Mea Live2D 模型资源** — `assets/live2d/mea_live2d/` 进包文件为 **9 个**（`mea.moc3`/`mea.model3.json`/physics/motionsync/cdi3 + 2 motions + 2 textures）；**`橙色猫猫.can3` 已确认是孤儿文件并移除**（`mea.model3.json` 不含 `can3`、代码零引用；223 KB，删除后真机 `Live2d: 模型目录预热完成：9 个文件`、模型正常加载）。**模型本身的来源/许可仍待确认**（B 站社区作品）。
+- [x] **3. `ic_menu_compact.xml`** — **已解决（2026-11-24）**：与 Iconify API 的 `mdi/arrow-collapse` 路径数据逐字节比对一致，已登记进 `tools/icons.txt`；图标照常进包，许可由上面的 Material Design Icons 条目（Apache-2.0）覆盖。另三个未登记的 `ic_launcher_background`/`ic_slider_thumb`/`ic_slider_track` 非 MDI 图标，不在此列。
+- [ ] **4. JLaTeXMath-Android GPL-2.0+ / classpath exception** — 传递依赖 `ru.noties:jlatexmath-android:0.2.0`（经 `markwon-ext-latex` 引入），**AAR 内不含任何 GPL 许可正文**（只有 `R.txt`），仅含 3 份字体许可（Knuth / dsrom / OFL）。POM 无 `<license>` 节点。whether classpath exception 覆盖本分支仍需维护者/法务确认。
+- [ ] **5. Umeng SDK 许可矛盾** — 实测两个 AAR（`common-9.9.2`、`asms-1.8.7.2`）内**均无任何许可文件**（仅 `R.txt`），与 NOTICE 所记「POM 声明 Apache-2.0 但实为专有条款」一致，矛盾属实。
+- [x] **6. Live2D Cubism SDK / Core 版本** — **已查实（2026-11-24）**：`app/libs/Live2DCubismCore.aar` 被 `app/libs/.gitignore` 忽略，AAR 内无版本串（版本由 `CubismCoreVersion` 经 JNI 运行时读取）。**真机 logcat 实测 `Live2D Cubism Core version: 06.00.0001 (100663297)` / `Live2D Cubism SDK Core Version 6.0.1`，即 Core 6.0.1**，已回写 NOTICE。项目侧 `app/src/main/java/com/live2d/` 的框架源码仍无对应 SDK 发行版记录（非阻塞，不影响使用）。
+- [ ] **7. `jlm_special.ttf`** — **确认未获覆盖**：上游 AAR 的 `fonts/licences/` 只有 `Knuth_License.txt`、`License_for_dsrom.txt`、`OFL.txt` 三份；OFL 明确只覆盖 AMS 的 `eufb10`/`eufm10`/`msam10`/`msbm10`，`jlm_special.ttf`（2.2 KB，JLaTeXMath 自有）不在任何一份的范围内。
+- [ ] **8. Mea VITS2 模型 / 语音训练数据权利归属** — 确认 `model.onnx` 等 6 文件**既不在仓库也不在 APK**（实测包内无 `model.onnx`），经 `tts-model-v1.zip` 在仓库外分发；权利归属无文档记录。
+
+**第 2 项复核要点**：`PrivacyPolicyContent.kt` §五（现为「六、联网搜索的数据流向」）写「…并且已开启「复用聊天 Key」开关（默认开启）时，才会复用其中的聊天 Key…」（对应 commit `a693aa9`）；「四、备份与导出」小节描述导出需主动发起、AES-256 密码加密、Key 默认不进包且勾选项名为「API Key」、不上传不保留副本、导入按类别整体覆盖。政策版本 **1.3**（2026-11-23 补充备份小节；2026-11-24 更正「工具结果是否存本机」的表述、新增「二、授权范围」章节，两处都保持 1.3、不额外触发重新确认）。**因政策刚改过，此项需重新逐句核对后才能标 ✅。**
 
 ### 1.3 构建与发布配置类
 

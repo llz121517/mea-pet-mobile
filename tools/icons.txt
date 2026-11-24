@@ -44,6 +44,7 @@ mdi/cog-outline                 ic_menu_settings
 mdi/trash-can-outline           ic_menu_clear
 mdi/bookmark-outline            ic_menu_memory
 mdi/picture-in-picture-top-right-outline  ic_menu_overlay
+mdi/arrow-collapse              ic_menu_compact
 
 # ── TTS 喇叭快捷钮（主界面）──
 mdi/volume-high                 ic_tts_volume_on
