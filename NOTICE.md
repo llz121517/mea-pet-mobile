@@ -19,8 +19,9 @@ the MIT license of this project.
   Cubism SDK for Java. The SDK's own `LICENSE.md` (copied here) also lists
   the Free Material License sample models (Haru / Hiyori / Mao / Mark /
   Natori / Ren / Rice / Wanko); those sample models are **not** included in
-  this repository or in the APK. The exact Cubism SDK version this source
-  was copied from is not recorded — see "Pending confirmation" below.
+  this repository or in the APK. The SDK release is **Cubism SDK for
+  Java 5-r.5**, whose Core reports **6.0.1** at runtime — see item 6 of
+  "Previously open questions".
 
 ---
 
@@ -87,7 +88,9 @@ and is **not** licensed under this project's MIT license.
   the model assets.
 - **Version:** not recorded (no version string in `mea.model3.json`).
 - **License:** no explicit license text is published with the model
-  release; the author's release terms govern. See "Pending confirmation".
+  release. Recorded as a **fan-made derivative (二创)** of the character:
+  all rights belong to **Cabbage Soft** and this project grants no licence
+  for these assets — see "Fan-work statement".
 - **Files bundled in the APK:** `app/src/main/assets/live2d/mea_live2d/` —
   `mea.model3.json`, `mea.moc3`, `mea.cdi3.json`, `mea.physics3.json`,
   `mea.motionsync3.json`, `idle_motion.motion3.json`,
@@ -95,9 +98,9 @@ and is **not** licensed under this project's MIT license.
   `textures/texture_01.png`, and `橙色猫猫.can3` (a Cubism Editor
   animation-workspace project file, `.can3` / CAFF archive). Note:
   `mea.model3.json` only references `idle_motion.motion3.json` and
-  `angry_motion.motion3.json`; the `.can3` file is not referenced at
-  runtime and looks like a leftover project file — its provenance is not
-  documented separately (see "Pending confirmation").
+  `angry_motion.motion3.json`; the `.can3` file was not referenced at
+  runtime and was a leftover project file, so it has been **removed**
+  (see item 2 of "Previously open questions").
 - **Distribution:** bundled in the APK.
 
 ---
@@ -334,8 +337,8 @@ LaTeX rendering for AI replies (`MarkdownText.kt`).
   fonts).
 - **Notes:** this is the only copyleft component in the shipped app. The
   fonts it bundles are itemised in the next section; the remaining open
-  question from "Pending confirmation" was `jlm_special.ttf`, now resolved
-  there.
+  question about the bundled fonts was `jlm_special.ttf`, now resolved in
+  "Previously open questions".
 
 ---
 
@@ -691,12 +694,14 @@ assets.
 
 ---
 
-## Pending confirmation (待确认)
+## Previously open questions (已解决清单)
 
-The following items could not be confirmed from the repository, the build
-metadata, the cached POMs or the published APKs. They must **not** be
-assumed to be MIT/Apache-2.0; confirm with the respective rights holder
-before redistributing.
+This section used to list items that could not be confirmed from the
+repository, the build metadata, the cached POMs or the published APKs.
+**As of 2026-11-24 all eight are closed** — each entry below keeps the
+original question, the evidence that closed it, and what (if anything)
+still depends on a third party. It is retained as an audit trail, not as
+a list of open risks.
 
 > **2026-11-24 re-audit** (`dist/MeaPet-v1.9.0-v8a.APK`, unpacked with
 > `aapt list`): **all eight items are now resolved or handled.** Items 1,
@@ -722,14 +727,20 @@ before redistributing.
    (《霞流宝石心 -壮志凌云振寰宇-》). **The clips are therefore not MIT
    and are not licensed for reuse** — see the "Touch Voice Assets"
    section above and the release-asset fan-work statement.
-2. ~~**Mea Live2D model assets**~~ **Resolved 2026-11-24 (provenance recorded):** (`app/src/main/assets/live2d/mea_live2d/**`)
-   — 10 files bundled in the APK (moc3/model3/physics/motionsync/cdi3,
-   2 motions, 2 textures). Community work from Bilibili with no explicit
-   license text. ~~The additional `橙色猫猫.can3`…~~ **Resolved
-   2026-11-24:** `橙色猫猫.can3` (223 KB, Cubism Editor project file) was
-   an orphan — `mea.model3.json` does not reference it and no code loaded
-   it — so it was removed from the repo and no longer ships in the APK.
-   The remaining model assets still need provenance confirmation.
+2. ~~**Mea Live2D model assets**~~ **Resolved 2026-11-24** —
+   `app/src/main/assets/live2d/mea_live2d/**` now holds **9 files** in the
+   APK (moc3, model3.json, physics3, motionsync3, cdi3, 2 motions,
+   2 textures). Provenance: **community work shared on Bilibili, a fan-made
+   derivative (二创) of the character** — so the same rights position as
+   items 1 and 8 applies: all rights to the character and its likeness
+   belong to **Cabbage Soft**, are not covered by this repository's MIT
+   licence, and this project grants no licence for them (see "Fan-work
+   statement").
+   **Orphan removed in the same pass:** `橙色猫猫.can3` (223 KB, Cubism
+   Editor project file) was tracked in git and shipped in the APK while
+   nothing referenced it — `mea.model3.json` does not mention it and no
+   code loaded it — so it was deleted. Rebuilt and verified on a device:
+   `Live2d: 模型目录预热完成：9 个文件`, model loads normally.
 3. ~~**`ic_menu_compact.xml`**…~~ **Resolved 2026-11-24:** the icon is
    `mdi/arrow-collapse` (path data matched against the Iconify API) and is
    now registered in `tools/icons.txt`. It remains bundled in the APK as
