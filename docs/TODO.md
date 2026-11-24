@@ -50,17 +50,17 @@
 
 ## 📌 待办 A · 稳定性 / ANR(优先于架构)
 
-- [ ] **#15 + 新-8** 隐私授权双存储 + 主线程 runBlocking + 2s 超时(PrivacyConsentManager.kt:51-69) — 统一为单一存储源(推荐 SharedPreferences,需 `Application.onCreate` 同步读);`agreedFlow` 从同一份 SP 派生(`OnSharedPreferenceChangeListener` → `callbackFlow`),消除双源不一致;`setAgreed` 改 `suspend`,写盘挪 IO,`killProcess` 放在写完后。**注意**:关于页授权开关(`SettingsViewModel`)有真实消费者,改动后必须真机验证开关仍响应。
+- [x] **#15 + 新-8** 隐私授权双存储 + 主线程 runBlocking（**2026-11-24 已修复**，commit `243da30`）— 授权状态只保留 SharedPreferences（`Application.onCreate` 同步读），`agreedFlow` 由 `OnSharedPreferenceChangeListener` + `callbackFlow` 派生；`setAgreed` 改 `suspend` 并在 IO 线程 `commit()`，调用方（MainActivity 授权弹窗、AboutSettings 撤销）等写盘完成后再初始化 SDK / killProcess。`PrivacyConsentFlowTest` 覆盖桥接协议。
 - [ ] **#42 残项** 永久类记忆无硬顶 — 写放大与检索读写分离已修(见 `CHANGELOG.md` [1.8.0]),但 `enforceCapacity` 仍把 FACTUAL/CORE_TRAIT 排除在 `maxItems=500` 之外(`SqliteMemoryStore.enforceCapacity`, `storage/SqliteMemoryStore.kt:245-253`;JSON 备胎 `MemoryRepository` 同样如此)→ 存储层无上限、随会话线性增长(注入侧已由 `getPersonaFacts(maxCount)` 封顶)。需给硬顶或独立上限。
 
 **2026-11-22 代码审查遗留(并发 / 数据一致性 / 正确性)**
 
-- [ ] **G1 清除对话与在途 turn 取消收尾竞态** — 取消旧 turn 与取撤销快照可能交错:快照可能缺已展示片段,或清空后旧 turn 的片段又落库/回显;需串行化并明确「取消完成后取快照」。
-- [x] **G2 撤销「清除对话」不恢复压缩摘要**（**2026-11-24 已解决大部分**）— 新增 `compactionGeneration`：每次 `clearHistory` / `reloadAfterExternalImport` 自增，压缩在调模型前后对比代次，变了就丢弃结果，不会把旧摘要写回清空的库（单测「压缩期间清除历史则结果作废」）。**仍未做**：撤销（undo）时把快照对应的旧摘要一并恢复——当前撤销后摘要为空、历史回来了，模型看不到那段的摘要。
+- [x] **G1 清除对话与在途 turn 取消收尾竞态**（**2026-11-24 已修复**，commit `3adf7df`）— `clearConversation` 先 `cancelAndJoin` 本地发送并 `cancelActiveTurnAndJoin()` 共享在途轮次，等收尾提交后再取快照 / 清库；旧协程用代次判定不改状态。单测「清除对话会等在途 turn 取消收尾完成后再取快照」。
+- [x] **G2 撤销「清除对话」不恢复压缩摘要**（**2026-11-24 已解决大部分**）— 新增 `compactionGeneration`：每次 `clearHistory` / `reloadAfterExternalImport` 自增，压缩在调模型前后对比代次，变了就丢弃结果，不会把旧摘要写回清空的库（单测「压缩期间清除历史则结果作废」）。**2026-11-24 补齐**：撤销时用 `ClearSnapshot` 把旧摘要一并还原（commit `4fe481e`），真机实测恢复 46 条历史与 358 字摘要。
 - [ ] **G3 整轮落库后记忆提交失败只回滚 user** — `ChatService` 先 `addMessages` 再 `memoryTools.onTurnSuccess()`,提交抛错时只移除 user,会留下无 user 的 assistant/tool 行;提交失败应与整轮落库同一失败边界。
-- [ ] **G4 `ConversationManager` 落盘消费者取消后静默丢数据 / `flush()` 永久挂起** — 消费协程被取消后 `Flush` 永不完成,恢复 1.8.0 曾有的 `isActive` 保护与失败兜底完成。
+- [x] **G4 `ConversationManager` 落盘消费者取消后静默丢数据 / `flush()` 永久挂起**（**2026-11-24 已修复**，commit `5479d2b`）— 保留消费协程 Job，`flush()` 检查活跃性并改用 `trySend`（队列关闭立即返回）；消费循环 `finally` 关闭队列并兜底完成已入队 Flush。`ConversationManagerPersistTest` 3 例覆盖取消 / 异常隔离 / 兜底完成。
 - [x] **G5 手动压缩与自动压缩无互斥、压缩状态读改写互相覆盖**（**2026-11-24 已修复**）— 原来两处 `compactionState` 的 load-modify-save 各走各的，并发时后写覆盖先写，摘要与覆盖点可回退。修复：新增 `compactionMutex`，把「读状态 → 调摘要模型 → 写状态」整段串行化（`mutateCompaction` / `runAutoCompaction` 共用）；自动压缩用 `tryLock`，拿不到锁**直接跳过**并退化为窗口内按轮丢弃，不排队等一次 LLM 调用把本轮聊天卡住；`clearHistory` 的存储清理也进锁，避免与在途压缩的 save 交错。单测覆盖「两个手动压缩并发时串行且摘要不被回退」「手动压缩持锁时自动压缩跳过」。
-- [ ] **G6 并发 turn 无守卫** — 悬浮窗发送不检查 `isTurnActive`,`cancelActiveTurn` 只取消最新 job;可能出现两个 turn 同时读写历史/记忆。
+- [x] **G6 并发 turn 无守卫**（**2026-11-24 已修复**，commit `3adf7df`）— ChatService 用唯一 `InFlightTurn`（Job + finished）替代布尔标记：发送前 CAS 抢槽，遇在途先取消并等收尾（与主界面插队语义一致），同协程重入直接拒绝；`cancelActiveTurn` 取消真实在途 job，新增 `cancelActiveTurnAndJoin()`。`ChatServiceConcurrentTurnTest` 2 例覆盖请求不重叠与取消后已提交片段。
 - [ ] **G7 `removeMessages` 逐条事务,整轮回滚非原子** — 需批量删除 op(单事务),避免中途失败或并发插入造成半轮回滚。
 - [ ] **G8 `create_memory` 允许空 `keywords`** — 空关键词记忆在只读/关键词检索路径永远匹配不到;应与摘要流程一致要求至少 1 个有效关键词。
 - [ ] **G11 上下文窗口手动值 <1024 被静默当成自动、重新检测用固定 delay** — 非法值应校验/提示;「重新检测」应随探测完成信号刷新,而不是固定 `delay(1500)`。

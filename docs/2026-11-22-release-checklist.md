@@ -99,7 +99,7 @@
 | # | 条目 | 判据 | 结果 |
 |---|---|---|---|
 | 1 | **版本号锁定** — `versionCode = 15`、`versionName = "1.9.0"` | 引号内字面量是 `tools/build-release.*` 与 `tools/release_meta.py` 的正则锚点，不可改成变量；`versionCode` 相对 1.8.0 已递增（14 → 15） | ✅ 2026-11-24 |
-| 2 | **全量单测通过** — 本版基线 584 条 | `./gradlew :app:testDebugUnitTest --stacktrace` 成功，报告 584 tests / 0 failed | ✅ 2026-11-24，多次 |
+| 2 | **全量单测通过** — 本版基线 593 条 | `./gradlew :app:testDebugUnitTest --stacktrace` 成功，报告 593 tests / 0 failed | ✅ 2026-11-24，多次 |
 | 3 | **debug / release 构建各通过一次** | `assembleDebug` 与 `assembleRelease -PappAbi=v8a` 均成功（每项待办都要能独立编过，bisect safe） | ✅ 2026-11-24 |
 | 4 | **文档链接检查通过** | `node tools/check_doc_links.mjs` 退出码 0 | ✅ 2026-11-24 |
 | 5 | **本文与执行记录登记进文档索引** | `docs/README.md` 可查到本文与 adb 执行记录 | ✅ 2026-11-24，登记在 §1 需求导航 |
@@ -111,7 +111,7 @@
 **已验证明细**
 
 - 第 1 项：`versionCode = 15`、`versionName = "1.9.0"` + 可选短哈希后缀，字面量未被改成变量。
-- 第 2 项：`ALL: tests=584 failures=0 errors=0`（77 个测试类）。
+- 第 2 项：`ALL: tests=593 failures=0 errors=0`（80 个测试类）。
 - 第 3 项：两档 BUILD SUCCESSFUL；release 产物 `versionName=1.9.0`、含真实构建时间。
 - 第 4 项：`链接检查通过（28 个 md）`，EXIT=0。
 
@@ -293,15 +293,15 @@
 
 | 指标 | 数值 |
 |---|---|
-| `*.kt` 文件总数 | 78（其中 `FakeHttpClientEngine.kt`、`storage/JdbcSQLiteDriver.kt`、`backup/BackupTestFakes.kt` 是测试辅助，不含用例） |
-| 含用例的测试文件 | 75 |
-| `*Test` 测试类 | 77（`MarkdownTableColumnsTest.kt` 一个文件两个类；`backup/BackupImporterTest.kt` 内含 `BackupImporterTest` 与 `BackupCollectorTest`） |
-| **`@Test` 总数** | **584** |
+| `*.kt` 文件总数 | 81（其中 `FakeHttpClientEngine.kt`、`storage/JdbcSQLiteDriver.kt`、`backup/BackupTestFakes.kt` 是测试辅助，不含用例） |
+| 含用例的测试文件 | 78 |
+| `*Test` 测试类 | 80（`MarkdownTableColumnsTest.kt` 一个文件两个类；`backup/BackupImporterTest.kt` 内含 `BackupImporterTest` 与 `BackupCollectorTest`） |
+| **`@Test` 总数** | **593** |
 | 其中数据与备份 | 87（`app/src/test/java/com/meapet/mobile/backup/` 下 10 个文件 / 10 个测试类，含全链路 `BackupRoundTripTest` 与条数对比 `BackupCounterTest`）；另有 `SettingsLocalStateTest` 6 例覆盖导入被本地编辑态覆盖的回归 |
 | `app/src/androidTest` | 3 个文件 / 5 个 `@Test`（instrumented，需真机） |
 | `@Ignore` | 0 |
 
-> 历史数字 **447**（`167e6bd` 时）/ **455**（`c6c223e` 时）/ **574**（2026-11-24 首测）已过时，当前以 **584** 为准：较 574 增加 `LogSafetyTest` 6 例、`ChatViewModelTest` 状态保持 2 例，另 2 例为口径补齐。574 已于 2026-11-24 回填到 [`2026-11-18-sqlite-context-plan.md`](archive/design/2026-11-18-sqlite-context-plan.md) 与 [`2026-11-19-web-search-plan.md`](archive/design/2026-11-19-web-search-plan.md)；584 为本轮新增，尚未回填。
+> 历史数字 **447**（`167e6bd` 时）/ **455**（`c6c223e` 时）/ **574**（2026-11-24 首测）/ **584** 均已过时，当前以 **593** 为准：较 584 增加 9 例（落盘生命周期 3、隐私授权流程 2、并发 turn 2、清除等待收尾 1、导入后压缩状态刷新 1）。574 已于 2026-11-24 回填到 [`2026-11-18-sqlite-context-plan.md`](archive/design/2026-11-18-sqlite-context-plan.md) 与 [`2026-11-19-web-search-plan.md`](archive/design/2026-11-19-web-search-plan.md)；584 与 593 尚未回填。
 
 统计命令（PowerShell，仓库根目录）：
 
@@ -387,20 +387,20 @@ node tools/check_doc_links.mjs
 
 ### 4.3 未排期（与 1.9 改动面直接相关的稳定 / 正确性遗留）
 
-> 以下都是 [`TODO.md`](TODO.md)「2026-11-22 代码审查遗留」与待办 A 的条目，本版**不修**，但需在发布说明或 issue 里有交代。
+> 以下都是 [`TODO.md`](TODO.md)「2026-11-22 代码审查遗留」与待办 A 的条目。**2026-11-24 本轮已修 G1 / G4 / G6 / #15**；其余本版**不修**，需在发布说明或 issue 里有交代。
 
-- [ ] **G1** 清除对话与在途 turn 取消收尾竞态（快照可能缺已展示片段 / 清空后旧片段又落库）
+- [x] **G1** ~~清除对话与在途 turn 取消收尾竞态~~ **2026-11-24 已修复**：清除前先 `cancelAndJoin` 本地发送与共享在途轮次，等收尾（提交已展示片段 / 回滚孤儿消息）后再取撤销快照与清库；「清除等待收尾」单测覆盖（commit `3adf7df`）
 - [x] **G2** ~~撤销「清除对话」不恢复压缩摘要~~ **2026-11-24 已解决**：清理时取 `ClearSnapshot`（历史 + 压缩状态），撤销走 `restoreHistory` 一并还原摘要，并用代次机制作废在途压缩结果（commit `4fe481e`）；真机实测撤销后恢复 46 条历史与 358 字摘要
 - [ ] **G3** 整轮落库后记忆提交失败只回滚 user，可能留下无 user 的 assistant / tool 行
-- [ ] **G4** `ConversationManager` 落盘消费者取消后静默丢数据 / `flush()` 永久挂起
+- [x] **G4** ~~`ConversationManager` 落盘消费者取消后静默丢数据 / `flush()` 永久挂起~~ **2026-11-24 已修复**：消费协程退出后 `flush()` 检查活跃性并立即返回，退出时关闭队列并兜底完成已入队 Flush；新增 3 例单测（commit `5479d2b`）
 - [x] **G5** ~~手动压缩与自动压缩无互斥~~ **2026-11-24 已修复**：`compactionMutex` 串行化「读 → 调模型 → 写」，自动压缩拿不到锁时跳过并退化为窗口丢弃
-- [ ] **G6** 并发 turn 无守卫（悬浮窗发送不检查 `isTurnActive`；`cancelActiveTurn` 只取消最新 job）
+- [x] **G6** ~~并发 turn 无守卫~~ **2026-11-24 已修复**：ChatService 用唯一在途 turn 槽位（Job + finished 完成信号），发送前 CAS 抢槽、遇在途先取消并等收尾，同协程重入直接拒绝；`cancelActiveTurn` 取消真实在途 job，新增 `cancelActiveTurnAndJoin`（commit `3adf7df`）
 - [ ] **G7** `removeMessages` 逐条事务、整轮回滚非原子
 - [ ] **G8** `create_memory` 允许空 `keywords`（空关键词记忆在只读 / 关键词检索路径永远匹配不到）
 - [ ] **G11** 上下文窗口手动值 < 1024 被静默当成自动、「重新检测」用固定 `delay(1500)`
 - [ ] **G13** `search_memory` 的 `total_matched` 语义错误（取的是返回条数，受 limit / 体积截断影响）
 - [x] **G15** ~~压缩摘要与保留窗口断层~~ **2026-11-24 已修复**：摘要 prompt 不再要求记录「进行中的话题」、摘要请求带整个保留窗口作只读参照、注入侧声明「与后文冲突以后文为准」。真机验证通过（完成事件在保留窗口最前面也能识别为已完成）。遗留 G5（压缩无互斥）与覆盖点失效问题未修。
-- [ ] **#15 + 新-8** 隐私授权双存储 + 主线程 `runBlocking`（`PrivacyConsentManager` 同时写 SharedPreferences 与 DataStore）
+- [x] **#15 + 新-8** ~~隐私授权双存储 + 主线程 `runBlocking`~~ **2026-11-24 已修复**：授权状态只存 SharedPreferences，`agreedFlow` 由 `OnSharedPreferenceChangeListener` 派生，`setAgreed` 改挂起并写 IO，调用方等写盘完成再初始化 SDK / 退出（commit `243da30`）
 - [ ] **#42 残项** 永久类记忆无硬顶（`enforceCapacity` 把 FACTUAL / CORE_TRAIT 排除在 `maxItems=500` 外）
 - [ ] **候选-1** 悬浮窗返回主界面后约 2 秒才出画面（推测为 GL 重初始化耗时，低优先）
 
@@ -511,7 +511,7 @@ node tools/check_doc_links.mjs
 | 待办 E「数据与备份真机验收」 | 单测实为 **87 例**（原写 85 例）；主链路已由 adb 自动化覆盖 | ✅ 已更新进度与剩余项 |
 | **压缩摘要与保留窗口断层** | 新发现的行為缺陷（真机反馈），根因与修法已定位 | ✅ 已登记为 **G15**（`TODO.md` 待办 A） |
 | 候选-1 / 待办 0 / `SEPARATE_USER` / TTS native 内存 | 复核后**均仍成立**，未被 1.9 改动影响 | 不动 |
-| 447 / 455 / 550 / 574 等单测数字 | 当前为 **584**（77 个测试类） | ✅ 已在两篇 plan 文档回填 |
+| 447 / 455 / 550 / 574 / 584 等单测数字 | 当前为 **593**（80 个测试类） | ✅ 574 已回填；584 / 593 待回填 |
 | PRD「10 个文件 / 9 个测试类」 | 实为 **10 个文件 / 10 个测试类**（`BackupImporterTest.kt` 含两个类） | ✅ 已改 PRD |
 | PRD「默认文件名对齐参考版」 | 参考版是 `_MeaPet-Android.zip`，本项目是 `_MeaPet-backup.zip`，并非对齐 | ✅ 已改 PRD 与互通审计 |
 | `2026-11-18-sqlite-context-plan.md` 记录「日文数字排入 1.9.0」 | 已实现，该记录已过时 | ✅ `TODO.md` 与本文已按实现更新 |
