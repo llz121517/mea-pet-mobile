@@ -6,6 +6,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -78,25 +79,36 @@ class ConversationManager(
     private val persistEnabled = repository != null && persistScope != null
     private val persistQueue = Channel<PersistOp>(Channel.UNLIMITED)
 
+    /** 落盘消费协程；scope 取消后用它判断消费者是否还活着（见 [flush]）。 */
+    @Volatile
+    private var persistJob: Job? = null
+
     init {
         if (repository != null && persistScope != null) {
-            persistScope.launch(Dispatchers.IO) {
-                for (op in persistQueue) {
-                    try {
-                        when (op) {
-                            is PersistOp.Append -> repository.append(op.message)
-                            is PersistOp.AppendAll -> repository.appendAll(op.messages)
-                            is PersistOp.Remove -> repository.remove(op.id)
-                            PersistOp.Clear -> repository.clear()
-                            is PersistOp.ReplaceAll -> repository.replaceAll(op.messages)
-                            is PersistOp.Flush -> op.done.complete(Unit)
+            persistJob = persistScope.launch(Dispatchers.IO) {
+                try {
+                    for (op in persistQueue) {
+                        try {
+                            when (op) {
+                                is PersistOp.Append -> repository.append(op.message)
+                                is PersistOp.AppendAll -> repository.appendAll(op.messages)
+                                is PersistOp.Remove -> repository.remove(op.id)
+                                PersistOp.Clear -> repository.clear()
+                                is PersistOp.ReplaceAll -> repository.replaceAll(op.messages)
+                                is PersistOp.Flush -> op.done.complete(Unit)
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Persist op failed: ${op::class.simpleName}", e)
+                            if (op is PersistOp.Flush) op.done.complete(Unit)
                         }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Persist op failed: ${op::class.simpleName}", e)
-                        if (op is PersistOp.Flush) op.done.complete(Unit)
                     }
+                } finally {
+                    // 消费者退出（scope 取消）后不会再有消费者：关闭队列拒绝新 op，
+                    // 并兜底完成已入队但永远不会被执行的 Flush，避免 flush() 永久挂起。
+                    persistQueue.close()
+                    drainQueueAfterStop()
                 }
             }
         }
@@ -445,12 +457,33 @@ class ConversationManager(
      */
     suspend fun flush() {
         if (!persistEnabled) return
+        // 消费协程可能已随 scope 取消而退出：此时入队的 Flush 没人会完成，
+        // 必须立即返回，否则 onStop 等调用方会挂在这里。
+        if (persistJob?.isActive != true) {
+            Log.w(TAG, "Persist consumer inactive (scope cancelled?); flush skipped")
+            return
+        }
         val done = CompletableDeferred<Unit>()
-        persistQueue.send(PersistOp.Flush(done))
+        if (persistQueue.trySend(PersistOp.Flush(done)).isFailure) {
+            // 退出时队列已被关闭：无需等待一个永远不会完成的 Deferred
+            Log.w(TAG, "Persist queue closed; flush skipped")
+            return
+        }
         done.await()
     }
 
     // ── 内部 ──────────────────────────────────────────
+
+    /** 消费协程退出时兜底：丢弃不会再执行的 op，并完成其中等待中的 Flush。 */
+    private fun drainQueueAfterStop() {
+        var pending = 0
+        while (true) {
+            val op = persistQueue.tryReceive().getOrNull() ?: break
+            pending++
+            if (op is PersistOp.Flush) op.done.complete(Unit)
+        }
+        Log.w(TAG, "Persist consumer stopped; $pending queued op(s) discarded")
+    }
 
     /** 必须在持有 [lock] 时调用，保证入队顺序与内存变更顺序一致。 */
     private fun enqueue(op: PersistOp) {
