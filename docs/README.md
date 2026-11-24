@@ -14,8 +14,10 @@
 | 安装 / 编译 / 配置 App，了解功能 | [`README.md`](../README.md) |
 | 知道某个版本改了什么 | [`CHANGELOG.md`](../CHANGELOG.md)；1.6.0 及更早见 [`archive/changelog/`](archive/changelog/) |
 | 接手续做代码审查遗留项 | [`TODO.md`](TODO.md) ← **唯一在维护的待办清单** |
+| **1.9.0 发版前收尾与真机验收** | [`2026-11-22-release-checklist.md`](2026-11-22-release-checklist.md)（勾选状态 + 判据）；已执行的 adb 自动化记录见 [`2026-11-24-adb-automation-plan.md`](2026-11-24-adb-automation-plan.md) |
 | 了解记忆工具、只读回退、自动摘要与数据兼容 | [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) |
 | 导出 / 导入自己的设置与数据（数据与备份） | [`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md)、[`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md) |
+| 了解备份包与社区分支的格式互通边界 | [`2026-11-23-backup-format-compat.md`](2026-11-23-backup-format-compat.md) |
 | 了解 TTS 的设计、发音规则与已知边界 | [`tts/architecture.md`](tts/architecture.md) |
 | 复现 / 重新打包 TTS 模型包与词表 | [`tts/model-package.md`](tts/model-package.md)、[`tts/g2p-pipeline.md`](tts/g2p-pipeline.md)、[`tools/tts/README.md`](../tools/tts/README.md) |
 | 查 1.8.0 真机验收记录（已通过，归档） | [`archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](archive/checklists/2026-11-15-tts-device-test-1.8.0.md) |
@@ -62,6 +64,9 @@
 | [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) | 联网搜索与抓取的已接入行为、适配器配置与待真机验收项 |
 | [`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md) | 1.9 数据与备份：需求决策、包格式、交互流程与测试清单（**已实现**，状态见文首） |
 | [`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md) | 1.9 数据与备份详细设计：模块划分、条目结构、接口、错误文案与测试设计（实现状态见 §3 开头） |
+| [`2026-11-23-backup-format-compat.md`](2026-11-23-backup-format-compat.md) | 备份包与社区参考分支的逐字段互通性审计（**一次性结论**，已实施部分见文首状态头） |
+| [`2026-11-22-release-checklist.md`](2026-11-22-release-checklist.md) | 1.9.0 发版收尾与真机验收：勾选状态、判据、已知问题与发版步骤（**一次性清单**，发版后归档） |
+| [`2026-11-24-adb-automation-plan.md`](2026-11-24-adb-automation-plan.md) | 上述清单的 adb 自动化分拣结果与实测证据（**一次性执行记录**） |
 
 ## 3. 历史归档（只读，不再维护）
 
@@ -96,6 +101,7 @@
 2. **状态头**：一次性文档（计划、迁移报告、真机清单）在标题下写明状态（进行中 / 已完成 / 待执行）与对应版本。
 3. **过时即删**：描述旧代码状态、会误导人的文档直接删除（git 历史可追溯），不进归档；只有长期有价值的版本化资料才归档（见 §3）。
 4. **TODO 与 CHANGELOG 联动**：`TODO.md` 勾掉 / 新增条目时，用户可见改动同步写进 `CHANGELOG.md`（见 TODO 页首约定）。
-5. **改代码要顺手改文档**：涉及 TTS 发音规则、模型包清单、迁移 step、发布流程的改动，必须同步更新对应活跃文档；真机验收需要**新写清单**（1.8.0 的记录已归档，只读不改）。
-6. **提交前查链接**：`docs/` 内相对链接必须可达，可跑 `node tools/check_doc_links.mjs` 自查；路径写法见本页示例（同目录直接写文件名，跨目录用相对路径）。
-7. **冲突处理**：文档与代码不一致时以代码为准，并及时修正文档（行号会漂移，引用一律优先用符号名）。
+5. **改代码要顺手改文档**：涉及 TTS 发音规则、模型包清单、迁移 step、发布流程的改动，必须同步更新对应活跃文档；每个版本的真机验收**新写清单**，不复用旧清单（1.8.0 的记录已归档，只读不改）。
+6. **发版清单格式统一**：条目一律写成**表格行**（`检查项 | 步骤 | 预期 | 状态`），状态只用 `✅ 已通过` / `🟡 部分完成` / `⬜ 未执行` / `❌ 失败` 四档；部分完成不算通过，证据写在该节「已验证明细」。这样可用一条正则统计进度，也便于与 `TODO.md` 对账。
+7. **提交前查链接**：`docs/` 内相对链接必须可达，可跑 `node tools/check_doc_links.mjs` 自查；路径写法见本页示例（同目录直接写文件名，跨目录用相对路径）。
+8. **冲突处理**：文档与代码不一致时以代码为准并及时修正（行号会漂移，引用优先用符号名）。整理文档时若发现数字 / 行号漂移，**当场改对并注明复核日期**，不要只留「待确认」让人二次核对。

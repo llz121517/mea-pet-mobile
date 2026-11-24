@@ -100,12 +100,14 @@ viewmodel/BackupViewModel.kt    ui/screen/settings/DataSettings.kt
 
 ### 3.2 默认文件名
 
+> **2026-11-24 更正**：本文审计时（commit `1f4fae8`，23:07:51）本项目文件名仍为 `_MeaPet-Android.zip`；该模板已在 **17 秒前**的 commit 里改成 `_MeaPet-backup.zip`。下表已按当前代码（`BackupExporter.kt:23`）更正。文件名不参与任何校验，此项不影响互通结论。
+
 | 项 | 参考版 | 本项目 | 判定 |
 |---|---|---|---|
-| 模板 | `${utcCompact}_MeaPet-Android.zip`（`BackupExporter.kt:48`） | 同（`BackupExporter.kt:23`） | **相同** |
-| 时间戳格式 | `yyyy-MM-dd'T'HHmmss'Z'` → `2026-10-20T030000Z`（`BackupService.kt:24`；测试 `BackupExporterTest.kt:130-135`） | `yyyyMMdd'T'HHmmss'Z'` → `20261122T153000Z`（`BackupService.kt:99-103`；测试 `BackupExporterTest.kt:155-160`） | **不同**（仅文件名外观；**不参与任何导入校验**，因为导入用 SAF 显示名/任意文件名） |
+| 模板 | `${utcCompact}_MeaPet-Android.zip`（参考版 `BackupExporter.kt:48`） | `${utcCompact}_MeaPet-backup.zip`（本项目 `BackupExporter.kt:23`） | **不同**（纯外观，**不参与任何导入校验**，因为导入用 SAF 显示名 / 任意文件名） |
+| 时间戳格式 | `yyyy-MM-dd'T'HHmmss'Z'` → `2026-10-20T030000Z`（`BackupService.kt:24`；测试 `BackupExporterTest.kt:130-135`） | `yyyyMMdd'T'HHmmss'Z'` → `20261122T153000Z`（`BackupService.kt:99-103`；测试 `BackupExporterTest.kt:155-160`） | **不同**（仅文件名外观；不参与任何导入校验） |
 | 时区 | UTC（`withZone(ZoneOffset.UTC)`） | 同 | **相同** |
-| 大小写 | `_MeaPet-Android.zip` | 同 | **相同** |
+| 大小写 | `.zip` 小写 | 同 | **相同** |
 
 ### 3.3 manifest.json
 
@@ -233,7 +235,7 @@ viewmodel/BackupViewModel.kt    ui/screen/settings/DataSettings.kt
 | A6 | **壁纸条目**（二进制直传） | 参考 `BackupCollector.kt:80-86` ↔ 我们 `BackupCollector.kt:105-113`；落地参考 `AppBackupApplier.kt:96-118` ↔ 我们 `BackupImporter.kt:129-155` | 编码方式、路径形态、落地语义三层都等价 ⇒ **除 C1 的整包拒绝外没有其它阻断点**；一旦放宽未知类别，壁纸是唯一能"原字节落地"的共有类别（未实跑，见 §1.3） |
 | A7 | **文本条目 64 MiB 内存闸 / 二进制不设闸** | 参考 `BackupInspector.kt:41,50-67` ↔ 我们 `BackupInspector.kt:65,203-236` | 同一数值、同一判据 |
 | A8 | **`bytes` 与 zip 未压缩长度自洽** | 参考强校验 `BackupInspector.kt:95-100`；我们写出值 `BackupContract.kt:26,34` | 按 zip4j 的写入口径两者应相等（`Text` 取 UTF-8 字节数、`FileSource` 取 `file.length()`，STORE 条目显式 `setEntrySize`）⇒ 我们的包应能过他们的强校验；**未实跑交叉验证**，见 §1.3 |
-| A9 | **默认文件名后缀与模板** `<…>_MeaPet-Android.zip` | 参考 `BackupExporter.kt:48` ↔ 我们 `BackupExporter.kt:23` | 仅时间戳格式不同（A 级：不影响任何解析） |
+| A9 | **默认文件名后缀与模板**：参考 `<…>_MeaPet-Android.zip`，本项目 `<…>_MeaPet-backup.zip`（**2026-11-24 更正**：审计时本项目仍为 `_MeaPet-Android.zip`，改名发生在审计 commit 前 17 秒） | 参考 `BackupExporter.kt:48` ↔ 我们 `BackupExporter.kt:23` | 模板后缀与时间戳格式都不同（A 级：不影响任何解析） |
 | A10 | **`createdAt` 只当不透明字符串** | 参考 `BackupInspector.kt:103`、`BackupViewModel.kt:220`；我们 `BackupInspector.kt` 不解 `createdAt`、UI `DataSettings.kt:664-672` 解析失败原样展示 | 两边格式不同但都不校验 ⇒ 不阻断 |
 | A11 | **密码不进状态、不落盘、不写日志** | 两侧 `BackupUiState` 都无密码字段；导出侧都清零 | 语义一致，无互通成本 |
 | A12 | **`exchangeCount` 缺失可接受** | 我们 `MemoryPayload.exchangeCount` 有默认 0（`BackupCodec.kt:21-24`） | 注意：**默认 0 ≠ 正确值**，落地会清零本机计数（见表 B-6） |

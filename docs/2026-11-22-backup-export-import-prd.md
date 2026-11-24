@@ -1,12 +1,12 @@
 # 配置与数据导出导入与备份（1.9 计划）
 
-> 状态：**已实现（2026-11-23）**。实现落点：`app/src/main/java/com/meapet/mobile/backup/`（格式、设置白名单、编解码、采集、条数对比、导出、校验、导入、SAF 封装）、`app/src/main/java/com/meapet/mobile/viewmodel/BackupViewModel.kt`、`app/src/main/java/com/meapet/mobile/ui/screen/settings/DataSettings.kt`，单测在 `app/src/test/java/com/meapet/mobile/backup/`（10 个文件 / 9 个测试类、87 例，`BackupTestFakes.kt` 是测试辅助）。详细设计见 [`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md)；与社区参考实现的**逐字段互通性审计**见 [`2026-11-23-backup-format-compat.md`](2026-11-23-backup-format-compat.md)。参考实现：社区版分支 [`mea-pet-mobile-fork-fo-pr`](https://gitee.com/flexiatom/mea-pet-mobile-fork-fo-pr)（其 `backup/` 包 + `DataSettings.kt`）。
+> 状态：**已实现（2026-11-23）**。实现落点：`app/src/main/java/com/meapet/mobile/backup/`（格式、设置白名单、编解码、采集、条数对比、导出、校验、导入、SAF 封装）、`app/src/main/java/com/meapet/mobile/viewmodel/BackupViewModel.kt`、`app/src/main/java/com/meapet/mobile/ui/screen/settings/DataSettings.kt`，单测在 `app/src/test/java/com/meapet/mobile/backup/`（10 个文件 / 10 个测试类、87 例；`BackupTestFakes.kt` 是测试辅助，`BackupImporterTest.kt` 内含 `BackupImporterTest` 与 `BackupCollectorTest` 两个类）。详细设计见 [`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md)；与社区参考实现的**逐字段互通性审计**见 [`2026-11-23-backup-format-compat.md`](2026-11-23-backup-format-compat.md)。参考实现：社区版分支 [`mea-pet-mobile-fork-fo-pr`](https://gitee.com/flexiatom/mea-pet-mobile-fork-fo-pr)（其 `backup/` 包 + `DataSettings.kt`）。
 >
 > **借鉴原则：借鉴设计，不借鉴实现。**
 >
 > - **对齐**：包结构与 manifest 语义、两级版本校验、按类别选择/按类别覆盖、SAF 选位置、密码不落盘不进状态、暂存目录清扫、文本条目内存闸 + 二进制流式写盘、密码错误不泄露包内信息。
 > - **不照搬**：参考版按「磁盘 JSON 文件」采集（`chatFile`/`memoryFile` 直接 `readText` 透传）。本项目 1.9 起会话、记忆、压缩状态都在 **SQLite 单库**，必须从库中读业务数据再序列化，不能复制 `.db` 文件，也不能沿用它的文件路径假设。
-> - **格式尽量对齐**：条目名（`settings`/`memory`/`chat`/`wallpaper`）、`format`/`schema` 版本语义、`manifest.json` 字段形态、`files/<category>` 包内路径、默认文件名 `<UTC紧凑>_MeaPet-backup.zip`，都对齐参考版；新增条目（`compaction`）按同样约定扩展。
+> - **格式尽量对齐**：条目名（`settings`/`memory`/`chat`/`wallpaper`）、`format`/`schema` 版本语义、`manifest.json` 字段形态、`files/<category>` 包内路径，都对齐参考版；新增条目（`compaction`）按同样约定扩展。**默认文件名例外**：参考版为 `<UTC紧凑>_MeaPet-Android.zip`，本项目为 `<UTC紧凑>_MeaPet-backup.zip`（`BackupExporter.kt:23`），文件名不参与任何校验，差异不影响互通。
 > - **互通边界（实测结论）**：**zip 信封与 manifest 完全同源，但内层三个共有条目的 JSON 根形状不同**——参考版 settings 为平铺对象而非 `{"values":{…}}`、chat/memory 为裸数组而非包装对象；且条目集合各缺一类（参考版有 `pet_form`、我们有 `compaction`）。按两侧现有代码，双向都会因根形状不匹配而「读包通过、逐类导入失败」。详见互通性审计文档。
 
 ## 1. 目标

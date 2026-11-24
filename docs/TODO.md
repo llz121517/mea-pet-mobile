@@ -42,7 +42,7 @@
 - [ ] **1.10：清理备胎代码** — `MemoryRepository`（JSON 实现）、`ConversationStore` 与相关单测；legacy 导入保留到 1.11（见 `legacy-compat.md`）。**2026-11-22 复核**：`MemoryRepository` 已无任何实例化点、`ConversationStore` 只剩一个无人读取的 `lazy` 属性，两者实际已是死代码，可提前到 1.9.x 删除。
 - [ ] **被打断 turn 的 `interrupted` 落库标记** — 当前仅 `TurnMetrics` 日志记录，无消费方；等有「中断轮次分析」需求再补（`extra_json` 或 meta 记录，不改 schema）。
 - [ ] **备用 tail 模式（`SEPARATE_USER`）未接线** — 只有常量与单测，没有设置入口，也没有计划里的「返回 400/500 且正文命中模板报错 → 回退 MERGE_USER 并按 baseUrl+model 缓存」探测 / 降级逻辑；默认 MERGE_USER 兼容性最好，暂不启用，等确有端点需要连续 user 时再做（避免写永不执行的死代码）。
-- [ ] **数据与备份真机验收（1.9.0）**（[PRD](2026-11-22-backup-export-import-prd.md) §8）— 导出→改数据→导入→逐类核对（设置/对话/记忆/压缩状态/壁纸）；错误密码与版本不符整包拒绝；SAF 取消路径；大壁纸（不触发文本 64 MiB 上限）；导入后 UI 与模型上下文都能读到新数据；确认弹窗的「本机 → 包内」条数与实际一致。单测已覆盖 85 例（`app/src/test/java/com/meapet/mobile/backup/`），真机验收未做。
+- [ ] **数据与备份真机验收（1.9.0）**（[PRD](2026-11-22-backup-export-import-prd.md) §8）— 导出→改数据→导入→逐类核对（设置/对话/记忆/压缩状态/壁纸）；错误密码与版本不符整包拒绝；SAF 取消路径；大壁纸（不触发文本 64 MiB 上限）；导入后 UI 与模型上下文都能读到新数据；确认弹窗的「本机 → 包内」条数与实际一致。单测已覆盖 87 例（`app/src/test/java/com/meapet/mobile/backup/`）。**2026-11-24 已完成主链路的真机自动化**（导出 / 加密 / 条数对比 / 强制确认 / 导入落地 / 刷新与状态清理，证据见 [`2026-11-24-adb-automation-plan.md`](2026-11-24-adb-automation-plan.md) §5.2）；**仍需人工**：版本不符整包拒绝、SAF 取消路径、大壁纸、导入后压缩状态刷新。
 - [ ] **联网工具真机验收**（见 [联网工具方案](2026-11-19-web-search-plan.md)）— 验证 DeepSeek 官方 Key、AnySearch 匿名与 token、搜索后读取正文、设置切换、限流和额度提示。
 - [ ] **设备残留数据清理**（可选，下次接设备时）— 测试注入的长消息、重复记忆 `mem_ln3glfhc` / `mem_39ypzmxj`。
 
@@ -65,6 +65,7 @@
 - [ ] **G8 `create_memory` 允许空 `keywords`** — 空关键词记忆在只读/关键词检索路径永远匹配不到;应与摘要流程一致要求至少 1 个有效关键词。
 - [ ] **G11 上下文窗口手动值 <1024 被静默当成自动、重新检测用固定 delay** — 非法值应校验/提示;「重新检测」应随探测完成信号刷新,而不是固定 `delay(1500)`。
 - [ ] **G13 `search_memory` 的 `total_matched` 语义错误** — 当前取的是检索返回条数(受 limit/体积截断影响),不是库中总命中数;应改为真实总命中数,或改字段名/删除。
+- [ ] **G15 压缩摘要与保留窗口的断层**(2026-11-24 真机反馈新增)— 摘要只在压缩时整体重写,两次压缩之间发生在保留窗口里的状态变化(尤其「待办已完成」)永远不会回到摘要,模型同时看到「摘要说未完成」与「原文显示已完成」而自相矛盾。四个成因:① 摘要生成时刻冻结、之后不重写;② 摘要 prompt 明确要求保留「进行中的话题」,没有「只写耐久事实 / 状态类须带时间」的约束(`chat/compaction/ContextCompactor.kt:87-89`);③ 摘要输入只含 `messages.take(foldCount)`,**不含保留窗口**,模型无从知道窗口内已完成(同文件 `:56,96-112`);④ 注入侧只写「(较早内容的压缩,供参考)」,没有「与后文冲突以后文为准」的优先级约定(`ConversationManager.kt:223-227`)。放大器:手动 / 自动压缩无互斥(G5)、`coveredToMessageId` 失效时 `resolveSkip` 返回 0 导致摘要与原文同屏(`ChatService.kt:853-857`)、摘要不带时间戳。**建议修法(低成本组合,未实施)**:摘要 prompt 只允许耐久事实、进度类须带「截至 <日期>」;注入句改为「以下摘要来自较早对话(截至 X),若与后文原文冲突,以后文为准」;摘要请求额外带入折叠边界后 3~5 条作为「仅用于判断哪些状态已过期」的只读重叠区。存储 schema、发送预算与 prefix cache 均不受影响,可纯 JVM 单测覆盖(沿用 `FakeHttpClientEngine` 抓 body 的写法)。**未确认**:真实模型对优先级句的服从度、重叠区取几条最优、真机发生率。
 
 > 每项独立 `assembleDebug` 编过;运行时行为(尤其授权开关一致性 #15)需真机验证。
 
@@ -79,7 +80,7 @@
 - [ ] **#14 并发原语统一(含 #1 lifeMap)** — `ConversationManager` 的 `synchronized(lock)` 改协程 `Mutex` + `suspend`(主线程确实会进这把锁:ChatViewModel 三条路径);lifeMap 随 #11 收敛为 actor / 单协程状态机(#1 目前仅线程约束注释,actor 化在此一并做)。
 - [ ] **#16** 客户端生命周期统一 — `SettingsViewModel.fetchModels` 里 `reloadClient()` 对本次拉取无作用(用的是临时 new 的实例);改成"落盘 → `reloadClient()` → 用容器 `apiClient` 拉取",删临时客户端。
 - [ ] **#9** 拆 ChatViewModel(约 800 行/9 块职责)与 SettingsViewModel(约 760 行/约 40 个状态字段/43 个公开方法)— 前者优先拆气泡寿命调度、更新检测、记忆 CRUD;后者按 Api/Tts/Appearance/Privacy 拆,或先把 `SettingsUiState` 按域拆成嵌套子状态。
-- [ ] **#8** 拆 Live2dDelegate(338 行/7 项职责)— 优先切出触摸交互与分区判定、分区语音与 TTS 互斥、壁纸与背景色参数;GL 生命周期 + 单例 + Activity 持有留原类。
+- [ ] **#8** 拆 Live2dDelegate(2026-11-24 实测 **372 行**/7 项职责)— 优先切出触摸交互与分区判定、分区语音与 TTS 互斥、壁纸与背景色参数;GL 生命周期 + 单例 + Activity 持有留原类。
 - [ ] **#10** companion var 布线改显式注入(AppContainer) — `ttsPlayingChecker`/`ttsStopper`/`TtsManager.onPlaybackStart` 三个全局可变回调改为一个 `VoiceMutex` 接口(或共享 `StateFlow<Boolean>`)由容器注入。
 - [ ] **#12** `Live2dModel` 别调 `Activity.finish()`(Live2dModel.kt:144, 219)— 加载失败改为返回值/回调上抛(`onModelLoadFailed`),由 Activity 决定;注意 `draw()` 跑在 GL 线程,回调要切主线程。
 - [ ] **#31** 拆 `ChatUiState`(chat/ChatState.kt:21-29)— `updateNotice`/`memoryDialog` 移出(#4 那个 bug 就是它俩被卷进整体重置导致的)。
@@ -91,23 +92,23 @@
 **重复代码**
 
 - [ ] #20 `SettingsManager` 约 28 项设置 × 3 份样板(重复成员随之增加)→ 泛型 `Setting<T>` + 委托生成 Flow/get/set
-- [ ] #21 `SettingsViewModel` 5 处「读旧值-比较-写」(`saveApiKey`/`saveApiUrl`/`saveModel`/`saveSystemPrompt`/`selectModel`)→ 抽 `saveIfChanged`
+- [ ] #21 `SettingsViewModel` **6 处**「读旧值-比较-写」(`saveApiKey`/`saveApiUrl`/`saveModel`/`saveContextWindow`/`saveSystemPrompt`/`selectModel`)→ 抽 `saveIfChanged`（2026-11-24 复核：1.9 新增的 `saveContextWindow` 使原 5 处变 6 处）
 - [ ] #25 抽公共基类:`dp()`/`Int.withAlpha()` 四处逐字重复(悬浮窗四个窗口);着色器 `compileShader`/`checkShaderCompiled`/`checkProgramLinked` 共 30 行逐字重复(`Live2dSpriteShader` ≡ `WallpaperBlurShader`)。**`place()` 仅 3 处且彼此有差异,别硬抽**
 - [ ] #26 抽 `MeaPetDialogCard`:`PrivacyDialog`/`AutoUpdateOptInDialog`/`ChatScreen` 卡片五个数值逐字一致
 - [ ] #45 抽 `BubbleContainer`:**只对 `UserBubble` 与 `AssistantBubble` 有效**,`SystemBanner` 结构不同别硬合
 
 **可读性 / 命名**
 
-- [ ] #22 魔法数字提常量(原 8 处;「SystemBubblePolicy 排位阈值 3」已在批次 1 提为 `KEEP_FULL_LIFE_POSITIONS`,余 7 处):`ChatViewModel` 的 `takeLast(5)`、`KtorHttpClientEngine` 的 `300_000`/`30_000`(顺便做成可配)、`SettingsViewModel` 的 `8`/`4`、`MainActivity` 的 `0x14`/`0xF7`/`0xFFF7F7F7`、`Live2dDelegate` 的 `30f`/`400L`/`±0.45f`/`-0.44f`/`0.66f`、`LogExporter` 的 `dropLast(5)`、`ChatScreen` 的 `100.dp`
+- [ ] #22 魔法数字提常量(原 8 处;「SystemBubblePolicy 排位阈值 3」已在批次 1 提为 `KEEP_FULL_LIFE_POSITIONS`,余 7 处):`ChatViewModel` 的 `takeLast(5)`、`KtorHttpClientEngine` 的 `300_000`/`30_000`(顺便做成可配)、`SettingsViewModel` 的 `8`/`4`、`MainActivity` 的 `0x14`/`0xF7`/`0xFFF7F7F7`、`Live2dDelegate` 的 `30f`/`400L`/`±0.45f`/`-0.44f`/`0.66f`、`LogExporter` 的 `dropLast(5)`、`ChatScreen` 的 `100.dp`。**2026-11-24 复核**:`SettingsViewModel` 的 `8`/`4` 现在指的是 API Key 遮罩(`"****"` 长度 8、`take(4)`/`takeLast(4)`),与待办原意可能不是同一处,复核「7 处」构成时别把它算进去
 - [ ] #17 / #47 `Pair` 换命名 data class:`ChatService.sendMessage` → `ChatExchange(user, assistant)`(注意:现为两个重载 + 失败回滚,返回仍是 Pair);`SystemBubblePolicy` → `NextLife(lifeMs, reduceCount)`(`SymbolTable` 已随 1.8.0 删除,无需处理)
-- [ ] #48 / #35 拆超长方法:`ChatService.sendMessage`(现两个重载 + 回滚逻辑,只更长)拆 `buildRequest`/`parseReply`/`schedulePostProcess`;`MainActivity.onCreate`(约 220 行)拆 `setupFirstFrameTheme`/`setupGlSurface`/`setupComposeContent`/`setupTouchForwarding`
+- [ ] #48 / #35 拆超长方法:`ChatService.sendMessage`(现两个重载 + 回滚逻辑,只更长)拆 `buildRequest`/`parseReply`/`schedulePostProcess`;`MainActivity.onCreate`(2026-11-24 实测 81–232 行,约 **152 行**;文件共 485 行)拆 `setupFirstFrameTheme`/`setupGlSurface`/`setupComposeContent`/`setupTouchForwarding`
 
 **规范 / i18n**
 
 - [ ] #23 文案抽 `strings.xml`(实测中文 387 处、`stringResource` 0 次)— 先抽高频页 `ChatScreen`/`PrivacyDialog`;`SettingsKeys` 里写死的 SystemPrompt(745 字)移 `assets/` 或 `res/raw/`
 - [ ] #27 空 catch 补注释(全树 20 余处无注释)— `ErrorHandling.kt` 明文要求"必须有一行注释说明为何可安全忽略"
 - [ ] #30 + 新-2 `isStreaming` 处置 — main 源码从未置 true(`ChatService` 固定 `stream = false`)。要么删掉它连同 `ChatBubble` 的死 UI 分支与 `MarkdownText` 的 `closeUnclosedFences` 参数,要么真的把流式做出来,别留着当装饰
-- [ ] #28 清死代码:`Live2dSprite` `textureId` 构造参数(被同名形参遮蔽)、`Live2dView.setClearColor()`、`Type.kt` 注释掉的 16 行、`ApiRequest` 三个仅测试调用的方法、`MeaPetApplication.onTerminate()`、`Color.kt` 6 个零引用常量
+- [ ] #28 清死代码:`Live2dSprite` `textureId` 构造参数(被同名形参遮蔽)、`Live2dView.setClearColor()`、`Type.kt` 注释掉的 16 行、`ApiRequest` **5 个**仅测试调用的方法(`visionMessage`/`transcriptionParts`/`speech`/`imageUrlContent`/`textContent`)、`MeaPetApplication.onTerminate()`、`Color.kt` 6 个零引用常量
 
 **工程**
 
@@ -124,7 +125,7 @@
 
 ## 📌 待办 D · 语音增强(1.9.0)
 
-- [x] **日文上下文数字/日期读法** — 已实现（2026-11-22）：`rewriteJapaneseNumbers` 在归一化层把日文上下文里的整数转为假名数词，覆盖日期（1日→ついたち、20日→はつか）、月份（9月→くがつ）、时刻（15時→じゅうごじ、4時→よじ）、分钟、人数、年龄与常见量词音变；中日文同形的数字串靠「整段是否含假名」区分，判不出时降级保留原数字交给 `ruleFsts`。实现细节见 `docs/tts/architecture.md` §3.1，用例见 `JapaneseNumbersTest`。**待真机验收**：日文句的听感与句间停顿。
+- [x] **日文上下文数字/日期读法** — 已实现（2026-11-22）：`TtsTextNormalizer.rewriteJapaneseNumbers` 在归一化层把日文上下文里的整数转为假名数词，覆盖日期（1日→ついたち、20日→はつか）、月份（9月→くがつ）、时刻（15時→じゅうごじ、4時→よじ）、分钟、人数、年龄与常见量词音变；中日文同形的数字串靠「整段是否含假名」区分，判不出时降级保留原数字交给 `ruleFsts`。实现细节见 `docs/tts/architecture.md` §3.1，用例见 `JapaneseNumbersTest`（13 例）。**只剩真机听感验收**：日文句的语气与句间停顿（步骤见 [`2026-11-22-release-checklist.md`](2026-11-22-release-checklist.md) §2.6）。
 
 ---
 
