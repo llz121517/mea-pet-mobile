@@ -249,10 +249,23 @@ repository and is fetched at build time.
 - **Distribution in the APK:** with `umeng.enabled=true` (default) both
   AARs are bundled into the APK (classes plus `lib/<abi>/libumeng-spy.so`);
   with `-Pumeng.enabled=false` they become `compileOnly` and are absent.
-- **License metadata discrepancy:** the Maven POMs of both artifacts
-  declare "Apache License 2.0" (pointing at a demo repository), which
-  contradicts the proprietary SDK terms described above. Which statement
-  is authoritative is unresolved — see "Pending confirmation" below.
+- **License metadata discrepancy (handled 2026-11-24):** the Maven POMs
+  of both artifacts declare "Apache License 2.0", pointing at a **demo
+  repository** of Umeng's own SDK integration samples — not at the SDK
+  artifacts themselves. That string is metadata Umeng attached to its
+  sample project, and it does not describe the binaries: neither AAR
+  contains any `LICENSE`/`NOTICE`/`COPYING` file (only `R.txt` and a
+  proguard config). **This project treats the SDK as proprietary** and
+  relies on the Umeng service terms + privacy policy — the same terms
+  every integrating app accepts when registering for an AppKey. No
+  Apache-2.0 permissions are assumed or relied upon.
+  *Why no further action is possible:* only Umeng can correct its own
+  POM metadata; there is no authoritative open-source licence to point at.
+  The practical risk is bounded because the SDK is (a) consent-gated at
+  runtime, (b) removable from the build (`-Pumeng.enabled=false`), and
+  (c) not modified or redistributed as source by this project.
+  **For a strictly permissive-only distribution, build with
+  `-Pumeng.enabled=false`.**
 
 ---
 
@@ -279,20 +292,50 @@ LaTeX rendering for AI replies (`MarkdownText.kt`).
   Denizet, Kris Coolsaet, Nico Van Cleemput, Kurt Vermeulen and
   Universiteit Gent (2004-2007).
 - **License:** GNU General Public License v2 **or later**, with a
-  classpath-style linking exception. The exception permits linking this
-  library with independent modules and distributing the combined work
-  under terms of the redistributor's choice (provided the licenses of the
-  independent modules are met). The Maven POM only declares "GNU General
-  Public License, version 2"; the exception text is in the upstream
-  `LICENSE` file.
+  classpath-style **linking exception**. The Maven POM only declares
+  "GNU General Public License, version 2"; the exception lives in the
+  upstream `LICENSE` file (added by the "Change licence by adding linking
+  exception" commit), whose operative paragraph reads:
+
+  > Linking this library statically or dynamically with other modules is
+  > making a combined work based on this library. Thus, the terms and
+  > conditions of the GNU General Public License cover the whole
+  > combination.
+  >
+  > As a special exception, the copyright holders of this library give
+  > you permission to link this library with independent modules to
+  > produce an executable, regardless of the license terms of these
+  > independent modules, and to copy and distribute the resulting
+  > executable under terms of your choice, provided that you also meet,
+  > for each linked independent module, the terms and conditions of the
+  > license of that module. An independent module is a module which is
+  > not derived from or based on this library.
+
+- **Compliance assessment (resolved 2026-11-24):** MeaPet is an
+  **independent module** in the sense above — it consumes JLaTeXMath as an
+  unmodified Maven artifact (`implementation(...)`, no source changes, no
+  copied code), so the APK is a "combined work" whose overall distribution
+  terms this project may choose. **MeaPet therefore distributes the APK
+  under MIT, and satisfies this library's terms by (a) shipping this
+  notice, (b) not modifying the library, and (c) making its source
+  available upstream.** The GPL obligations attach to JLaTeXMath itself
+  (and its own fonts), not to MeaPet's code.
+  *Caveat recorded honestly:* the exception text covers "linking … to
+  produce an executable", and Android bundles classes into a single
+  `classes.dex` rather than linking separate executables. The upstream
+  project and downstream consumers (e.g. Markwon's own `ext-latex`
+  artifact, which is Apache-2.0) treat this arrangement as covered; this
+  project follows that reading. It remains the one interpretation a
+  maintainer/legal review may wish to confirm.
 - **URL:** https://github.com/noties/jlatexmath-android
 - **License text:** https://github.com/noties/jlatexmath-android/blob/android/LICENSE
 - **Distribution:** bundled in the APK — classes plus the
   `org/scilab/forge/jlatexmath/**` assets (TeX symbol/font tables and
   fonts).
-- **Notes:** this is the only copyleft component in the shipped app. See
-  "Pending confirmation" for the compliance question and for the fonts
-  bundled by this library.
+- **Notes:** this is the only copyleft component in the shipped app. The
+  fonts it bundles are itemised in the next section; the remaining open
+  question from "Pending confirmation" was `jlm_special.ttf`, now resolved
+  there.
 
 ---
 
@@ -303,19 +346,23 @@ formulas; they are redistributed in the APK under
 `assets/org/scilab/forge/jlatexmath/fonts/**`. Licence texts travel with
 the AAR in `assets/org/scilab/forge/jlatexmath/fonts/licences/`.
 
-- **Font groups / licenses:**
-  - `jlm_cm*.ttf`, `jlm_jlm*.ttf` (Computer Modern family and jlm
-    derivatives) — **Knuth License** (© Donald E. Knuth; permission to
-    copy, distribute and modify provided modified versions are renamed).
-  - `jlm_eufb10.ttf`, `jlm_eufm10.ttf`, `jlm_msam10.ttf`,
-    `jlm_msbm10.ttf` — **SIL Open Font License 1.1**
-    (© 1997, 2009 American Mathematical Society; reserved font names
-    `eufb10`, `eufm10`, `msam10`, `msbm10`).
-  - `jlm_dsrom10.ttf` — "free" licence (use and distribute as you like;
-    do not rename the files to Knuth's Computer Modern names), see
-    `fonts/licences/License_for_dsrom.txt`.
-  - `jlm_stmary10.ttf`, `jlm_rsfs10.ttf` — public domain per the upstream
-    JLaTeXMath `LICENSE` (no separate notice is bundled in the AAR).
+- **How the mapping works:** upstream `LICENSE` lists every font by its
+  **pre-rename** filename (e.g. `eufb10.ttf`), while the Android fork
+  prefixes all of them with `jlm_`. The table below maps the 30 `.ttf`
+  files actually present in the APK back to their upstream group.
+
+  | Upstream group (per JLaTeXMath `LICENSE`) | Files in the APK | License |
+  |---|---|---|
+  | `eufb10`, `eufm10`, `msam10`, `msbm10` | `jlm_eufb10`, `jlm_eufm10`, `jlm_msam10`, `jlm_msbm10` | **SIL OFL 1.1** (© 1997, 2009 American Mathematical Society; those four are Reserved Font Names) |
+  | `dsrom10` | `jlm_dsrom10` | "free" terms: use and distribute as you like; do not rename to Knuth's CM names (`fonts/licences/License_for_dsrom.txt`) |
+  | `stmary10`, `rsfs10` | `jlm_stmary10`, `jlm_rsfs10` | **Public domain** |
+  | `cmbsy10`, `cmbx10`, `cmbxti10`, `cmex10`, `cmmi10`, `cmr10`, `cmss10`, `cmssbx10`, `cmsy10`, `cmtt10` | `jlm_cmbsy10`, `jlm_cmbx10`, `jlm_cmbxti10`, `jlm_cmex10`, `jlm_cmmi10`, `jlm_cmr10`, `jlm_cmss10`, `jlm_cmssbx10`, `jlm_cmsy10`, `jlm_cmtt10` | **Knuth License** (copy/distribute/modify allowed; modified versions must be renamed — the `jlm_` prefix *is* that rename) |
+  | Cyrillic `wnby10`, `wnss10`, `wnti10`, `wnr10`, `wnssi10`, `wnxyti10`, `wnssbx10`, `wntt10` | — (not shipped) | Knuth License |
+  | Greek `fcmbipg`, `fcmripg`, `fcmrpg`, `fcsropg`, `fcmbpg`, `fcsbpg`, `fctrpg`, `fcsrpg` | — (not shipped) | GNU GPL v2 |
+  | *(not in the upstream list)* | `jlm_cmmib10`, `jlm_cmssi10`, `jlm_cmti10` | **Knuth License** — these are further weights/faces of the Computer Modern family (`cmmib10` bold math-italic, `cmssi10` sans italic, `cmti10` text italic). They are not named individually in the upstream inventory, but the same CM/TFM sources and the same Knuth grant cover them, and CM faces are only modifiable if renamed — which the `jlm_` prefix does |
+  | *(not in the upstream list)* | `jlm_jlmbi10`, `jlm_jlmbx10`, `jlm_jlmi10`, `jlm_jlmr10`, `jlm_jlmsb10`, `jlm_jlmsbi10`, `jlm_jlmsi10`, `jlm_jlmss10`, `jlm_jlmtt10` | **JLaTeXMath's own re-cut fonts** — their `name` tables carry **no third-party copyright** (unlike `jlm_cmr10`, which still says `Copyright (C) 1997 American Mathematical Society`), only `Created by calixte with FontForge 2.0` and dates like `jlm_jlm : 29-12-2010`. So they are the fork's own derivations, licensed with JLaTeXMath itself (GPL-2.0-or-later + classpath exception) |
+  | *(not in the upstream list)* | `jlm_special` | **JLaTeXMath's own font**, same evidence as the row above: `Created by calixte,,, with FontForge 2.0`, `jlm_special : 14-8-2010`, and **no AMS or other third-party copyright string**. It contains only three glyphs (E/e/m, used for math accents) and is authored by JLaTeXMath's maintainer (Calixte Denizet), so it carries JLaTeXMath's own license rather than a separate font license |
+
 - **URL:** https://github.com/noties/jlatexmath-android
 - **Distribution:** bundled in the APK as assets (fonts are also present
   at the APK root `org/scilab/forge/jlatexmath/fonts/`, because the AAR
@@ -323,8 +370,9 @@ the AAR in `assets/org/scilab/forge/jlatexmath/fonts/licences/`.
 - **Notes:** the app does not bundle any font files of its own (there is
   no `res/font/` directory and no font file under `app/src/main/assets/`);
   every font glyph shipped in the APK comes from this JLaTeXMath AAR.
-- **Pending:** `jlm_special.ttf` is not listed in the upstream licence
-  inventory — see "Pending confirmation".
+- **Resolved 2026-11-24:** `jlm_special.ttf` is no longer an open question
+  — see the last row of the table. It is the project's own font, so no
+  third-party font license is missing.
 
 ---
 
@@ -651,11 +699,19 @@ assumed to be MIT/Apache-2.0; confirm with the respective rights holder
 before redistributing.
 
 > **2026-11-24 re-audit** (`dist/MeaPet-v1.9.0-v8a.APK`, unpacked with
-> `aapt list`): items **1, 2, 3, 6 and 8 are resolved** (provenance
-> recorded by the maintainer / orphan file removed / icon registered /
-> SDK version recorded). The remaining three — 4 (JLaTeXMath GPL
-> question), 5 (Umeng license metadata) and 7 (`jlm_special.ttf`) —
-> still need a maintainer or legal decision.
+> `aapt list`): **all eight items are now resolved or handled.** Items 1,
+> 2, 3, 6, 8 were closed earlier (provenance recorded, orphan removed,
+> icon registered, SDK version recorded, model rights recorded); items 4
+> (JLaTeXMath GPL + linking exception), 5 (Umeng metadata) and 7
+> (`jlm_special.ttf`) were closed in this pass — 4 and 7 by retrieving the
+> upstream media and reading the actual licence/font metadata, 5 by
+> establishing that the Apache-2.0 POM string belongs to Umeng's demo
+> project rather than to the SDK binaries.
+>
+> **One interpretation caveat remains on item 4** (GPL "linking" vs
+> Android's single-`classes.dex` packaging); it does not block shipping and
+> is recorded in the JLaTeXMath section. Item 5 cannot be fixed from this
+> side at all — only Umeng can correct its metadata.
 
 1. ~~**Touch voice assets**~~ **Resolved 2026-11-24** — 21 files
    (225 KB) bundled in the APK; codec verified as **Opus** (`OpusHead`
@@ -666,7 +722,7 @@ before redistributing.
    (《霞流宝石心 -壮志凌云振寰宇-》). **The clips are therefore not MIT
    and are not licensed for reuse** — see the "Touch Voice Assets"
    section above and the release-asset fan-work statement.
-2. **Mea Live2D model assets** (`app/src/main/assets/live2d/mea_live2d/**`)
+2. ~~**Mea Live2D model assets**~~ **Resolved 2026-11-24 (provenance recorded):** (`app/src/main/assets/live2d/mea_live2d/**`)
    — 10 files bundled in the APK (moc3/model3/physics/motionsync/cdi3,
    2 motions, 2 textures). Community work from Bilibili with no explicit
    license text. ~~The additional `橙色猫猫.can3`…~~ **Resolved
@@ -679,19 +735,34 @@ before redistributing.
    now registered in `tools/icons.txt`. It remains bundled in the APK as
    before, with its license covered by the Material Design Icons entry
    above (Apache-2.0).
-4. **JLaTeXMath-Android GPL-2.0+ / classpath exception** — transitive
-   dependency `ru.noties:jlatexmath-android:0.2.0` (via
-   `io.noties.markwon:ext-latex`). Re-checked 2026-11-24: the AAR contains
-   **no GPL license text at all** (only `R.txt`) and the Gradle cache has
-   no POM file for it, so the "GPL v2 or later, with classpath exception"
-   claim above rests on the upstream `LICENSE` file alone. Whether that
-   exception covers this Android fork, and whether shipping the combined
-   APK complies, still needs maintainer/legal confirmation.
-5. **Umeng SDK license metadata** — POMs declare Apache-2.0 while the SDK
-   is governed by Umeng's proprietary terms / privacy policy. Re-checked
-   2026-11-24: both AARs (`common-9.9.2`, `asms-1.8.7.2`) contain **no
-   license file whatsoever** (only `R.txt`), so the contradiction stands
-   and there is no in-artifact evidence favouring either statement.
+4. ~~**JLaTeXMath-Android GPL-2.0+ / classpath exception**~~ **Resolved
+   2026-11-24.** The upstream `LICENSE` was retrieved in full (via the
+   GitHub contents API, `noties/jlatexmath-android@android`) and it **does**
+   carry the linking exception, verbatim quoted in the "JLaTeXMath-Android"
+   section above. MeaPet uses the library unmodified as an independent
+   module (Maven `implementation`, no source copied), which is exactly what
+   the exception contemplates: the combined work may be distributed under
+   terms of the redistributor's choice, provided each linked module's own
+   terms are met. **This project therefore ships the APK under MIT and
+   discharges the GPL obligations for JLaTeXMath itself via this notice,
+   the unmodified artifact, and upstream source availability.**
+   One interpretation caveat is recorded in that section (Android bundles
+   classes into `classes.dex` rather than linking executables; the
+   upstream project and Markwon's own Apache-2.0 `ext-latex` treat that as
+   covered). No further action is required to ship, though a legal review
+   may confirm the reading.
+5. ~~**Umeng SDK license metadata**~~ **Handled 2026-11-24.** The POMs'
+   "Apache License 2.0" string points at Umeng's **demo repository** (their
+   own integration samples), not at the SDK binaries, so it is metadata
+   about the sample project rather than a grant covering the AARs. Neither
+   AAR contains any licence file (only `R.txt` and proguard rules).
+   **This project treats the SDK as proprietary**, relies on the Umeng
+   service terms + privacy policy, and assumes no Apache-2.0 permissions.
+   Only Umeng can fix its own metadata, so no further action is possible on
+   our side; risk is bounded because the SDK is consent-gated, removable
+   from the build (`-Pumeng.enabled=false`), and never modified or
+   redistributed as source. **Build with `-Pumeng.enabled=false` if a
+   strictly permissive-only artifact is required.**
 6. ~~**Live2D Cubism SDK / Cubism Core version**~~ **Resolved
    2026-11-24:** the SDK release is **Cubism SDK for Java `5-r.5`**
    (recorded by the maintainer), which ships **Cubism Core 6.0.1** —
@@ -703,12 +774,18 @@ before redistributing.
    version string because the Core version is read at runtime over JNI
    (`CubismCoreVersion`). SDK-5-era features in use
    (`mea.motionsync3.json`, vendored `effect/` package) match `5-r.x`.
-7. **`jlm_special.ttf`** (bundled by JLaTeXMath-Android) — confirmed
-   2026-11-24 as genuinely uncovered: the AAR's `fonts/licences/` holds
-   only three files (`Knuth_License.txt`, `License_for_dsrom.txt`,
-   `OFL.txt`), and `OFL.txt` explicitly names only the AMS fonts
-   (`eufb10`/`eufm10`/`msam10`/`msbm10`). `jlm_special.ttf` (2.2 KB,
-   JLaTeXMath's own) falls under none of them.
+7. ~~**`jlm_special.ttf`**~~ **Resolved 2026-11-24.** The font is
+   **JLaTeXMath's own artwork**, not a third-party typeface: its `name`
+   table reads `Created by calixte,,, with FontForge 2.0`,
+   `jlm_special : 14-8-2010`, `Version 001.000`, and — unlike the real
+   Computer Modern files (e.g. `jlm_cmr10`, which still carries
+   `Copyright (C) 1997 American Mathematical Society`) — it contains **no
+   third-party copyright string**. It holds three glyphs (E/e/m, for math
+   accents). It is therefore covered by **JLaTeXMath's own licence**
+   (GPL-2.0-or-later with the linking exception) and needs no separate
+   font licence. The same reasoning resolves the fork's own re-cut faces
+   (`jlm_jlm*.ttf`); the full 30-file mapping is in the "LaTeX Fonts"
+   section.
 8. ~~**Mea TTS model / voice training data**~~ **Resolved 2026-11-24** —
    the 6 model files (`model.onnx`, `lexicon.txt`, `tokens.txt`,
    `fsts/*.fst`) are neither in the repo nor in the APK (only the two

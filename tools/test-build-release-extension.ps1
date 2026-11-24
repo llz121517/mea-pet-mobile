@@ -27,20 +27,18 @@ try {
     # 且 PowerShell 7 下 git 的 stderr 输出（如 "Initialized empty Git repository"）
     # 会被当成 NativeCommandError。这里统一用 `2>&1 | Out-Null` 吞掉，并以
     # 用户配置 + 显式 --allow-empty 保证在任何环境都能提交成功。
-    Push-Location $fixture
-    try {
-        & git init -q 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
-        & git config user.email 'release-test@example.com' 2>&1 | Out-Null
-        & git config user.name 'release test' 2>&1 | Out-Null
-        & git config commit.gpgsign false 2>&1 | Out-Null
-        & git add -A 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'git add failed' }
-        & git commit --allow-empty -qm 'fixture' 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'git commit failed' }
-    } finally {
-        Pop-Location
-    }
+    # 注意：一律用 `git -C $fixture` 并显式 `--local`，不要依赖 Push-Location。
+    # 曾因裸 `git config` 在 fixture 未就绪时落到主仓库，把 .git/config 的
+    # user.name/email 永久改成假的测试身份，导致之后所有提交作者错位。
+    & git init -q $fixture 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
+    & git -C $fixture config --local user.email 'release-test@example.com' 2>&1 | Out-Null
+    & git -C $fixture config --local user.name 'release test' 2>&1 | Out-Null
+    & git -C $fixture config --local commit.gpgsign false 2>&1 | Out-Null
+    & git -C $fixture add -A 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'git add failed' }
+    & git -C $fixture commit --allow-empty -qm 'fixture' 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'git commit failed' }
     $expectedSuffix = (& git -C $fixture rev-parse --short=9 HEAD | Out-String).Trim()
     if ($expectedSuffix -notmatch '^[0-9a-fA-F]{7,40}$') {
         throw "unexpected short hash from git: $expectedSuffix"
