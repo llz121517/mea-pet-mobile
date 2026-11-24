@@ -1,9 +1,25 @@
 # MeaPet 语音资源分发条款
 
-**适用范围**：本条款适用于 `tts-resource-pack` 发布页面分发的全部语音合成相关文件
-（模型权重、G2P 资产、规则文件、打包产物），以及随 MeaPet 应用安装包分发的触摸语音素材。
+**适用范围**：本条款**仅**适用于下列以角色声线为对象的衍生制品：
 
-**不适用范围**：MeaPet 应用程序源代码。源代码依 [MIT License](../LICENSE) 授权，与本条款无关。
+- 模型权重：`model.onnx`（1.8.0+）与 1.7.x 的 `enc_p` / `dp` / `flow` / `dec.onnx`；
+- 语音素材：随应用安装包分发的 21 个触摸语音文件；
+- 上述内容的打包产物：`tts-model-v1.zip`、`TTS-Resource-Pack.zip`。
+
+**不适用范围**（各自适用其上游许可，不受本条款约束）：
+
+| 内容 | 许可 | 说明 |
+|---|---|---|
+| MeaPet 应用程序源代码 | [MIT License](../LICENSE) | 与语音资源无关 |
+| **G2P 资产**：`tokens.txt`、`lexicon.txt`、`ja_reading_map.json`、`en_words.bloom` | 各自上游数据许可 | 由 `tools/tts/` 脚本从开源数据生成，**非角色衍生制品**。详见 [`NOTICE.md`](../NOTICE.md) 的 "Build-time G2P data" 与 [`tools/tts/data-sources.json`](../tools/tts/data-sources.json) |
+| **规则文件**：`phone.fst`、`date.fst`、`number.fst` | Apache-2.0 | 自 sherpa-onnx / icefall 下载并按原样分发，**非本项目编写** |
+| **旧版 native 库**：`libonnxruntime-arm64-v8a.so`、`libonnxruntime-armeabi-v7a.so` | **MIT License**（[Microsoft ONNX Runtime](https://github.com/microsoft/onnxruntime)） | 1.7.x 遗留产物，可自由再分发；仅需保留其版权与许可声明。1.8.0+ 已改用 sherpa-onnx AAR 内置的 ORT，不再需要这两个文件 |
+| **Live2D 模型资源** | 角色二创衍生 | 权利归 Cabbage Soft，但来源为社区作品，另行记录于 [`NOTICE.md`](../NOTICE.md) |
+
+> **要点**：G2P 资产、规则文件与旧版 native 库是开源工具链的产物或按原样分发的第三方二进制，
+> **不因随本资源包分发而受本条款限制**，但仍须遵守其各自上游许可
+> （尤其是 `ja_reading_map.json` 的 CC BY-SA 4.0 义务，以及 ONNX Runtime 的 MIT 声明保留要求）。
+> 本条款的限制仅针对模型权重与语音素材这两类角色衍生制品。
 
 **版本**：v1.0　**生效日期**：2026-11-24
 
@@ -37,6 +53,10 @@
 
 2.1　**结论：VITS 架构可依 MIT License 复用；本项目的模型权重与语音素材不可复用。**
 
+2.2　**G2P 资产与规则文件不属本条款的权利分层对象。** 它们由开源工具链产出或按原样分发，
+分别适用其上游许可（见文首「不适用范围」），本项目不因分发行为而对其主张任何权利，
+也不对其施加本条款的使用限制。
+
 ---
 
 ## 第三条　授权范围
@@ -50,11 +70,18 @@
 3.3　**查看与构建源代码**：依 [MIT License](../LICENSE) 使用、修改、分发 MeaPet
 的**应用程序源代码**（不含本条款所涉资源）。
 
+3.4　**G2P 资产与规则文件**：不受本条款授权约束——您可直接依其各自的上游许可使用
+（例如 `ja_reading_map.json` 依 JMdict 的 CC BY-SA 4.0、三个 `.fst` 依 Apache-2.0），
+仅需遵守对应许可的署名与相同方式共享等义务。
+
 上述许可不包含任何明示或默示的商标许可、角色形象使用许可或商业化许可。
 
 ---
 
 ## 第四条　使用限制
+
+下列限制**仅针对本条款所涉的模型权重与语音素材**（见文首「适用范围」），不适用于
+G2P 资产、规则文件或应用程序源代码。
 
 您**不得**实施下列行为：
 
