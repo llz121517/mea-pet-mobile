@@ -11,7 +11,7 @@
 
 识别 / 解析失败时直接降级到兜底值，不做特殊补救。
 
-> 来源：[`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) §0 决策 7；记忆系统当前实现参考见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)。
+> 来源：[`2026-11-18-sqlite-context-plan.md`](archive/design/2026-11-18-sqlite-context-plan.md) §0 决策 7；记忆系统当前实现参考见 [`2026-11-18-memory-tools-plan.md`](archive/design/2026-11-18-memory-tools-plan.md)。
 
 ## 童子军规则优先
 

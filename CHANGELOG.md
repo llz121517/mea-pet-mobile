@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 
 - 版本号 1.9.0（versionCode 15）；自动构建的短哈希后缀在「检测更新」比较时会被剥离，不会误判。
-- 备份的需求与实现见 [备份 PRD](docs/2026-11-22-backup-export-import-prd.md) / [备份 LLD](docs/2026-11-22-backup-export-import-lld.md)。
+- 备份的需求与实现见 [备份 PRD](docs/archive/design/2026-11-22-backup-export-import-prd.md) / [备份 LLD](docs/archive/design/2026-11-22-backup-export-import-lld.md)。
 
 ---
 

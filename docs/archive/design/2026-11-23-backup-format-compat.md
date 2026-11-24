@@ -2,7 +2,7 @@
 
 > 状态：**一次性审计报告（2026-11-23）**。结论基于源码逐行阅读，未做字节级/真机实测（见 §1.3 核实边界）。
 > 对比对象：本项目 `dev`（备份功能已实现）与社区参考分支 `mea-pet-mobile-fork-fo-pr`。
-> 关联文档：[`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md)、[`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md)、[`legacy-compat.md`](legacy-compat.md) §8。
+> 关联文档：[`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md)、[`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md)、[`legacy-compat.md`](../../legacy-compat.md) §8。
 
 ---
 
@@ -73,7 +73,7 @@ viewmodel/BackupViewModel.kt    ui/screen/settings/DataSettings.kt
 - **天然互通**：zip 容器（AES-256 / DEFLATE+STORE / manifest 也加密 / manifest 收尾）、manifest 骨架与两级版本语义、包内路径约定、默认文件名后缀、未知字段容忍、文本条目 64 MiB 内存闸、**壁纸条目（二进制直传）**。
 - **语义等价需适配**：settings（`{"values":{…}}` vs **平铺**）、chat（`{"messages":[…]}` vs **裸数组**）、memory（`{"items":[…],"exchangeCount":N}` vs **裸数组**）、壁纸文件名安全化细节、`createdAt` 字符串格式、memory 的 `exchangeCount` 归属。这四项适配后，**"我们的 App 导入他们的包"是可行的，且不需要动 `format`/`schema` 常量**。
 - **不兼容**：`pet_form`（我们无此领域、且会整包触发拒绝）、`compaction`（他们无此概念、整包触发拒绝）、chat 的 `tool` 角色与 `rawAssistantJson`（他们的消息模型根本没有工具轮）、设置键集合的产品级分叉（取诗 / 摆位 vs 联网搜索 / 记忆模式）。
-- **方向建议**：**只做单向只读兼容（导入方向）**，不做双向；不新增 `pet_form`；不改我们 canonical 格式；不 bump `format`/`schema`（因此不触发 [`legacy-compat.md`](legacy-compat.md) §8 的迁移 step 联动）。
+- **方向建议**：**只做单向只读兼容（导入方向）**，不做双向；不新增 `pet_form`；不改我们 canonical 格式；不 bump `format`/`schema`（因此不触发 [`legacy-compat.md`](../../legacy-compat.md) §8 的迁移 step 联动）。
 
 ---
 
@@ -265,9 +265,9 @@ viewmodel/BackupViewModel.kt    ui/screen/settings/DataSettings.kt
 | C1 | **`pet_form`（他们有、我们没有）** | ① 我们是无此条目 → `BackupCategory.fromPath` 返回 null → **整包拒**（`BackupInspector.kt:142`）；② 就算放宽路径，我们**没有任何落地目标**：没有 `filesDir/pet` 用户形象根、没有 `pet_form` 设置键、`live2d/` 只从 APK `assets` 加载内置模型（`live2d/Live2dAssetFiles.kt`）；③ 它装的是整套 Live2D 资产（`PetFormsBundle.kt:31-55`），属"新增功能"不是"格式兼容" | **不做**。互通方案里把 `pet_form` 当"未知类别跳过"，**绝不实现落地**。明确边界：不为互通引入 Live2D 资产导入能力 |
 | C2 | **`compaction`（我们有、他们没有）** | 参考仓库全仓无 compaction 概念（无 `CompactionStore`、无摘要游标）；他们的 `SUPPORTED_SCHEMA` 没有该键 → `entrySupported` false → **整包拒**（`BackupInspector.kt:86-91`） | **不为了他们去掉自己的条目**。我们导出保持现状；他们若想吃我们的包，必须自己放宽"未知条目"策略（见 §5.2） |
 | C3 | **chat 的 `tool` 角色 + `rawAssistantJson`** | 他们的 `ChatRole` 只有 3 值（`ChatMessage.kt:11`），没有工具轮、没有 `tool_calls`/`reasoning_content` 的持久化通道。我们包里 `role=tool` 的消息他们**枚举都解不出**（`ChatRole.valueOf` 失败 → 整类拒） | **不建议**为他们裁剪我们的历史（裁掉 tool 行会让下一次请求 400——这正是我们 `ChatMessage.kt:41-43` 明写的理由）。他们若导入我们的包，必须自己决定"丢弃 tool 行 + 接受后续请求可能不合规"，属他们的取舍 |
-| C4 | **settings 键集合的产品级分叉** | 他们有取诗（`enable_click_poetry*`/`click_poetry_search_keywords`）、形象摆位（`pet_offset_x/y`/`pet_scale`）、`update_check_url`；我们有联网搜索（`web_search_*`）、记忆模式（`memory_mode`）、`context_window`、`wallpaper_path`。这些是**功能不同**，不是编码不同 | **不做键映射表**（违反 [`rules.md`](rules.md)「不设内置表」）。方向性结论：互导时**双方各自忽略对方未知键**即可；但他们的 `decodeTo` 目前是"未知键整类拒"，这必须由他们改 |
+| C4 | **settings 键集合的产品级分叉** | 他们有取诗（`enable_click_poetry*`/`click_poetry_search_keywords`）、形象摆位（`pet_offset_x/y`/`pet_scale`）、`update_check_url`；我们有联网搜索（`web_search_*`）、记忆模式（`memory_mode`）、`context_window`、`wallpaper_path`。这些是**功能不同**，不是编码不同 | **不做键映射表**（违反 [`rules.md`](../../rules.md)「不设内置表」）。方向性结论：互导时**双方各自忽略对方未知键**即可；但他们的 `decodeTo` 目前是"未知键整类拒"，这必须由他们改 |
 | C5 | **at-rest 加密语义差异** | 他们导出时把常驻加密的磁盘文件**解密回明文**入包（`BackupCollector.kt:100-107`，注释 `:13-14`）；我们的业务数据本就在 SQLite 明文库里按业务对象读（`BackupCollector.kt:84-103`） | **不影响互通**（两侧包内都是明文 JSON），但**不要**因此认为"我们能读他们的密文包"——包本身一定是加密 zip + 明文条目，这一点两边一致。此处仅作澄清 |
-| C6 | **为互通而 bump `format`/`schema`** | 若把 `format` 升到 2 以区分"参考格式"，会立刻触发 [`legacy-compat.md`](legacy-compat.md) §8（格式升级必须同步提供迁移 step + 导入兼容），并把"旧包变砖"的风险引入一个本可零成本解决的问题 | **不做**。兼容层放在"归一化"位置，保持 `format=1`/`schema=1` 不变 |
+| C6 | **为互通而 bump `format`/`schema`** | 若把 `format` 升到 2 以区分"参考格式"，会立刻触发 [`legacy-compat.md`](../../legacy-compat.md) §8（格式升级必须同步提供迁移 step + 导入兼容），并把"旧包变砖"的风险引入一个本可零成本解决的问题 | **不做**。兼容层放在"归一化"位置，保持 `format=1`/`schema=1` 不变 |
 
 ---
 
@@ -297,7 +297,7 @@ viewmodel/BackupViewModel.kt    ui/screen/settings/DataSettings.kt
 2. **新增通用形状归一化适配层** —— 建议新文件 `backup/BackupPayloadAdapters.kt`（放在 `BackupFormat`/`BackupCodec` 之间，纯函数、无 Android 依赖）。
    - `normalizeWrappedObject(text, wrapperKey): JsonObject`：root 是 Object 且 `root[wrapperKey]` 是 Object → 取它；否则 root 自身。用于 settings（`wrapperKey = "values"`）。
    - `normalizeCollection(text, fieldName): String`：root 是 Array → `{"$fieldName": root}`；root 是 Object 且有 `fieldName` → 原样。用于 chat（`"messages"`）/ memory（`"items"`）。
-   - 都是**按 JSON 形状**分支（Object vs Array / 有无包装键），不是按"参考版"分支 ⇒ 不违反 [`rules.md`](rules.md)「不为单个服务单独写 if / 不设内置表」。
+   - 都是**按 JSON 形状**分支（Object vs Array / 有无包装键），不是按"参考版"分支 ⇒ 不违反 [`rules.md`](../../rules.md)「不为单个服务单独写 if / 不设内置表」。
    - 归一化失败 → 保持现有拒绝文案（`BackupFormat.STRUCTURE_INCOMPLETE`），不做"特殊补救"。
 3. **把归一化接进解码入口**（保持唯一真相源，不让 `decode` 各自长一套）：
    - `SettingsWhitelist.decode`（`SettingsWhitelist.kt:126-141`）：先用 `normalizeWrappedObject(text, "values")` 再按原逻辑遍历。
@@ -317,8 +317,8 @@ viewmodel/BackupViewModel.kt    ui/screen/settings/DataSettings.kt
 
 **是否需要动 `format`/`schema` 常量？** —— **不需要**。兼容性加在"归一化层"，canonical 格式（我们的导出）不变，`format=1`/`schema=1` 语义不变。
 
-**是否触发 [`legacy-compat.md`](legacy-compat.md) §8？** —— **不触发**。§8 的触发条件是"备份包 `format` 包级或条目 `schema` 升级到新值"，并要求同步提供"旧格式备份升级 step + 导入兼容"。本方案**不升版本常量、不改 canonical 格式**，因此既不产生"旧包变砖"风险，也不需要新增迁移 step。
-反过来说：**如果将来有人提议"为了标识参考格式而 bump format=2"，那就落入 [`legacy-compat.md`](legacy-compat.md) §8** —— 同一次改动必须补该文 §3 的升级 step，且旧 `format=1` 包必须仍可导入。本文立场是：**不要 bump**，用归一化适配层解决。
+**是否触发 [`legacy-compat.md`](../../legacy-compat.md) §8？** —— **不触发**。§8 的触发条件是"备份包 `format` 包级或条目 `schema` 升级到新值"，并要求同步提供"旧格式备份升级 step + 导入兼容"。本方案**不升版本常量、不改 canonical 格式**，因此既不产生"旧包变砖"风险，也不需要新增迁移 step。
+反过来说：**如果将来有人提议"为了标识参考格式而 bump format=2"，那就落入 [`legacy-compat.md`](../../legacy-compat.md) §8** —— 同一次改动必须补该文 §3 的升级 step，且旧 `format=1` 包必须仍可导入。本文立场是：**不要 bump**，用归一化适配层解决。
 
 **工作量估计**：
 | 项 | 规模 |
@@ -388,4 +388,4 @@ viewmodel/BackupViewModel.kt    ui/screen/settings/DataSettings.kt
 5. UI 跳过项呈现 + 回执文案；
 6. 全链路 fixture 测试 + `assembleDebug` + `check_doc_links`。
 
-> 最后更新：2026-11-23。本文是一次性审计报告；结论若被后续实现推翻，按 [`docs/README.md`](README.md) §5「过时即删」处理（直接删除，不进归档）。
+> 最后更新：2026-11-23。本文是一次性审计报告；结论若被后续实现推翻，按 [`docs/README.md`](../../README.md) §5「过时即删」处理（直接删除，不进归档）。

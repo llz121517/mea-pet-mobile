@@ -15,9 +15,9 @@
 | 知道某个版本改了什么 | [`CHANGELOG.md`](../CHANGELOG.md)；1.6.0 及更早见 [`archive/changelog/`](archive/changelog/) |
 | 接手续做代码审查遗留项 | [`TODO.md`](TODO.md) ← **唯一在维护的待办清单** |
 | **1.9.0 发版前收尾与真机验收** | [`2026-11-22-release-checklist.md`](2026-11-22-release-checklist.md)（勾选状态 + 判据）；已执行的 adb 自动化记录见 [`2026-11-24-adb-automation-plan.md`](2026-11-24-adb-automation-plan.md) |
-| 了解记忆工具、只读回退、自动摘要与数据兼容 | [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) |
-| 导出 / 导入自己的设置与数据（数据与备份） | [`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md)、[`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md) |
-| 了解备份包与社区分支的格式互通边界 | [`2026-11-23-backup-format-compat.md`](2026-11-23-backup-format-compat.md) |
+| 了解记忆工具、只读回退、自动摘要与数据兼容 | [`2026-11-18-memory-tools-plan.md`](archive/design/2026-11-18-memory-tools-plan.md) |
+| 导出 / 导入自己的设置与数据（数据与备份） | [`2026-11-22-backup-export-import-prd.md`](archive/design/2026-11-22-backup-export-import-prd.md)、[`2026-11-22-backup-export-import-lld.md`](archive/design/2026-11-22-backup-export-import-lld.md) |
+| 了解备份包与社区分支的格式互通边界 | [`2026-11-23-backup-format-compat.md`](archive/design/2026-11-23-backup-format-compat.md) |
 | 了解 TTS 的设计、发音规则与已知边界 | [`tts/architecture.md`](tts/architecture.md) |
 | 复现 / 重新打包 TTS 模型包与词表 | [`tts/model-package.md`](tts/model-package.md)、[`tts/g2p-pipeline.md`](tts/g2p-pipeline.md)、[`tools/tts/README.md`](../tools/tts/README.md) |
 | 查 1.8.0 真机验收记录（已通过，归档） | [`archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](archive/checklists/2026-11-15-tts-device-test-1.8.0.md) |
@@ -57,16 +57,10 @@
 | [`adr/0002-context-window-fallback.md`](adr/0002-context-window-fallback.md) | ADR：兜底上下文容量取 32K 小窗口而非 128K，把「估大被 400 拒绝」换成「提前压缩」 | 新决策按编号追加 |
 | [`adr/0003-live2d-32bit-fallback.md`](adr/0003-live2d-32bit-fallback.md) | ADR：32 位 ARM 无 Live2D 原生核心，降级为无模型背景；保留 v7a 兼容，后续考虑改 v8a-only | 新决策按编号追加 |
 
-### 2.4 活跃实现参考
+### 2.4 发版清单与执行记录（1.9.0）
 
 | 文件 | 内容 |
 |---|---|
-| [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md) | 1.9 记忆系统当前实现：工具写入、只读关键词注入、自动摘要边界、历史与旧数据兼容 |
-| [`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) | 1.9 SQLite 存储、上下文压缩、容量探测及遗留决策 / 待验收项 |
-| [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md) | 联网搜索与抓取的已接入行为、适配器配置与待真机验收项 |
-| [`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md) | 1.9 数据与备份：需求决策、包格式、交互流程与测试清单（**已实现**，状态见文首） |
-| [`2026-11-22-backup-export-import-lld.md`](2026-11-22-backup-export-import-lld.md) | 1.9 数据与备份详细设计：模块划分、条目结构、接口、错误文案与测试设计（实现状态见 §3 开头） |
-| [`2026-11-23-backup-format-compat.md`](2026-11-23-backup-format-compat.md) | 备份包与社区参考分支的逐字段互通性审计（**一次性结论**，已实施部分见文首状态头） |
 | [`2026-11-22-release-checklist.md`](2026-11-22-release-checklist.md) | 1.9.0 发版收尾与真机验收：勾选状态、判据、已知问题与发版步骤（**一次性清单**，发版后归档） |
 | [`2026-11-24-adb-automation-plan.md`](2026-11-24-adb-automation-plan.md) | 上述清单的 adb 自动化分拣结果与实测证据（**一次性执行记录**） |
 
@@ -78,10 +72,16 @@
 | [`archive/checklists/2026-11-15-tts-device-test-1.8.0.md`](archive/checklists/2026-11-15-tts-device-test-1.8.0.md) | 1.8.0 真机验收清单（**已执行完成、全部通过**，2026-11-15；含自动化记录 §A 与结论 §3） |
 | [`archive/reports/2026-11-15-migration-report-1.8.0.md`](archive/reports/2026-11-15-migration-report-1.8.0.md) | 1.8.0 迁移报告：架构对比、决策、验证记录、升级与回滚、已知限制、提交记录、最终审查结论（历史结论参考） |
 | [`archive/plans/2026-10-31-sherpa-onnx-tts-integration.md`](archive/plans/2026-10-31-sherpa-onnx-tts-integration.md) | 1.8.0 TTS 迁移的逐任务实施计划（**已执行完成**，勾选框未回填；结论见 `archive/reports/2026-11-15-migration-report-1.8.0.md`） |
+| [`archive/design/2026-11-18-memory-tools-plan.md`](archive/design/2026-11-18-memory-tools-plan.md) | 1.9 记忆系统：工具写入、只读关键词注入、自动摘要边界、旧数据兼容（**1.9 已发布，2026-11-24 归档**） |
+| [`archive/design/2026-11-18-sqlite-context-plan.md`](archive/design/2026-11-18-sqlite-context-plan.md) | 1.9 SQLite 存储、上下文压缩、容量探测的设计与决策（同上归档） |
+| [`archive/design/2026-11-19-web-search-plan.md`](archive/design/2026-11-19-web-search-plan.md) | 联网搜索与抓取的适配器设计、错误信封与验收结论（同上归档） |
+| [`archive/design/2026-11-22-backup-export-import-prd.md`](archive/design/2026-11-22-backup-export-import-prd.md) | 1.9 数据与备份需求：包格式、交互流程、测试清单（同上归档） |
+| [`archive/design/2026-11-22-backup-export-import-lld.md`](archive/design/2026-11-22-backup-export-import-lld.md) | 1.9 数据与备份详细设计：模块划分、条目结构、接口与错误文案（同上归档） |
+| [`archive/design/2026-11-23-backup-format-compat.md`](archive/design/2026-11-23-backup-format-compat.md) | 备份包与社区参考分支的逐字段互通性审计（一次性结论，同上归档） |
 
 归档规则：只有**长期有价值**的版本化资料才归档（发布记录、已完成计划的实施过程）；进来后**不再更新**，新结论写回活跃文档。
 **过时且会误导的文档直接删除，不进归档**——2026-08/09 的 48 项代码审查报告、逐条判定表、旧批次清单已于 2026-11-15 删除（描述 1.7.2 之前的代码，结论已并入 `TODO.md`；需要追溯查 git 历史）。
-新增计划文档先按 `YYYY-MM-DD-<主题>` 命名，执行完成后加状态头再移入 `archive/plans/`。
+新增计划文档先按 `YYYY-MM-DD-<主题>` 命名，执行完成后加状态头再移入 `archive/plans/`（设计 / 需求类移入 `archive/design/`）。
 
 ## 4. 仓库内其他文档（不在 `docs/`）
 

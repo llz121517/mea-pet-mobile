@@ -34,7 +34,7 @@
 
 ## 📌 待办 E · 1.9 收尾
 
-1.9.0 的记忆工具、只读文本回退、联网工具、SQLite、历史分页与上下文压缩已接入。当前状态与行为见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)（记忆实现参考）、[`2026-11-18-sqlite-context-plan.md`](2026-11-18-sqlite-context-plan.md) 与 [`2026-11-19-web-search-plan.md`](2026-11-19-web-search-plan.md)。仍需处理：
+1.9.0 的记忆工具、只读文本回退、联网工具、SQLite、历史分页与上下文压缩已接入。当前状态与行为见 [`2026-11-18-memory-tools-plan.md`](archive/design/2026-11-18-memory-tools-plan.md)（记忆实现参考）、[`2026-11-18-sqlite-context-plan.md`](archive/design/2026-11-18-sqlite-context-plan.md) 与 [`2026-11-19-web-search-plan.md`](archive/design/2026-11-19-web-search-plan.md)。仍需处理：
 
 - [ ] **1.9 真机验收** — 连续回复顺序与逐条 TTS、插队发送 /「停止」、工具消息落库后重启续聊、记忆检索四档、工具记忆写入 / 删除撤销、TEXT 模式无记忆内容变更、只读回退不触发文本写入或自动摘要、摘要触发范围、turn 超时、压缩分隔条与手动压缩、向上懒加载锚定。
 - [ ] **M4 观察期指标** — 收集 `TurnMetrics` 中的工具调用率、平均轮数、失败 / 取消 / 超时占比和 `cacheHitRatio`，评估运行质量与容量 / 摘要参数。
@@ -42,8 +42,8 @@
 - [ ] **1.10：清理备胎代码** — `MemoryRepository`（JSON 实现）、`ConversationStore` 与相关单测；legacy 导入保留到 1.11（见 `legacy-compat.md`）。**2026-11-22 复核**：`MemoryRepository` 已无任何实例化点、`ConversationStore` 只剩一个无人读取的 `lazy` 属性，两者实际已是死代码，可提前到 1.9.x 删除。
 - [ ] **被打断 turn 的 `interrupted` 落库标记** — 当前仅 `TurnMetrics` 日志记录，无消费方；等有「中断轮次分析」需求再补（`extra_json` 或 meta 记录，不改 schema）。
 - [ ] **备用 tail 模式（`SEPARATE_USER`）未接线** — 只有常量与单测，没有设置入口，也没有计划里的「返回 400/500 且正文命中模板报错 → 回退 MERGE_USER 并按 baseUrl+model 缓存」探测 / 降级逻辑；默认 MERGE_USER 兼容性最好，暂不启用，等确有端点需要连续 user 时再做（避免写永不执行的死代码）。
-- [ ] **数据与备份真机验收（1.9.0）**（[PRD](2026-11-22-backup-export-import-prd.md) §8）— 导出→改数据→导入→逐类核对（设置/对话/记忆/压缩状态/壁纸）；错误密码与版本不符整包拒绝；SAF 取消路径；大壁纸（不触发文本 64 MiB 上限）；导入后 UI 与模型上下文都能读到新数据；确认弹窗的「本机 → 包内」条数与实际一致。单测已覆盖 87 例（`app/src/test/java/com/meapet/mobile/backup/`）。**2026-11-24 已完成主链路的真机自动化**（导出 / 加密 / 条数对比 / 强制确认 / 导入落地 / 刷新与状态清理，证据见 [`2026-11-24-adb-automation-plan.md`](2026-11-24-adb-automation-plan.md) §5.2）；**仍需人工**：版本不符整包拒绝、SAF 取消路径、大壁纸、导入后压缩状态刷新。
-- [ ] **联网工具真机验收**（见 [联网工具方案](2026-11-19-web-search-plan.md)）— 验证 DeepSeek 官方 Key、AnySearch 匿名与 token、搜索后读取正文、设置切换、限流和额度提示。
+- [ ] **数据与备份真机验收（1.9.0）**（[PRD](archive/design/2026-11-22-backup-export-import-prd.md) §8）— 导出→改数据→导入→逐类核对（设置/对话/记忆/压缩状态/壁纸）；错误密码与版本不符整包拒绝；SAF 取消路径；大壁纸（不触发文本 64 MiB 上限）；导入后 UI 与模型上下文都能读到新数据；确认弹窗的「本机 → 包内」条数与实际一致。单测已覆盖 87 例（`app/src/test/java/com/meapet/mobile/backup/`）。**2026-11-24 已完成主链路的真机自动化**（导出 / 加密 / 条数对比 / 强制确认 / 导入落地 / 刷新与状态清理，证据见 [`2026-11-24-adb-automation-plan.md`](2026-11-24-adb-automation-plan.md) §5.2）；**仍需人工**：版本不符整包拒绝、SAF 取消路径、大壁纸、导入后压缩状态刷新。
+- [ ] **联网工具真机验收**（见 [联网工具方案](archive/design/2026-11-19-web-search-plan.md)）— 验证 DeepSeek 官方 Key、AnySearch 匿名与 token、搜索后读取正文、设置切换、限流和额度提示。
 - [ ] **设备残留数据清理**（可选，下次接设备时）— 测试注入的长消息、重复记忆 `mem_ln3glfhc` / `mem_39ypzmxj`。
 
 ---

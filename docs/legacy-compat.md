@@ -82,7 +82,7 @@ adb logcat -s LegacyMigration
 
 记忆 / 会话 JSON 导入由 `LegacyJsonImporter` 在 SQLite 可用后执行，不注册到上述 `LegacyMigration.STEPS`。历史 JSON 记录里的废弃记忆操作附加字段会被忽略，不会被重放或写入记忆。
 
-开发期旧 SQLite 数据库可能保留 nullable 的旧记忆操作列。运行时不读取、不写入该列，也不通过破坏性迁移清除它；新建数据库不包含该列。记忆数据、会话历史与稳定人设引用不因这一兼容处理而删除。当前模式行为见 [`2026-11-18-memory-tools-plan.md`](2026-11-18-memory-tools-plan.md)。
+开发期旧 SQLite 数据库可能保留 nullable 的旧记忆操作列。运行时不读取、不写入该列，也不通过破坏性迁移清除它；新建数据库不包含该列。记忆数据、会话历史与稳定人设引用不因这一兼容处理而删除。当前模式行为见 [`2026-11-18-memory-tools-plan.md`](archive/design/2026-11-18-memory-tools-plan.md)。
 
 ---
 
@@ -96,5 +96,5 @@ adb logcat -s LegacyMigration
 2. 在备份导入侧提供对应的兼容路径，或明确写出「旧 format 包由该 step 升级后导入」。
 
 不允许出现「新版只认新包、用户旧备份变砖」的情况。备份格式与包版本常量见
-[`2026-11-22-backup-export-import-prd.md`](2026-11-22-backup-export-import-prd.md) §3、§6。
+[`2026-11-22-backup-export-import-prd.md`](archive/design/2026-11-22-backup-export-import-prd.md) §3、§6。
 

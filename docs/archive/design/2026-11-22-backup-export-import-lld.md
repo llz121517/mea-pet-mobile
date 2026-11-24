@@ -494,7 +494,7 @@ refreshAvailability()                               // 备份页自身的可用�
 5. `BackupService` + `AppContainer` 装配（含 `dataRevision` 广播）。
 6. `BackupViewModel` + `DataSettings` UI。
 7. `NOTICE.md` 补 zip4j、隐私政策补备份章节、`docs/README.md` 登记本文、CHANGELOG 补条目。
-8. 真机验收：导出→改数据→导入→核对；错误密码；取消路径；大壁纸。**（当前未执行，见 [`TODO.md`](TODO.md)）**
+8. 真机验收：导出→改数据→导入→核对；错误密码；取消路径；大壁纸。**（当前未执行，见 [`TODO.md`](../../TODO.md)）**
 
 > 后续（未做）：与社区参考实现的互通。审计结论是最小方案只需一层**按 JSON 形状归一化**
 > 的解码前适配（不看来源、只看形状），约 1 人日、不必动 `format`/`schema`；详见

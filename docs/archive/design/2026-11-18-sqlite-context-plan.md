@@ -54,7 +54,7 @@
 
 **兜底容量（原始容量，再乘系数）**
 - 云端、私网、回环统一使用**原始容量 32768**（乘 0.85 约 27852）；回环常量保留独立定义，当前与云端同值。
-- 为什么是 32K 而不是 128K：见 [ADR 0002](adr/0002-context-window-fallback.md)。
+- 为什么是 32K 而不是 128K：见 [ADR 0002](../../adr/0002-context-window-fallback.md)。
 - 兜底只在探测无结果时使用。
 
 **单一适配器（`ContextCapacityParser`，`client/ContextCapacity.kt`，独立抽出）**
