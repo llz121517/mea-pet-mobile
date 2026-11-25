@@ -1,6 +1,6 @@
 # 检查单的 adb 自动化分拣与执行记录（1.9.0）
 
-> **状态**：一次性执行记录（2026-11-24），**已被本节结论消费**；检查单本身见 [`2026-11-22-release-checklist.md`](2026-11-22-release-checklist.md)。
+> **状态**：一次性执行记录（2026-11-24），**已被本节结论消费**；检查单本身见 [`2026-11-24-release-1.9.0.md`](2026-11-24-release-1.9.0.md)。
 > **设备**：Xiaomi `22041216UC`（MT6895Z，Android 14 / SDK 34，`arm64-v8a,armeabi-v7a`），已 root（Magisk）。
 > **方式**：`adb` + `uiautomator dump` + `screencap`；截图只落电脑（`adb shell screencap -p` → `adb pull`），**未写入设备相册**。
 

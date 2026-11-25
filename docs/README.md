@@ -14,7 +14,7 @@
 | 安装 / 编译 / 配置 App，了解功能 | [`README.md`](../README.md) |
 | 知道某个版本改了什么 | [`CHANGELOG.md`](../CHANGELOG.md)；1.6.0 及更早见 [`archive/changelog/`](archive/changelog/) |
 | 接手续做代码审查遗留项 | [`TODO.md`](TODO.md) ← **唯一在维护的待办清单** |
-| **1.9.0 发版前收尾与真机验收** | [`2026-11-22-release-checklist.md`](2026-11-22-release-checklist.md)（勾选状态 + 判据）；已执行的 adb 自动化记录见 [`2026-11-24-adb-automation-plan.md`](2026-11-24-adb-automation-plan.md) |
+| 1.9.0 发版清单与 adb 执行记录（已归档） | [`archive/checklists/2026-11-24-release-1.9.0.md`](archive/checklists/2026-11-24-release-1.9.0.md)、[`archive/checklists/2026-11-24-adb-automation-1.9.0.md`](archive/checklists/2026-11-24-adb-automation-1.9.0.md) |
 | 了解记忆工具、只读回退、自动摘要与数据兼容 | [`2026-11-18-memory-tools-plan.md`](archive/design/2026-11-18-memory-tools-plan.md) |
 | 导出 / 导入自己的设置与数据（数据与备份） | [`2026-11-22-backup-export-import-prd.md`](archive/design/2026-11-22-backup-export-import-prd.md)、[`2026-11-22-backup-export-import-lld.md`](archive/design/2026-11-22-backup-export-import-lld.md) |
 | 了解备份包与社区分支的格式互通边界 | [`2026-11-23-backup-format-compat.md`](archive/design/2026-11-23-backup-format-compat.md) |
@@ -57,12 +57,9 @@
 | [`adr/0002-context-window-fallback.md`](adr/0002-context-window-fallback.md) | ADR：兜底上下文容量取 32K 小窗口而非 128K，把「估大被 400 拒绝」换成「提前压缩」 | 新决策按编号追加 |
 | [`adr/0003-live2d-32bit-fallback.md`](adr/0003-live2d-32bit-fallback.md) | ADR：32 位 ARM 无 Live2D 原生核心，降级为无模型背景；保留 v7a 兼容，后续考虑改 v8a-only | 新决策按编号追加 |
 
-### 2.4 发版清单与执行记录（1.9.0）
+### 2.4 发版清单与执行记录
 
-| 文件 | 内容 |
-|---|---|
-| [`2026-11-22-release-checklist.md`](2026-11-22-release-checklist.md) | 1.9.0 发版收尾与真机验收：勾选状态、判据、已知问题与发版步骤（**一次性清单**，发版后归档） |
-| [`2026-11-24-adb-automation-plan.md`](2026-11-24-adb-automation-plan.md) | 上述清单的 adb 自动化分拣结果与实测证据（**一次性执行记录**） |
+1.9.0 的发布清单与 adb 执行记录已随发布完成归档，见 §3「历史归档」。
 
 ## 3. 历史归档（只读，不再维护）
 
